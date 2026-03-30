@@ -1,0 +1,383 @@
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import type { PtyHandle, SessionInfo } from './types.ts';
+import { spawnPty, resizePty, killPty } from './pty.ts';
+import { generateUniqueSessionName } from './session-names.ts';
+import type { LoggerInterface } from './types.ts';
+import headlessPkg from '@xterm/headless';
+const { Terminal } = headlessPkg;
+import { trackCursorVisibility } from './cursor-visibility.ts';
+import type { CursorVisibilityTracker } from './cursor-visibility.ts';
+import { registerNotificationHandlers } from './osc-notifications.ts';
+
+interface SessionEntry {
+  sessionId: string;
+  name: string;
+  pid: number;
+  alive: boolean;
+  createdAt: string;
+  command: string;
+  shell: string;
+  handle: PtyHandle | null;
+  headless: InstanceType<typeof Terminal> | null;
+  cursorTracker: CursorVisibilityTracker | null;
+  title: string;
+  hasAlert: boolean;
+  onExitCallbacks: Array<() => void>;
+  onDetachCallbacks: Array<() => void>;
+  onChangeCallbacks: Array<() => void>;
+}
+
+interface SessionsDiskData {
+  sessions: Array<{
+    sessionId: string;
+    name: string;
+    pid: number;
+    createdAt: string;
+    command: string;
+    shell: string;
+  }>;
+}
+
+export class SessionRegistry {
+  private sessions = new Map<string, SessionEntry>();
+  private filePath: string;
+  private dataFolder: string;
+  private logger: LoggerInterface;
+  private alertListeners = new Set<(sessionId: string) => void>();
+  private notificationListeners = new Set<(sessionId: string, title: string, body: string) => void>();
+
+  constructor(dataFolder: string, logger: LoggerInterface) {
+    this.dataFolder = dataFolder;
+    this.logger = logger;
+    this.filePath = join(dataFolder, 'sessions.json');
+  }
+
+  init(): void {
+    mkdirSync(this.dataFolder, { recursive: true });
+    this.loadFromDisk();
+  }
+
+  private loadFromDisk(): void {
+    let data: SessionsDiskData;
+    try {
+      const raw = readFileSync(this.filePath, 'utf-8');
+      data = JSON.parse(raw) as SessionsDiskData;
+    } catch {
+      return;
+    }
+
+    if (!Array.isArray(data.sessions)) return;
+
+    for (const s of data.sessions) {
+      if (typeof s.sessionId !== 'string') continue;
+      let alive = false;
+      try {
+        process.kill(s.pid, 0);
+        // PID exists, but we have no handle — can't reattach
+        alive = false;
+      } catch {
+        alive = false;
+      }
+
+      this.sessions.set(s.sessionId, {
+        sessionId: s.sessionId,
+        name: s.name,
+        pid: s.pid,
+        alive,
+        createdAt: s.createdAt,
+        command: s.command,
+        shell: s.shell,
+        handle: null,
+        headless: null,
+        cursorTracker: null,
+        title: '',
+        hasAlert: false,
+        onExitCallbacks: [],
+        onDetachCallbacks: [],
+        onChangeCallbacks: [],
+      });
+    }
+
+    this.logger.debug('loaded sessions from disk', { count: this.sessions.size });
+  }
+
+  private persist(): void {
+    const data: SessionsDiskData = {
+      sessions: [...this.sessions.values()].map(s => ({
+        sessionId: s.sessionId,
+        name: s.name,
+        pid: s.pid,
+        createdAt: s.createdAt,
+        command: s.command,
+        shell: s.shell,
+      })),
+    };
+    try {
+      writeFileSync(this.filePath, JSON.stringify(data, null, 2));
+    } catch (err) {
+      this.logger.error('failed to persist sessions', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  createSession(
+    argv: string[],
+    terminalType: string,
+    columns: number,
+    rows: number,
+    scrollback: number,
+    shellName: string,
+    env?: Record<string, string>,
+  ): { info: SessionInfo; handle: PtyHandle } {
+    const sessionId = randomUUID();
+    const existingNames = new Set([...this.sessions.values()].map(s => s.name));
+    const name = generateUniqueSessionName(existingNames);
+
+    const headless = new Terminal({ cols: columns, rows, scrollback, allowProposedApi: true });
+    let title = '';
+
+    const onExitCallbacks: Array<() => void> = [];
+    const onDetachCallbacks: Array<() => void> = [];
+    const onChangeCallbacks: Array<() => void> = [];
+
+    const notifyChange = () => {
+      for (const cb of onChangeCallbacks) cb();
+    };
+
+    const cursorTracker = trackCursorVisibility(headless, notifyChange);
+
+    headless.onCursorMove(notifyChange);
+    headless.onLineFeed(notifyChange);
+    headless.onScroll(notifyChange);
+    headless.onBell(() => {
+      entry.hasAlert = true;
+      for (const cb of this.alertListeners) cb(sessionId);
+      notifyChange();
+    });
+    headless.onResize(notifyChange);
+    headless.buffer.onBufferChange(notifyChange);
+    headless.onTitleChange(t => { title = t; entry.title = t; notifyChange(); });
+    registerNotificationHandlers(headless, (notifTitle, body) => {
+      // Use session terminal title instead of generic "Notification" (e.g. from OSC 9)
+      const effectiveTitle = notifTitle === 'Notification' && title ? title : notifTitle;
+      entry.hasAlert = true;
+      for (const cb of this.notificationListeners) cb(sessionId, effectiveTitle, body);
+      notifyChange();
+    });
+
+    const command = argv.join(' ');
+    const handle = spawnPty(
+      {
+        argv,
+        terminalType,
+        columns,
+        rows,
+        env: { ...env, MOBITTY_SESSION_ID: sessionId },
+      },
+      {
+        onData: (data: string) => { headless.write(data); notifyChange(); },
+        onExit: () => {
+          const entry = this.sessions.get(sessionId);
+          if (entry) {
+            entry.alive = false;
+            entry.handle = null;
+            this.persist();
+            this.logger.debug('session process exited', { sessionId, name });
+            for (const cb of entry.onExitCallbacks) cb();
+            entry.onExitCallbacks.length = 0;
+          }
+        },
+      },
+    );
+
+    const entry: SessionEntry = {
+      sessionId,
+      name,
+      pid: handle.pid,
+      alive: true,
+      createdAt: new Date().toISOString(),
+      command,
+      shell: shellName,
+      handle,
+      headless,
+      cursorTracker,
+      title,
+      hasAlert: false,
+      onExitCallbacks,
+      onDetachCallbacks,
+      onChangeCallbacks,
+    };
+
+    this.sessions.set(sessionId, entry);
+    this.persist();
+    this.logger.info('session created', { sessionId, name, pid: handle.pid });
+
+    return { info: this.toSessionInfo(entry), handle };
+  }
+
+  attachSession(sessionId: string, onExit: () => void, onDetach: () => void): SessionInfo | undefined {
+    const entry = this.sessions.get(sessionId);
+    if (!entry || !entry.alive || !entry.handle) return undefined;
+
+    entry.onExitCallbacks.push(onExit);
+    entry.onDetachCallbacks.push(onDetach);
+    return this.toSessionInfo(entry);
+  }
+
+  detachSession(sessionId: string): void {
+    const entry = this.sessions.get(sessionId);
+    if (!entry) return;
+    for (const cb of entry.onDetachCallbacks) cb();
+    entry.onDetachCallbacks.length = 0;
+    entry.onExitCallbacks.length = 0;
+    entry.onChangeCallbacks.length = 0;
+  }
+
+  getHeadless(sessionId: string): InstanceType<typeof Terminal> | null {
+    return this.sessions.get(sessionId)?.headless ?? null;
+  }
+
+  getTitle(sessionId: string): string {
+    return this.sessions.get(sessionId)?.title ?? '';
+  }
+
+  clearAlert(sessionId: string): void {
+    const entry = this.sessions.get(sessionId);
+    if (entry) entry.hasAlert = false;
+  }
+
+  addAlertListener(cb: (sessionId: string) => void): () => void {
+    this.alertListeners.add(cb);
+    return () => { this.alertListeners.delete(cb); };
+  }
+
+  addNotificationListener(cb: (sessionId: string, title: string, body: string) => void): () => void {
+    this.notificationListeners.add(cb);
+    return () => { this.notificationListeners.delete(cb); };
+  }
+
+  getCursorHidden(sessionId: string): boolean {
+    return this.sessions.get(sessionId)?.cursorTracker?.cursorHidden ?? false;
+  }
+
+  addChangeListener(sessionId: string, callback: () => void): void {
+    const entry = this.sessions.get(sessionId);
+    if (entry) entry.onChangeCallbacks.push(callback);
+  }
+
+  removeChangeListener(sessionId: string, callback: () => void): void {
+    const entry = this.sessions.get(sessionId);
+    if (!entry) return;
+    const idx = entry.onChangeCallbacks.indexOf(callback);
+    if (idx !== -1) entry.onChangeCallbacks.splice(idx, 1);
+  }
+
+  getSession(sessionId: string): { info: SessionInfo; handle: PtyHandle | null } | undefined {
+    const entry = this.sessions.get(sessionId);
+    if (!entry) return undefined;
+    return { info: this.toSessionInfo(entry), handle: entry.handle };
+  }
+
+  getHandle(sessionId: string): PtyHandle | null {
+    return this.sessions.get(sessionId)?.handle ?? null;
+  }
+
+  listSessions(): SessionInfo[] {
+    return [...this.sessions.values()].map(e => this.toSessionInfo(e));
+  }
+
+  reorderSession(sessionId: string, newIndex: number): boolean {
+    const entry = this.sessions.get(sessionId);
+    if (!entry) return false;
+    const entries = [...this.sessions.entries()];
+    const currentIndex = entries.findIndex(([id]) => id === sessionId);
+    const clamped = Math.max(0, Math.min(entries.length - 1, newIndex));
+    if (currentIndex === clamped) return true;
+    entries.splice(currentIndex, 1);
+    entries.splice(clamped, 0, [sessionId, entry]);
+    this.sessions = new Map(entries);
+    this.persist();
+    return true;
+  }
+
+  renameSession(sessionId: string, newName: string): boolean {
+    const entry = this.sessions.get(sessionId);
+    if (!entry) return false;
+    if (!/^[a-zA-Z0-9_-]{1,64}$/.test(newName)) return false;
+    entry.name = newName;
+    this.persist();
+    return true;
+  }
+
+  deleteSession(sessionId: string): boolean {
+    const entry = this.sessions.get(sessionId);
+    if (!entry) return false;
+    if (entry.alive && entry.handle) {
+      killPty(entry.handle);
+      entry.alive = false;
+    }
+    if (entry.cursorTracker) {
+      entry.cursorTracker.dispose();
+      entry.cursorTracker = null;
+    }
+    if (entry.headless) {
+      entry.headless.dispose();
+      entry.headless = null;
+    }
+    this.sessions.delete(sessionId);
+    this.persist();
+    this.logger.info('session deleted', { sessionId, name: entry.name });
+    return true;
+  }
+
+  destroyAll(): void {
+    for (const entry of this.sessions.values()) {
+      if (entry.alive && entry.handle) {
+        killPty(entry.handle);
+        entry.alive = false;
+      }
+      if (entry.cursorTracker) {
+        entry.cursorTracker.dispose();
+        entry.cursorTracker = null;
+      }
+      if (entry.headless) {
+        entry.headless.dispose();
+        entry.headless = null;
+      }
+    }
+    this.sessions.clear();
+    this.persist();
+  }
+
+  resizeSession(sessionId: string, columns: number, rows: number): void {
+    const entry = this.sessions.get(sessionId);
+    if (!entry?.handle) return;
+    resizePty(entry.handle, columns, rows);
+    if (entry.headless) {
+      entry.headless.resize(columns, rows);
+    }
+  }
+
+  updateSessionScrollback(sessionId: string, scrollback: number): void {
+    const entry = this.sessions.get(sessionId);
+    if (!entry?.headless) return;
+    entry.headless.options.scrollback = scrollback;
+  }
+
+  private toSessionInfo(entry: SessionEntry): SessionInfo {
+    return {
+      sessionId: entry.sessionId,
+      name: entry.name,
+      pid: entry.pid,
+      alive: entry.alive,
+      createdAt: entry.createdAt,
+      command: entry.command,
+      shell: entry.shell,
+      title: entry.title,
+      hasAlert: entry.hasAlert,
+    };
+  }
+}

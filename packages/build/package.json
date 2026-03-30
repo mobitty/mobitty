@@ -1,0 +1,18 @@
+{
+  "name": "@mobitty/build",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/dev-server.ts",
+    "release": "node src/release.ts",
+    "check": "tsc --noEmit"
+  },
+  "dependencies": {
+    "concurrently": "^9.2.1",
+    "nodemon": "^3.1.14"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.9.3"
+  }
+}

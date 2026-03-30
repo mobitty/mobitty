@@ -1,0 +1,164 @@
+import type { IPty } from 'node-pty';
+
+// Protocol command bytes
+// Server -> Client
+export const SET_WINDOW_TITLE = 0x31;  // '1'
+export const SET_PREFERENCES = 0x32;   // '2'
+export const SET_SESSION_INFO = 0x33;     // '3' — session metadata JSON
+export const STATE_UPDATE = 0x34;      // '4' — incremental VT diff
+export const STATE_FULL = 0x35;        // '5' — full state (reconnect, init, resize, buffer switch)
+export const CLIPBOARD_IMAGE_ACK = 0x36; // '6' — clipboard image ACK: {requestId, status}
+export const RTT_REPORT = 0x37;          // '7' — RTT in ms (uint16 BE)
+export const SESSION_ALERT = 0x38;       // '8' — session alert: sessionId string
+export const SESSION_NOTIFICATION = 0x3a; // ':' — rich notification: {sessionId, title, body}
+
+// Client -> Server
+export const INPUT = 0x30;             // '0'
+export const RESIZE_TERMINAL = 0x31;   // '1'
+export const UPDATE_SETTINGS = 0x32;   // '2' — live settings update: {scrollback?}
+export const CLIPBOARD_IMAGE = 0x36;  // '6' — clipboard image upload: {requestId, mime, data}
+export const CLIENT_LOG = 0x39;       // '9' — client log forwarding: {seq, level, msg, data?}
+export const JSON_DATA = 0x7b;        // '{'
+
+// Logging types
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+export type LogSource = 'server' | 'client';
+
+export interface LogEntry {
+  seq: number;
+  ts: string;
+  level: LogLevel;
+  source: LogSource;
+  session?: string;
+  msg: string;
+  data?: Record<string, unknown>;
+  clientSeq?: number;
+}
+
+export interface ClientLogMessage {
+  seq: number;
+  level: LogLevel;
+  msg: string;
+  data?: Record<string, unknown>;
+}
+
+export interface LoggerInterface {
+  debug(msg: string, data?: Record<string, unknown>): void;
+  info(msg: string, data?: Record<string, unknown>): void;
+  warn(msg: string, data?: Record<string, unknown>): void;
+  error(msg: string, data?: Record<string, unknown>): void;
+}
+
+const VALID_LOG_LEVELS = new Set<string>(['debug', 'info', 'warn', 'error']);
+
+export function isLogLevel(value: unknown): value is LogLevel {
+  return typeof value === 'string' && VALID_LOG_LEVELS.has(value);
+}
+
+export function isClientLogMessage(obj: unknown): obj is ClientLogMessage {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const record = obj as Record<string, unknown>;
+  return typeof record['seq'] === 'number'
+    && typeof record['level'] === 'string'
+    && VALID_LOG_LEVELS.has(record['level'] as string)
+    && typeof record['msg'] === 'string';
+}
+
+export interface TlsConfig {
+  cert: string;
+  key: string;
+  ca?: string;
+}
+
+export interface ServerConfig {
+  port: number;
+  host: string;
+  terminalType: string;
+  prefsJson: string;
+  dataFolder: string;
+  tls?: TlsConfig;
+}
+
+export interface SessionInfo {
+  sessionId: string;
+  name: string;
+  pid: number;
+  alive: boolean;
+  createdAt: string;
+  command: string;
+  shell: string;
+  title: string;
+  hasAlert: boolean;
+}
+
+export interface ServerState {
+  clientCount: number;
+  config: ServerConfig;
+}
+
+export interface PtyHandle {
+  pid: number;
+  pty: IPty;
+  paused: boolean;
+  columns: number;
+  rows: number;
+}
+
+export interface ClientState {
+  columns: number;
+  rows: number;
+}
+
+export interface ResizeMessage {
+  columns: number;
+  rows: number;
+}
+
+export interface AuthMessage {
+  AuthToken?: string;
+  columns?: number;
+  rows?: number;
+  sessionId?: string;
+  scrollback?: number;
+  shell?: string;
+  imagePasteDir?: string;
+  notificationMode?: string;
+}
+
+export interface UpdateSettingsMessage {
+  scrollback?: number;
+  imagePasteDir?: string;
+  notificationMode?: string;
+}
+
+export function isResizeMessage(obj: unknown): obj is ResizeMessage {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const record = obj as Record<string, unknown>;
+  return typeof record['columns'] === 'number' && typeof record['rows'] === 'number';
+}
+
+// Heartbeat configuration
+export const HEARTBEAT_INTERVAL_MS = 5000;   // ping every 5s
+export const HEARTBEAT_TIMEOUT_MS = 15000;    // dead after 15s with no pong
+
+export function isAuthMessage(obj: unknown): obj is AuthMessage {
+  if (typeof obj !== 'object' || obj === null) return false;
+  return true;
+}
+
+export function isUpdateSettingsMessage(obj: unknown): obj is UpdateSettingsMessage {
+  if (typeof obj !== 'object' || obj === null) return false;
+  const r = obj as Record<string, unknown>;
+  if (r['scrollback'] !== undefined) {
+    if (typeof r['scrollback'] !== 'number' || !Number.isInteger(r['scrollback'])
+        || r['scrollback'] < 100 || r['scrollback'] > 50000) return false;
+  }
+  if (r['imagePasteDir'] !== undefined) {
+    if (typeof r['imagePasteDir'] !== 'string' || r['imagePasteDir'].length > 256) return false;
+  }
+  if (r['notificationMode'] !== undefined) {
+    if (typeof r['notificationMode'] !== 'string'
+        || !['iterm', 'kitty', 'ghostty', 'off'].includes(r['notificationMode'])) return false;
+  }
+  return true;
+}

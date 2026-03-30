@@ -1,0 +1,29 @@
+{
+  "name": "@mobitty/root",
+  "version": "0.1.0",
+  "description": "Mobile-friendly web terminal",
+  "author": "Mobitty <info@mobitty.dev>",
+  "license": "BSL-1.1",
+  "homepage": "https://github.com/mobitty/mobitty",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mobitty/mobitty.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mobitty/mobitty/issues",
+    "email": "info@mobitty.dev"
+  },
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r run --if-present build",
+    "dev": "pnpm --filter @mobitty/build start",
+    "check": "pnpm -r run --if-present check",
+    "release": "pnpm --filter @mobitty/build release"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild",
+      "node-pty"
+    ]
+  }
+}

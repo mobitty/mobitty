@@ -1,0 +1,52 @@
+{
+  "name": "mobitty",
+  "version": "0.1.0",
+  "description": "Mobile-friendly web terminal",
+  "author": "Mobitty <info@mobitty.dev>",
+  "keywords": [
+    "terminal",
+    "web-terminal",
+    "mobile",
+    "pty",
+    "xterm",
+    "pwa",
+    "touch",
+    "ssh"
+  ],
+  "license": "BSL-1.1",
+  "homepage": "https://github.com/mobitty/mobitty",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/mobitty/mobitty.git"
+  },
+  "bugs": {
+    "url": "https://github.com/mobitty/mobitty/issues",
+    "email": "info@mobitty.dev"
+  },
+  "exports": "./src/not-a-library.js",
+  "type": "module",
+  "bin": {
+    "mobitty": "src/main.ts"
+  },
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts",
+    "client/index.html"
+  ],
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "check": "tsc --noEmit && node --test 'src/**/*.test.ts'"
+  },
+  "dependencies": {
+    "@xterm/headless": "^5.5.0",
+    "node-pty": "^1.0.0",
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/ws": "^8.5.0",
+    "typescript": "^5.9.3"
+  }
+}

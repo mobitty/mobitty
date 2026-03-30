@@ -1,0 +1,41 @@
+node_modules/
+dist/
+*.tsbuildinfo
+/workspace
+/logs/
+/tmp/
+
+# Playwright test artifacts
+/.playwright-cli/
+/.playwright/
+
+# AI coding agent workspace files
+# Workspace setup is each developer's preference — this project does not
+# intend to impose an opinion on which tools you use or how you configure them.
+
+# Claude Code
+**/CLAUDE.md
+.claude/
+.claude
+
+# OpenAI Codex
+**/AGENTS.md
+.codex/
+
+# Cursor
+.cursor/
+.cursorrules
+.cursorignore
+.cursorindexingignore
+
+# Windsurf / Codeium
+.windsurf/
+.codeiumignore
+
+# Aider
+.aider*
+.aiderignore
+
+# GitHub Copilot (local settings only — .github/ itself should be committed)
+.github/copilot/settings.local.json
+.copilotignore
