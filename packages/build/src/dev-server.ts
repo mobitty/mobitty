@@ -6,6 +6,7 @@ import concurrently from 'concurrently';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, '..', '..', '..');
+const initCwd = process.env['INIT_CWD'] ?? process.cwd();
 const nodemonBin = resolve(__dirname, '..', 'node_modules', '.bin', 'nodemon');
 
 // Dev-server flags (for Vite): --port, --interface, --tls-cert, --tls-key, --tls-ca (long form only).
@@ -80,7 +81,7 @@ const serverExec = ['node', resolve(rootDir, 'packages/server/src/main.ts'), ...
 const { commands, result } = concurrently(
   [
     {
-      command: `"${nodemonBin}" --watch "${resolve(rootDir, 'packages/server/src')}" --ext ts --exec "${serverExec}"`,
+      command: `${nodemonBin} --watch "${resolve(rootDir, 'packages/server/src')}" --ext ts --exec "${serverExec}"`,
       name: 'server',
       prefixColor: 'blue',
     },
@@ -92,9 +93,9 @@ const { commands, result } = concurrently(
       env: {
         ...process.env,
         MOBITTY_SERVER_PORT: serverPort,
-        ...(tlsCert !== undefined ? { MOBITTY_TLS_CERT: resolve(tlsCert) } : {}),
-        ...(tlsKey !== undefined ? { MOBITTY_TLS_KEY: resolve(tlsKey) } : {}),
-        ...(tlsCa !== undefined ? { MOBITTY_TLS_CA: resolve(tlsCa) } : {}),
+        ...(tlsCert !== undefined ? { MOBITTY_TLS_CERT: resolve(initCwd, tlsCert) } : {}),
+        ...(tlsKey !== undefined ? { MOBITTY_TLS_KEY: resolve(initCwd, tlsKey) } : {}),
+        ...(tlsCa !== undefined ? { MOBITTY_TLS_CA: resolve(initCwd, tlsCa) } : {}),
       },
     },
   ],
