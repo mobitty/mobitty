@@ -622,7 +622,12 @@ export class TerminalCore {
         void this.handleNativePasteImage(blob, item.type);
         return;
       }
-      // Text-only paste: let xterm's handler process it
+      // No image found — check if clipboard was completely empty (likely paste permission denied on iOS)
+      const hasText = e.clipboardData?.getData('text/plain') !== '';
+      this.logger?.debug('paste-no-image', { itemCount: items.length, itemTypes, hasText });
+      if (items.length === 0 && !hasText) {
+        this.overlayAddon?.showOverlay('Clipboard empty \u2014 allow access when prompted', 2000);
+      }
     };
     el.addEventListener('paste', onPaste, { capture: true });
     this.register({ dispose: () => el.removeEventListener('paste', onPaste, { capture: true }) });
