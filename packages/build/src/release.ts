@@ -6,7 +6,7 @@ import { execSync } from 'node:child_process';
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const rootDir = resolve(__dirname, '..', '..', '..');
 const distDir = resolve(rootDir, 'dist');
-const serverDir = resolve(rootDir, 'packages', 'server');
+const serverDir = resolve(rootDir, 'packages', 'mobitty');
 const clientDir = resolve(rootDir, 'packages', 'client');
 
 // 1. Clean dist/

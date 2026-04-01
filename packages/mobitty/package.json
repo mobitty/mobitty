@@ -40,9 +40,9 @@
     "check": "tsc --noEmit && node --test 'src/**/*.test.ts'"
   },
   "dependencies": {
-    "@xterm/headless": "^5.5.0",
-    "node-pty": "^1.0.0",
-    "ws": "^8.18.0"
+    "@xterm/headless": "5.5.0",
+    "node-pty": "1.2.0-beta.3",
+    "ws": "8.20.0"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

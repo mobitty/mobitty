@@ -74,14 +74,14 @@ const tee = new Writable({
 });
 
 // Server always binds to localhost; append -i 127.0.0.1 last to enforce it.
-const serverExec = ['node', resolve(rootDir, 'packages/server/src/main.ts'), ...serverArgs, '-i', '127.0.0.1']
+const serverExec = ['node', resolve(rootDir, 'packages/mobitty/src/main.ts'), ...serverArgs, '-i', '127.0.0.1']
   .map((a) => (/\s/.test(a) ? `'${a}'` : a))
   .join(' ');
 
 const { commands, result } = concurrently(
   [
     {
-      command: `${nodemonBin} --watch "${resolve(rootDir, 'packages/server/src')}" --ext ts --exec "${serverExec}"`,
+      command: `${nodemonBin} --watch "${resolve(rootDir, 'packages/mobitty/src')}" --ext ts --exec "${serverExec}"`,
       name: 'server',
       prefixColor: 'blue',
     },
