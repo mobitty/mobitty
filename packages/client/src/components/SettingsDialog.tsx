@@ -101,6 +101,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
   const [imagePasteDir, setImagePasteDir] = useState('tmp');
   const [optionIsMeta, setOptionIsMeta] = useState(true);
   const [notificationMode, setNotificationMode] = useState<'iterm' | 'kitty' | 'ghostty' | 'off'>('iterm');
+  const [remoteEditor, setRemoteEditor] = useState(false);
   const [hotkeyError, setHotkeyError] = useState<string | undefined>();
   const [status, setStatus] = useState('');
   const [fieldErrors, setFieldErrors] = useState<ProfileFieldErrors>(new Map());
@@ -168,6 +169,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
     setImagePasteDir(profile.imagePasteDir ?? 'tmp');
     setOptionIsMeta(profile.optionIsMeta);
     setNotificationMode(profile.notificationMode);
+    setRemoteEditor(profile.remoteEditor);
     setHotkeyError(undefined);
     setFieldErrors(new Map());
   }, []);
@@ -225,6 +227,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
       imagePasteDir: imagePasteDir.trim() || undefined,
       optionIsMeta,
       notificationMode,
+      remoteEditor,
     };
     if (Object.keys(gestures).length > 0) {
       candidate['gestures'] = gestures;
@@ -645,6 +648,18 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
                 className="accent-primary"
               />
               <HelpTip>Send ESC+key for Option shortcuts (macOS)</HelpTip>
+            </div>
+
+            {/* Remote Editor */}
+            <div className="flex items-center gap-2">
+              <Label className="min-w-[100px] text-xs text-muted-foreground">Remote Editor</Label>
+              <input
+                type="checkbox"
+                checked={remoteEditor}
+                onChange={e => setRemoteEditor(e.target.checked)}
+                className="accent-primary"
+              />
+              <HelpTip>Allow programs (e.g. Claude Code) to open files in the browser for editing via $EDITOR/$VISUAL. Applies to new sessions only.</HelpTip>
             </div>
 
             {/* Notification mode */}

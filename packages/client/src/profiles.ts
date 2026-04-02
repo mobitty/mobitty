@@ -56,6 +56,7 @@ export const DEFAULT_PROFILE: Profile = {
   imagePasteDir: 'tmp',
   optionIsMeta: true,
   notificationMode: 'iterm',
+  remoteEditor: false,
 };
 
 // ── localStorage ─────────────────────────────────────────────────────────────

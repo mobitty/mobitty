@@ -26,7 +26,8 @@
   "exports": "./src/not-a-library.js",
   "type": "module",
   "bin": {
-    "mobitty": "src/main.ts"
+    "mobitty": "src/main.ts",
+    "mobitty-editor": "src/mobitty-editor.ts"
   },
   "files": [
     "src/**/*.ts",

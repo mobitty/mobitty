@@ -13,6 +13,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
 const MAX_BODY_BYTES = 65536;
+const MAX_EDITOR_BODY_BYTES = 5 * 1024 * 1024; // 5 MB for editor content
 
 interface HtmlCache {
   raw: Buffer;
@@ -42,13 +43,13 @@ function getHtmlCache(): HtmlCache {
   return htmlCache;
 }
 
-function readBody(req: IncomingMessage): Promise<string> {
+function readBody(req: IncomingMessage, maxBytes = MAX_BODY_BYTES): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     let size = 0;
     req.on('data', (chunk: Buffer) => {
       size += chunk.length;
-      if (size > MAX_BODY_BYTES) {
+      if (size > maxBytes) {
         req.destroy();
         reject(new Error('Body too large'));
         return;
@@ -97,6 +98,12 @@ function parseSessionNamePath(pathname: string): string | undefined {
 
 function parseSessionOrderPath(pathname: string): string | undefined {
   const match = /^\/api\/sessions\/([a-f0-9-]{36})\/order$/.exec(pathname);
+  if (match) return match[1];
+  return undefined;
+}
+
+function parseSessionEditorPath(pathname: string): string | undefined {
+  const match = /^\/api\/sessions\/([a-f0-9-]{36})\/editor$/.exec(pathname);
   if (match) return match[1];
   return undefined;
 }
@@ -341,6 +348,54 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
         jsonResponse(res, 200, { sessionId: sessionOrderPath, index });
       } else {
         jsonResponse(res, 404, { error: 'Session not found' });
+      }
+    }).catch(() => {
+      jsonResponse(res, 400, { error: 'Failed to read request body' });
+    });
+    return;
+  }
+
+  const sessionEditorPath = parseSessionEditorPath(pathname);
+  if (sessionEditorPath !== undefined && method === 'POST') {
+    readBody(req, MAX_EDITOR_BODY_BYTES).then(async body => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        jsonResponse(res, 400, { error: 'Invalid JSON' });
+        return;
+      }
+      if (typeof parsed !== 'object' || parsed === null) {
+        jsonResponse(res, 400, { error: 'Invalid body' });
+        return;
+      }
+      const r = parsed as Record<string, unknown>;
+      if (typeof r['filePath'] !== 'string' || typeof r['content'] !== 'string') {
+        jsonResponse(res, 400, { error: 'Missing filePath or content' });
+        return;
+      }
+      const filePath = r['filePath'];
+      const content = r['content'];
+
+      try {
+        const result = await registry.requestEdit(
+          sessionEditorPath,
+          filePath,
+          content,
+          (cleanup) => { req.on('close', cleanup); },
+        );
+        jsonResponse(res, 200, result);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg === 'Session not found') {
+          jsonResponse(res, 404, { error: msg });
+        } else if (msg === 'Edit already in progress') {
+          jsonResponse(res, 409, { error: msg });
+        } else if (msg === 'No client connected') {
+          jsonResponse(res, 503, { error: msg });
+        } else {
+          jsonResponse(res, 500, { error: msg });
+        }
       }
     }).catch(() => {
       jsonResponse(res, 400, { error: 'Failed to read request body' });

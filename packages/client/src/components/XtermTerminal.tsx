@@ -66,6 +66,7 @@ export const XtermTerminal = forwardRef<XtermTerminalHandle, XtermTerminalProps>
         coreRef.current.setSoftkeySettings(profile.softkeySettings ?? DEFAULT_SOFTKEY_SETTINGS);
         coreRef.current.setImagePasteDir(profile.imagePasteDir ?? 'tmp');
         coreRef.current.setNotificationMode(profile.notificationMode);
+        coreRef.current.setRemoteEditor(profile.remoteEditor);
       }
     }, [profile, themeColors, isMobile]);
 

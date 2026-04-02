@@ -5,6 +5,7 @@ import {
   STATE_UPDATE, STATE_FULL,
   INPUT, RESIZE_TERMINAL, UPDATE_SETTINGS, JSON_DATA, CLIENT_LOG,
   CLIPBOARD_IMAGE, CLIPBOARD_IMAGE_ACK, RTT_REPORT, SESSION_ALERT, SESSION_NOTIFICATION,
+  EDITOR_OPEN, EDITOR_DONE,
   HEARTBEAT_INTERVAL_MS, HEARTBEAT_TIMEOUT_MS,
   isResizeMessage, isAuthMessage, isUpdateSettingsMessage,
   isClientLogMessage,
@@ -19,10 +20,12 @@ import type { ShellStore } from './shells.ts';
 import type { Logger, SessionLogger } from './logger.ts';
 import { captureSnapshot, generateDiff, serializeFullState, compareSnapshots } from './diff.ts';
 import type { FrameSnapshot } from './diff.ts';
+import { resolveEditorBin } from './editor-bin.ts';
 import headlessPkg from '@xterm/headless';
 const { Terminal: HeadlessTerminal } = headlessPkg;
 
 const VERIFY_DIFF = process.env['MOBITTY_VERIFY_DIFF'] === '1';
+const EDITOR_BIN_PATH = resolveEditorBin();
 
 /** Update EMA-smoothed RTT and decide sync interval.
  *  < 20ms → 60fps (16ms), 20–50ms → dead zone, 50–100ms → 30fps (33ms),
@@ -66,6 +69,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
   let syncIntervalMs = 33; // adaptive; adjusted continuously by RTT
   let smoothRtt = 33;      // EMA of RTT for adaptive sync interval
   let imagePasteDir: string | undefined;
+  let remoteEditor = false;
 
   let sessionId: string | null = null;
   let sessionLogger: SessionLogger | null = null;
@@ -347,6 +351,20 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         notificationModeEnv['TERM_PROGRAM'] = 'ghostty';
       }
 
+      // Parse remote editor setting
+      if (parsed.remoteEditor === true) {
+        remoteEditor = true;
+      }
+
+      // Remote editor env vars
+      const editorEnv: Record<string, string> = {};
+      if (remoteEditor && EDITOR_BIN_PATH) {
+        editorEnv['EDITOR'] = EDITOR_BIN_PATH;
+        editorEnv['VISUAL'] = EDITOR_BIN_PATH;
+        editorEnv['MOBITTY_EDITOR_PORT'] = String(state.config.port);
+        editorEnv['MOBITTY_EDITOR_HOST'] = state.config.host;
+      }
+
       // Try to attach to existing session
       if (requestedSessionId) {
         const existing = registry.getSession(requestedSessionId);
@@ -374,6 +392,16 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
             // Reset snapshot so next tick sends STATE_FULL after resize
             lastSnapshot = null;
             startSync(sessionId);
+
+            // Register editor sender and re-send pending edit if any
+            registry.setEditorSender(sessionId, (filePath, content) => {
+              sendBinary(ws, EDITOR_OPEN, JSON.stringify({ filePath, content }));
+            });
+            const pending = registry.getEditorPending(sessionId);
+            if (pending) {
+              sendBinary(ws, EDITOR_OPEN, JSON.stringify(pending));
+            }
+
             lastPingSentAt = Date.now(); ws.ping();
 
             logger.debug('session attached', { address, sessionId, name: info.name });
@@ -406,7 +434,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
           rows,
           scrollback,
           shell.name,
-          { ...shell.env, ...notificationModeEnv },
+          { ...shell.env, ...notificationModeEnv, ...editorEnv },
         );
         sessionId = info.sessionId;
         sessionLogger = logger.createSessionLogger(sessionId);
@@ -424,6 +452,12 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         sendBinary(ws, SET_SESSION_INFO, JSON.stringify(info));
 
         startSync(sessionId);
+
+        // Register editor sender for newly created session
+        registry.setEditorSender(sessionId, (filePath, content) => {
+          sendBinary(ws, EDITOR_OPEN, JSON.stringify({ filePath, content }));
+        });
+
         lastPingSentAt = Date.now(); ws.ping();
 
         logger.debug('session created and attached', { address, sessionId, name: info.name });
@@ -536,6 +570,9 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       if (parsed.imagePasteDir !== undefined) {
         imagePasteDir = parsed.imagePasteDir;
       }
+      if (parsed.remoteEditor !== undefined) {
+        remoteEditor = parsed.remoteEditor;
+      }
       return;
     }
 
@@ -555,6 +592,21 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       }
       return;
     }
+
+    if (command === EDITOR_DONE) {
+      if (sessionId === null) return;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(buf.subarray(1).toString('utf-8'));
+      } catch {
+        return;
+      }
+      if (typeof parsed !== 'object' || parsed === null) return;
+      const r = parsed as Record<string, unknown>;
+      if (typeof r['content'] !== 'string' || typeof r['cancelled'] !== 'boolean') return;
+      registry.completeEdit(sessionId, r['content'], r['cancelled']);
+      return;
+    }
   });
 
   ws.on('close', () => {
@@ -562,6 +614,9 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
     stopSync();
     unsubAlert();
     unsubNotification();
+    if (sessionId !== null) {
+      registry.clearEditorSender(sessionId);
+    }
     state.clientCount--;
     logger.debug('WS closed', { address, clientCount: state.clientCount });
 

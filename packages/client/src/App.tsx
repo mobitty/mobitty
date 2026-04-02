@@ -25,6 +25,7 @@ import { findFontOption, loadFont } from '@/fonts';
 import { getLastSessionId, setLastSessionId, clearLastSessionId, fetchSessions } from '@/sessions';
 import { fetchShells, type ShellInfo } from '@/shells';
 import { ShellSelectionPanel } from '@/components/ShellSelectionPanel';
+import { RemoteEditorPanel } from '@/components/RemoteEditorPanel';
 import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
 
@@ -94,6 +95,9 @@ export function App() {
   const [pendingShellSelection, setPendingShellSelection] = useState<boolean>(() => getLastSessionId() === null);
   const [initialShellName, setInitialShellName] = useState<string | undefined>();
   const [initialShells, setInitialShells] = useState<ShellInfo[]>([]);
+  const [editorOpen, setEditorOpen] = useState(false);
+  const [editorFilePath, setEditorFilePath] = useState('');
+  const [editorContent, setEditorContent] = useState('');
 
   const terminalRef = useRef<XtermTerminalHandle>(null);
   const currentSessionIdRef = useRef<string | undefined>(undefined);
@@ -350,6 +354,11 @@ export function App() {
     onImagePasteError: (error: ImagePasteErrorInfo) => {
       setImagePasteError(error);
     },
+    onEditorOpen: (filePath: string, content: string) => {
+      setEditorFilePath(filePath);
+      setEditorContent(content);
+      setEditorOpen(true);
+    },
   }), []);
 
   // Modifier source for the terminal
@@ -430,6 +439,18 @@ export function App() {
     setPendingShellSelection(false);
   }, []);
 
+  const handleEditorSave = useCallback((content: string) => {
+    terminalRef.current?.core?.sendEditorDone(content, false);
+    setEditorOpen(false);
+    terminalRef.current?.core?.focus();
+  }, []);
+
+  const handleEditorCancel = useCallback(() => {
+    terminalRef.current?.core?.sendEditorDone(editorContent, true);
+    setEditorOpen(false);
+    terminalRef.current?.core?.focus();
+  }, [editorContent]);
+
   return (
     <>
       {/* Terminal area — flex-1, always present for layout stability */}
@@ -485,6 +506,14 @@ export function App() {
       />
 
       {/* Overlays — absolute within #root (contain: paint) */}
+      <RemoteEditorPanel
+        open={editorOpen}
+        filePath={editorFilePath}
+        content={editorContent}
+        onSave={handleEditorSave}
+        onCancel={handleEditorCancel}
+      />
+
       {pendingShellSelection && initialShells.length > 0 && (
         <ShellSelectionPanel shells={initialShells} onSelect={handleInitialShellSelect} />
       )}

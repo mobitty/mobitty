@@ -85,6 +85,7 @@ export interface Profile {
   imagePasteDir?: string;
   optionIsMeta: boolean;
   notificationMode: 'iterm' | 'kitty' | 'ghostty' | 'off';
+  remoteEditor: boolean;
 }
 
 // ── Declarative Field Schema ─────────────────────────────────────────────────
@@ -287,6 +288,13 @@ export const PROFILE_FIELD_RULES: Readonly<Record<string, FieldRule>> = {
     values: ['iterm', 'kitty', 'ghostty', 'off'] as const,
     errors: {
       invalid: 'Must be iterm, kitty, ghostty, or off',
+    },
+  },
+  remoteEditor: {
+    type: 'boolean',
+    default: false,
+    errors: {
+      type: 'Must be true or false',
     },
   },
 };

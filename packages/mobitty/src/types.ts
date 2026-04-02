@@ -11,6 +11,7 @@ export const CLIPBOARD_IMAGE_ACK = 0x36; // '6' — clipboard image ACK: {reques
 export const RTT_REPORT = 0x37;          // '7' — RTT in ms (uint16 BE)
 export const SESSION_ALERT = 0x38;       // '8' — session alert: sessionId string
 export const SESSION_NOTIFICATION = 0x3a; // ':' — rich notification: {sessionId, title, body}
+export const EDITOR_OPEN = 0x3b;         // ';' — remote editor: open file for editing
 
 // Client -> Server
 export const INPUT = 0x30;             // '0'
@@ -18,6 +19,7 @@ export const RESIZE_TERMINAL = 0x31;   // '1'
 export const UPDATE_SETTINGS = 0x32;   // '2' — live settings update: {scrollback?}
 export const CLIPBOARD_IMAGE = 0x36;  // '6' — clipboard image upload: {requestId, mime, data}
 export const CLIENT_LOG = 0x39;       // '9' — client log forwarding: {seq, level, msg, data?}
+export const EDITOR_DONE = 0x3a;      // ':' — remote editor: done editing
 export const JSON_DATA = 0x7b;        // '{'
 
 // Logging types
@@ -123,12 +125,19 @@ export interface AuthMessage {
   shell?: string;
   imagePasteDir?: string;
   notificationMode?: string;
+  remoteEditor?: boolean;
 }
 
 export interface UpdateSettingsMessage {
   scrollback?: number;
   imagePasteDir?: string;
   notificationMode?: string;
+  remoteEditor?: boolean;
+}
+
+export interface EditorResult {
+  content: string;
+  cancelled: boolean;
 }
 
 export function isResizeMessage(obj: unknown): obj is ResizeMessage {
@@ -159,6 +168,9 @@ export function isUpdateSettingsMessage(obj: unknown): obj is UpdateSettingsMess
   if (r['notificationMode'] !== undefined) {
     if (typeof r['notificationMode'] !== 'string'
         || !['iterm', 'kitty', 'ghostty', 'off'].includes(r['notificationMode'])) return false;
+  }
+  if (r['remoteEditor'] !== undefined) {
+    if (typeof r['remoteEditor'] !== 'boolean') return false;
   }
   return true;
 }

@@ -30,6 +30,8 @@ const CMD_RTT_REPORT = 0x37;
 const CMD_SESSION_ALERT = 0x38;
 const CMD_SESSION_NOTIFICATION = 0x3a;
 const CMD_UPDATE_SETTINGS = 0x32;
+const CMD_EDITOR_OPEN = 0x3b;
+const CMD_EDITOR_DONE = 0x3a;
 
 const Command = {
   SET_WINDOW_TITLE: '1',
@@ -78,6 +80,7 @@ export interface TerminalCoreCallbacks {
   onSessionAlert?: (sessionId: string) => void;
   onSessionNotification?: (sessionId: string, title: string, body: string, sessionName: string, sessionTitle: string) => void;
   onImagePasteError?: (error: ImagePasteErrorInfo) => void;
+  onEditorOpen?: (filePath: string, content: string) => void;
 }
 
 export interface TerminalCoreOptions {
@@ -134,6 +137,7 @@ export class TerminalCore {
   private scrollback: number;
   private imagePasteDir?: string;
   private notificationMode: 'iterm' | 'kitty' | 'ghostty' | 'off' = 'iterm';
+  private remoteEditor = false;
   private scrollbarHealthTimer?: ReturnType<typeof setInterval>;
   private scrollbarStuckCount = 0;
 
@@ -178,12 +182,28 @@ export class TerminalCore {
     this.sendUpdateSettings();
   }
 
+  setRemoteEditor(enabled: boolean) {
+    this.remoteEditor = enabled;
+    this.sendUpdateSettings();
+  }
+
+  sendEditorDone(content: string, cancelled: boolean) {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+    const payload = JSON.stringify({ content, cancelled });
+    const encoded = this.textEncoder.encode(payload);
+    const msg = new Uint8Array(1 + encoded.length);
+    msg[0] = CMD_EDITOR_DONE;
+    msg.set(encoded, 1);
+    this.socket.send(msg);
+  }
+
   private sendUpdateSettings() {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
     const payload = JSON.stringify({
       scrollback: this.scrollback,
       imagePasteDir: this.imagePasteDir,
       notificationMode: this.notificationMode,
+      remoteEditor: this.remoteEditor,
     });
     const encoded = this.textEncoder.encode(payload);
     const msg = new Uint8Array(1 + encoded.length);
@@ -765,6 +785,7 @@ export class TerminalCore {
       handshake['imagePasteDir'] = this.imagePasteDir;
     }
     handshake['notificationMode'] = this.notificationMode;
+    handshake['remoteEditor'] = this.remoteEditor;
     this.socket?.send(textEncoder.encode(JSON.stringify(handshake)));
 
     // Clear any lingering overlay (e.g. "Reconnecting..." from failed initial attempts)
@@ -918,6 +939,20 @@ export class TerminalCore {
         } catch { /* ignore parse errors */ }
       }
       this.pendingClipboardImageResolve?.({ status, errorInfo });
+      return;
+    }
+
+    if (cmd === CMD_EDITOR_OPEN && rawData.byteLength > 1) {
+      const jsonStr = this.textDecoder.decode(new Uint8Array(rawData, 1));
+      try {
+        const parsed: unknown = JSON.parse(jsonStr);
+        if (typeof parsed === 'object' && parsed !== null) {
+          const r = parsed as Record<string, unknown>;
+          if (typeof r['filePath'] === 'string' && typeof r['content'] === 'string') {
+            this.callbacks.onEditorOpen?.(r['filePath'], r['content']);
+          }
+        }
+      } catch { /* ignore malformed */ }
       return;
     }
 

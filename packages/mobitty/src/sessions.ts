@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import type { PtyHandle, SessionInfo } from './types.ts';
+import type { PtyHandle, SessionInfo, EditorResult } from './types.ts';
 import { spawnPty, resizePty, killPty } from './pty.ts';
 import { generateUniqueSessionName } from './session-names.ts';
 import type { LoggerInterface } from './types.ts';
@@ -27,6 +27,12 @@ interface SessionEntry {
   onExitCallbacks: Array<() => void>;
   onDetachCallbacks: Array<() => void>;
   onChangeCallbacks: Array<() => void>;
+  editorPending: {
+    filePath: string;
+    content: string;
+    resolve: (result: EditorResult) => void;
+  } | null;
+  editorSender: ((filePath: string, content: string) => void) | null;
 }
 
 interface SessionsDiskData {
@@ -97,6 +103,8 @@ export class SessionRegistry {
         onExitCallbacks: [],
         onDetachCallbacks: [],
         onChangeCallbacks: [],
+        editorPending: null,
+        editorSender: null,
       });
     }
 
@@ -209,6 +217,8 @@ export class SessionRegistry {
       onExitCallbacks,
       onDetachCallbacks,
       onChangeCallbacks,
+      editorPending: null,
+      editorSender: null,
     };
 
     this.sessions.set(sessionId, entry);
@@ -315,6 +325,7 @@ export class SessionRegistry {
   deleteSession(sessionId: string): boolean {
     const entry = this.sessions.get(sessionId);
     if (!entry) return false;
+    this.cancelPendingEdit(entry);
     if (entry.alive && entry.handle) {
       killPty(entry.handle);
       entry.alive = false;
@@ -335,6 +346,7 @@ export class SessionRegistry {
 
   destroyAll(): void {
     for (const entry of this.sessions.values()) {
+      this.cancelPendingEdit(entry);
       if (entry.alive && entry.handle) {
         killPty(entry.handle);
         entry.alive = false;
@@ -365,6 +377,59 @@ export class SessionRegistry {
     const entry = this.sessions.get(sessionId);
     if (!entry?.headless) return;
     entry.headless.options.scrollback = scrollback;
+  }
+
+  // ── Remote Editor ──────────────────────────────────────────────────────────
+
+  setEditorSender(sessionId: string, fn: (filePath: string, content: string) => void): void {
+    const entry = this.sessions.get(sessionId);
+    if (entry) entry.editorSender = fn;
+  }
+
+  clearEditorSender(sessionId: string): void {
+    const entry = this.sessions.get(sessionId);
+    if (entry) entry.editorSender = null;
+  }
+
+  getEditorPending(sessionId: string): { filePath: string; content: string } | undefined {
+    const entry = this.sessions.get(sessionId);
+    if (!entry?.editorPending) return undefined;
+    return { filePath: entry.editorPending.filePath, content: entry.editorPending.content };
+  }
+
+  requestEdit(sessionId: string, filePath: string, content: string, onAbort: (cleanup: () => void) => void): Promise<EditorResult> {
+    const entry = this.sessions.get(sessionId);
+    if (!entry) return Promise.reject(new Error('Session not found'));
+    if (entry.editorPending) return Promise.reject(new Error('Edit already in progress'));
+    if (!entry.editorSender) return Promise.reject(new Error('No client connected'));
+
+    return new Promise<EditorResult>((resolve) => {
+      entry.editorPending = { filePath, content, resolve };
+      entry.editorSender!(filePath, content);
+
+      // If the HTTP request from mobitty-editor drops, clean up
+      const cleanup = () => {
+        if (entry.editorPending?.resolve === resolve) {
+          entry.editorPending = null;
+        }
+      };
+      onAbort(cleanup);
+    });
+  }
+
+  completeEdit(sessionId: string, content: string, cancelled: boolean): boolean {
+    const entry = this.sessions.get(sessionId);
+    if (!entry?.editorPending) return false;
+    entry.editorPending.resolve({ content, cancelled });
+    entry.editorPending = null;
+    return true;
+  }
+
+  private cancelPendingEdit(entry: SessionEntry): void {
+    if (entry.editorPending) {
+      entry.editorPending.resolve({ content: entry.editorPending.content, cancelled: true });
+      entry.editorPending = null;
+    }
   }
 
   private toSessionInfo(entry: SessionEntry): SessionInfo {
