@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { PtyHandle, SessionInfo, EditorResult } from './types.ts';
-import { spawnPty, resizePty, killPty } from './pty.ts';
+import { spawnPty, writePty, resizePty, killPty } from './pty.ts';
 import { generateUniqueSessionName } from './session-names.ts';
 import type { LoggerInterface } from './types.ts';
 import headlessPkg from '@xterm/headless';
@@ -10,6 +10,10 @@ const { Terminal } = headlessPkg;
 import { trackCursorVisibility } from './cursor-visibility.ts';
 import type { CursorVisibilityTracker } from './cursor-visibility.ts';
 import { registerNotificationHandlers } from './osc-notifications.ts';
+import { registerColorQueryHandlers } from './osc-color-query.ts';
+import type { OscColorQueryTracker, OscColorConfig } from './osc-color-query.ts';
+import { BUILTIN_THEMES } from './themes.ts';
+import { normalizeSgrColors } from './sgr-normalize.ts';
 
 interface SessionEntry {
   sessionId: string;
@@ -22,6 +26,7 @@ interface SessionEntry {
   handle: PtyHandle | null;
   headless: InstanceType<typeof Terminal> | null;
   cursorTracker: CursorVisibilityTracker | null;
+  colorTracker: OscColorQueryTracker | null;
   title: string;
   hasAlert: boolean;
   onExitCallbacks: Array<() => void>;
@@ -98,6 +103,7 @@ export class SessionRegistry {
         handle: null,
         headless: null,
         cursorTracker: null,
+        colorTracker: null,
         title: '',
         hasAlert: false,
         onExitCallbacks: [],
@@ -176,6 +182,19 @@ export class SessionRegistry {
       notifyChange();
     });
 
+    // OSC 10/11/12 color query handlers — respond with the session's theme
+    // colors so programs (e.g. nvim) can detect dark/light background.
+    const defaultTheme = BUILTIN_THEMES.get('default-dark')!;
+    const oscColorConfig: OscColorConfig = {
+      foreground: defaultTheme.colors.foreground,
+      background: defaultTheme.colors.background,
+      cursor: defaultTheme.colors.cursor,
+      writeToPty: (response: string) => {
+        if (entry.handle) writePty(entry.handle, response);
+      },
+    };
+    const colorTracker = registerColorQueryHandlers(headless, oscColorConfig);
+
     const command = argv.join(' ');
     const handle = spawnPty(
       {
@@ -186,7 +205,7 @@ export class SessionRegistry {
         env: { ...env, MOBITTY_SESSION_ID: sessionId },
       },
       {
-        onData: (data: string) => { headless.write(data); notifyChange(); },
+        onData: (data: string) => { headless.write(normalizeSgrColors(data)); notifyChange(); },
         onExit: () => {
           const entry = this.sessions.get(sessionId);
           if (entry) {
@@ -212,6 +231,7 @@ export class SessionRegistry {
       handle,
       headless,
       cursorTracker,
+      colorTracker,
       title,
       hasAlert: false,
       onExitCallbacks,
@@ -271,6 +291,11 @@ export class SessionRegistry {
 
   getCursorHidden(sessionId: string): boolean {
     return this.sessions.get(sessionId)?.cursorTracker?.cursorHidden ?? false;
+  }
+
+  updateSessionThemeColors(sessionId: string, fg: string, bg: string): void {
+    const entry = this.sessions.get(sessionId);
+    entry?.colorTracker?.updateColors(fg, bg, fg);
   }
 
   addChangeListener(sessionId: string, callback: () => void): void {
@@ -334,6 +359,10 @@ export class SessionRegistry {
       entry.cursorTracker.dispose();
       entry.cursorTracker = null;
     }
+    if (entry.colorTracker) {
+      entry.colorTracker.dispose();
+      entry.colorTracker = null;
+    }
     if (entry.headless) {
       entry.headless.dispose();
       entry.headless = null;
@@ -354,6 +383,10 @@ export class SessionRegistry {
       if (entry.cursorTracker) {
         entry.cursorTracker.dispose();
         entry.cursorTracker = null;
+      }
+      if (entry.colorTracker) {
+        entry.colorTracker.dispose();
+        entry.colorTracker = null;
       }
       if (entry.headless) {
         entry.headless.dispose();

@@ -138,6 +138,8 @@ export class TerminalCore {
   private imagePasteDir?: string;
   private notificationMode: 'iterm' | 'kitty' | 'ghostty' | 'off' = 'iterm';
   private remoteEditor = false;
+  private themeForeground?: string;
+  private themeBackground?: string;
   private scrollbarHealthTimer?: ReturnType<typeof setInterval>;
   private scrollbarStuckCount = 0;
 
@@ -204,6 +206,8 @@ export class TerminalCore {
       imagePasteDir: this.imagePasteDir,
       notificationMode: this.notificationMode,
       remoteEditor: this.remoteEditor,
+      themeForeground: this.themeForeground,
+      themeBackground: this.themeBackground,
     });
     const encoded = this.textEncoder.encode(payload);
     const msg = new Uint8Array(1 + encoded.length);
@@ -264,6 +268,8 @@ export class TerminalCore {
     this.options.termOptions.macOptionIsMeta = profile.optionIsMeta;
     if (themeColors) {
       this.options.termOptions.theme = themeColors;
+      this.themeForeground = themeColors.foreground;
+      this.themeBackground = themeColors.background;
     }
     this.terminal.options.fontSize = fontSize;
     this.terminal.options.fontFamily = profile.fontFamily;
@@ -786,6 +792,8 @@ export class TerminalCore {
     }
     handshake['notificationMode'] = this.notificationMode;
     handshake['remoteEditor'] = this.remoteEditor;
+    if (this.themeForeground) handshake['themeForeground'] = this.themeForeground;
+    if (this.themeBackground) handshake['themeBackground'] = this.themeBackground;
     this.socket?.send(textEncoder.encode(JSON.stringify(handshake)));
 
     // Clear any lingering overlay (e.g. "Reconnecting..." from failed initial attempts)

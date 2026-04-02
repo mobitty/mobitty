@@ -70,6 +70,8 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
   let smoothRtt = 33;      // EMA of RTT for adaptive sync interval
   let imagePasteDir: string | undefined;
   let remoteEditor = false;
+  let themeForeground: string | undefined;
+  let themeBackground: string | undefined;
 
   let sessionId: string | null = null;
   let sessionLogger: SessionLogger | null = null;
@@ -221,6 +223,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         sessionLogger.debug('frame', { wasFull, deltaScroll, baseY: curr.baseY, diffBytes: vtPayload.length });
       }
 
+
       // Verification terminal
       if (verifyTerm && sessionLogger) {
         verifyFrameCount++;
@@ -356,6 +359,15 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         remoteEditor = true;
       }
 
+      // Parse theme colors for OSC 10/11 color query responses
+      const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+      if (typeof parsed.themeForeground === 'string' && HEX_COLOR.test(parsed.themeForeground)) {
+        themeForeground = parsed.themeForeground;
+      }
+      if (typeof parsed.themeBackground === 'string' && HEX_COLOR.test(parsed.themeBackground)) {
+        themeBackground = parsed.themeBackground;
+      }
+
       // Remote editor env vars
       const editorEnv: Record<string, string> = {};
       if (remoteEditor && EDITOR_BIN_PATH) {
@@ -384,6 +396,9 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
             registry.clearAlert(sessionId);
             registry.resizeSession(sessionId, columns, rows);
             registry.updateSessionScrollback(sessionId, scrollback);
+            if (themeForeground && themeBackground) {
+              registry.updateSessionThemeColors(sessionId, themeForeground, themeBackground);
+            }
 
             sendBinary(ws, SET_WINDOW_TITLE, info.name);
             sendBinary(ws, SET_PREFERENCES, state.config.prefsJson);
@@ -440,6 +455,9 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         sessionLogger = logger.createSessionLogger(sessionId);
         drainPendingClientLogs();
         registry.clearAlert(sessionId);
+        if (themeForeground && themeBackground) {
+          registry.updateSessionThemeColors(sessionId, themeForeground, themeBackground);
+        }
 
         registry.attachSession(sessionId, () => {
           ws.close(4002, 'Process exited');
@@ -572,6 +590,15 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       }
       if (parsed.remoteEditor !== undefined) {
         remoteEditor = parsed.remoteEditor;
+      }
+      if (parsed.themeForeground !== undefined) {
+        themeForeground = parsed.themeForeground;
+      }
+      if (parsed.themeBackground !== undefined) {
+        themeBackground = parsed.themeBackground;
+      }
+      if (themeForeground && themeBackground) {
+        registry.updateSessionThemeColors(sessionId, themeForeground, themeBackground);
       }
       return;
     }

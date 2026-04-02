@@ -126,6 +126,8 @@ export interface AuthMessage {
   imagePasteDir?: string;
   notificationMode?: string;
   remoteEditor?: boolean;
+  themeForeground?: string;
+  themeBackground?: string;
 }
 
 export interface UpdateSettingsMessage {
@@ -133,6 +135,8 @@ export interface UpdateSettingsMessage {
   imagePasteDir?: string;
   notificationMode?: string;
   remoteEditor?: boolean;
+  themeForeground?: string;
+  themeBackground?: string;
 }
 
 export interface EditorResult {
@@ -171,6 +175,13 @@ export function isUpdateSettingsMessage(obj: unknown): obj is UpdateSettingsMess
   }
   if (r['remoteEditor'] !== undefined) {
     if (typeof r['remoteEditor'] !== 'boolean') return false;
+  }
+  const HEX_COLOR = /^#[0-9a-fA-F]{6}$/;
+  if (r['themeForeground'] !== undefined) {
+    if (typeof r['themeForeground'] !== 'string' || !HEX_COLOR.test(r['themeForeground'])) return false;
+  }
+  if (r['themeBackground'] !== undefined) {
+    if (typeof r['themeBackground'] !== 'string' || !HEX_COLOR.test(r['themeBackground'])) return false;
   }
   return true;
 }
