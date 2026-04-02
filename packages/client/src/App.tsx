@@ -93,6 +93,9 @@ export function App() {
   const [meterOpen, setMeterOpen] = useState(false);
   const [alertedSessionIds, setAlertedSessionIds] = useState<Set<string>>(() => new Set());
   const [pendingShellSelection, setPendingShellSelection] = useState<boolean>(() => getLastSessionId() === null);
+  // When there's no stored session ID, we must check for alive sessions on the server before
+  // showing the shell selection UI — otherwise we'd force shell selection even if sessions exist.
+  const [initialCheckComplete, setInitialCheckComplete] = useState(() => getLastSessionId() !== null);
   const [initialShellName, setInitialShellName] = useState<string | undefined>();
   const [initialShells, setInitialShells] = useState<ShellInfo[]>([]);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -140,9 +143,24 @@ export function App() {
     };
   }, []);
 
-  // Fetch shells for new-user selection
+  // On mount with no stored session ID, check for alive sessions before showing shell selection.
+  // If alive sessions exist, open the session panel instead.
   useEffect(() => {
-    if (!pendingShellSelection) return;
+    if (getLastSessionId() !== null) return;
+    fetchSessions()
+      .then(sessions => {
+        if (sessions.some(s => s.alive)) {
+          setPendingShellSelection(false);
+          setSessionPanelOpen(true);
+        }
+      })
+      .catch(() => { /* on error, fall through to shell selection */ })
+      .finally(() => { setInitialCheckComplete(true); });
+  }, []);
+
+  // Fetch shells for new-user selection (waits for initial session check to avoid racing)
+  useEffect(() => {
+    if (!pendingShellSelection || !initialCheckComplete) return;
     fetchShells().then(shells => {
       if (shells.length <= 1) {
         setInitialShellName(shells[0]?.name);
@@ -153,7 +171,7 @@ export function App() {
     }).catch(() => {
       setPendingShellSelection(false);
     });
-  }, [pendingShellSelection]);
+  }, [pendingShellSelection, initialCheckComplete]);
 
   // Cleanup metrics on unmount
   useEffect(() => {
