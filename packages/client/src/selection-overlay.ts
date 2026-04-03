@@ -1,6 +1,10 @@
 // iOS-style selection handles and edit menu for touch devices.
 // Renders draggable handles at selection endpoints and a floating
-// Copy / Select All menu.  Desktop is unaffected.
+// Copy menu.  Desktop is unaffected.
+//
+// Each handle: a blue vertical bar (2px × cellHeight) on the boundary,
+// with a small circle (10px) offset vertically.  The circle flips
+// direction when near the viewport edge.  Touch target is 44px.
 
 import type { ITerminalAddon, IDisposable, Terminal } from '@xterm/xterm';
 
@@ -26,10 +30,12 @@ export class SelectionOverlayAddon implements ITerminalAddon {
   private disposables: IDisposable[] = [];
   private isTouchDevice: () => boolean;
 
-  // DOM
+  // DOM — bars and circles are separate absolute elements, no flex nesting
   private container: HTMLDivElement | null = null;
-  private startHandle: HTMLDivElement | null = null;
-  private endHandle: HTMLDivElement | null = null;
+  private startBar: HTMLDivElement | null = null;
+  private startCircle: HTMLDivElement | null = null;
+  private endBar: HTMLDivElement | null = null;
+  private endCircle: HTMLDivElement | null = null;
   private editMenu: HTMLDivElement | null = null;
 
   // State
@@ -38,11 +44,18 @@ export class SelectionOverlayAddon implements ITerminalAddon {
   private active = false;
   private cellWidth = 0;
   private cellHeight = 0;
+  // Pixel offset of the .xterm-screen grid within terminal.element
+  private gridOffsetX = 0;
+  private gridOffsetY = 0;
 
   // Auto-scroll during drag
   private scrollInterval: ReturnType<typeof setInterval> | null = null;
   private lastPointerX = 0;
   private lastPointerY = 0;
+  // Offset between pointer and the actual cell boundary, captured at drag start.
+  // Applied during drag so the bar stays stable instead of jumping to finger pos.
+  private dragOffsetX = 0;
+  private dragOffsetY = 0;
 
   // Bound listeners for cleanup
   private boundOnPointerMove: ((e: PointerEvent) => void) | null = null;
@@ -173,62 +186,52 @@ export class SelectionOverlayAddon implements ITerminalAddon {
       display: 'none',
     });
 
-    this.startHandle = this.createHandle('start');
-    this.endHandle = this.createHandle('end');
+    this.startBar = this.createBar();
+    this.startCircle = this.createCircle('start');
+    this.endBar = this.createBar();
+    this.endCircle = this.createCircle('end');
     this.editMenu = this.createEditMenu();
 
-    this.container.appendChild(this.startHandle);
-    this.container.appendChild(this.endHandle);
+    this.container.appendChild(this.startBar);
+    this.container.appendChild(this.startCircle);
+    this.container.appendChild(this.endBar);
+    this.container.appendChild(this.endCircle);
     this.container.appendChild(this.editMenu);
   }
 
-  private createHandle(target: DragTarget): HTMLDivElement {
-    const handle = document.createElement('div');
-    Object.assign(handle.style, {
+  /** Blue vertical bar marking the selection boundary. */
+  private createBar(): HTMLDivElement {
+    const bar = document.createElement('div');
+    Object.assign(bar.style, {
       position: 'absolute',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
+      width: '2px',
+      background: '#007AFF',
+      pointerEvents: 'none',
+    });
+    return bar;
+  }
+
+  /** Draggable circle with 44px touch target (10px visible). */
+  private createCircle(target: DragTarget): HTMLDivElement {
+    const circle = document.createElement('div');
+    Object.assign(circle.style, {
+      position: 'absolute',
+      width: '10px',
+      height: '10px',
+      borderRadius: '50%',
+      background: '#007AFF',
+      backgroundClip: 'content-box',
+      boxSizing: 'content-box',
+      padding: '17px',
+      margin: '-17px',
       pointerEvents: 'auto',
       touchAction: 'none',
       cursor: 'grab',
     });
-
-    // Stem
-    const stem = document.createElement('div');
-    Object.assign(stem.style, {
-      width: '2px',
-      height: '6px',
-      background: '#007AFF',
-    });
-
-    // Circle (drag target)
-    const circle = document.createElement('div');
-    Object.assign(circle.style, {
-      width: '20px',
-      height: '20px',
-      borderRadius: '50%',
-      background: '#007AFF',
-      boxSizing: 'content-box',
-      padding: '10px',
-      margin: '-10px',
-    });
-
-    // Start handle: circle above, stem below (points into selection)
-    // End handle: stem above, circle below
-    if (target === 'start') {
-      handle.appendChild(circle);
-      handle.appendChild(stem);
-    } else {
-      handle.appendChild(stem);
-      handle.appendChild(circle);
-    }
-
-    handle.addEventListener('pointerdown', (e: PointerEvent) => {
+    circle.addEventListener('pointerdown', (e: PointerEvent) => {
       this.onHandlePointerDown(target, e);
     });
-
-    return handle;
+    return circle;
   }
 
   private createEditMenu(): HTMLDivElement {
@@ -280,54 +283,113 @@ export class SelectionOverlayAddon implements ITerminalAddon {
   // ── Positioning ───────────────────────────────────────────────────────────
 
   private measureCells(): void {
-    const screen = this.terminal?.element?.querySelector('.xterm-screen');
-    if (!screen || !this.terminal) return;
+    const termEl = this.terminal?.element;
+    const screen = termEl?.querySelector('.xterm-screen');
+    if (!screen || !termEl || !this.terminal) return;
     this.cellWidth = screen.clientWidth / this.terminal.cols;
     this.cellHeight = screen.clientHeight / this.terminal.rows;
+    // The cell grid may be offset within terminal.element (padding, viewport)
+    const termRect = termEl.getBoundingClientRect();
+    const screenRect = screen.getBoundingClientRect();
+    this.gridOffsetX = screenRect.left - termRect.left;
+    this.gridOffsetY = screenRect.top - termRect.top;
   }
 
+  // Gap between the cell edge and the circle center.
+  private static readonly HANDLE_GAP = 20;
+  // Circle visible radius (half of 10px).
+  private static readonly CIRCLE_R = 5;
+
   private updatePositions(): void {
-    if (!this.terminal || !this.selection || !this.startHandle || !this.endHandle || !this.editMenu) return;
+    if (!this.terminal || !this.selection) return;
+    if (!this.startBar || !this.startCircle || !this.endBar || !this.endCircle || !this.editMenu) return;
 
     const viewportY = this.terminal.buffer.active.viewportY;
     const rows = this.terminal.rows;
+    const termHeight = this.gridOffsetY + rows * this.cellHeight;
+    const gap = SelectionOverlayAddon.HANDLE_GAP;
+    const cr = SelectionOverlayAddon.CIRCLE_R;
 
-    // Start handle: positioned at top-left of selection start cell
+    // ── Start handle ────────────────────────────────────────────────────
     const startViewRow = this.selection.start.y - viewportY;
-    const startX = this.selection.start.x * this.cellWidth;
-    const startY = startViewRow * this.cellHeight;
+    const startX = this.gridOffsetX + this.selection.start.x * this.cellWidth;
+    const startCellTop = this.gridOffsetY + startViewRow * this.cellHeight;
+    const startCellBot = startCellTop + this.cellHeight;
 
     if (startViewRow >= 0 && startViewRow < rows) {
-      this.startHandle.style.display = 'flex';
-      this.startHandle.style.left = (startX - 10) + 'px'; // center the 20px circle
-      this.startHandle.style.top = (startY - 26) + 'px';  // circle(20) + stem(6) above the line
+      // Default: circle above cell.  Flip when near top edge.
+      const startFlipped = startCellTop < (gap + cr);
+
+      if (startFlipped) {
+        // Circle below cell, bar extends from cell top down through gap
+        this.positionBar(this.startBar, startX, startCellTop, this.cellHeight + gap);
+        this.positionCircle(this.startCircle, startX, startCellBot + gap);
+      } else {
+        // Circle above cell, bar extends from gap up through cell
+        this.positionBar(this.startBar, startX, startCellTop - gap, this.cellHeight + gap);
+        this.positionCircle(this.startCircle, startX, startCellTop - gap);
+      }
     } else {
-      this.startHandle.style.display = 'none';
+      this.hideElement(this.startBar);
+      this.hideElement(this.startCircle);
     }
 
-    // End handle: positioned at bottom-right of selection end cell
+    // ── End handle ──────────────────────────────────────────────────────
     const endViewRow = this.selection.end.y - viewportY;
-    const endX = this.selection.end.x * this.cellWidth;
-    const endY = (endViewRow + 1) * this.cellHeight;
+    const endX = this.gridOffsetX + this.selection.end.x * this.cellWidth;
+    const endCellTop = this.gridOffsetY + endViewRow * this.cellHeight;
+    const endCellBot = endCellTop + this.cellHeight;
 
     if (endViewRow >= 0 && endViewRow < rows) {
-      this.endHandle.style.display = 'flex';
-      this.endHandle.style.left = (endX - 10) + 'px';
-      this.endHandle.style.top = (endY) + 'px'; // stem + circle below the line
+      // Default: circle below cell.  Flip when near bottom edge.
+      const endFlipped = (termHeight - endCellBot) < (gap + cr);
+
+      if (endFlipped) {
+        // Circle above cell, bar extends from gap up through cell
+        this.positionBar(this.endBar, endX, endCellTop - gap, this.cellHeight + gap);
+        this.positionCircle(this.endCircle, endX, endCellTop - gap);
+      } else {
+        // Circle below cell, bar extends from cell top down through gap
+        this.positionBar(this.endBar, endX, endCellTop, this.cellHeight + gap);
+        this.positionCircle(this.endCircle, endX, endCellBot + gap);
+      }
     } else {
-      this.endHandle.style.display = 'none';
+      this.hideElement(this.endBar);
+      this.hideElement(this.endCircle);
     }
 
-    // Edit menu: centered above the start handle, or below end if too high
-    this.positionEditMenu(startX, startY, endX, endY);
+    // ── Edit menu ───────────────────────────────────────────────────────
+    this.positionEditMenu(startX, startCellTop, endX, endCellBot);
   }
 
-  private positionEditMenu(startX: number, startY: number, endX: number, endY: number): void {
+  /** Position a 2px bar centered on x, starting at top with given height. */
+  private positionBar(bar: HTMLDivElement, x: number, top: number, height: number): void {
+    bar.style.display = '';
+    bar.style.left = (x - 1) + 'px';
+    bar.style.top = top + 'px';
+    bar.style.height = height + 'px';
+  }
+
+  /** Position a circle centered on (x, y). */
+  private positionCircle(circle: HTMLDivElement, x: number, y: number): void {
+    const cr = SelectionOverlayAddon.CIRCLE_R;
+    circle.style.display = '';
+    circle.style.left = (x - cr) + 'px';
+    circle.style.top = (y - cr) + 'px';
+  }
+
+  private hideElement(el: HTMLDivElement): void {
+    el.style.display = 'none';
+  }
+
+  private positionEditMenu(startX: number, startCellTop: number, endX: number, endCellBot: number): void {
     if (!this.editMenu || !this.terminal?.element) return;
 
     const termRect = this.terminal.element.getBoundingClientRect();
-    const menuWidth = this.editMenu.offsetWidth || 150; // estimate before first render
+    const menuWidth = this.editMenu.offsetWidth || 150;
     const menuHeight = this.editMenu.offsetHeight || 36;
+    const gap = SelectionOverlayAddon.HANDLE_GAP;
+    const cr = SelectionOverlayAddon.CIRCLE_R;
 
     // Horizontal: center between start and end
     const midX = (startX + endX) / 2;
@@ -335,12 +397,12 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     menuLeft = Math.max(0, Math.min(termRect.width - menuWidth, menuLeft));
 
     // Vertical: prefer above start handle
-    const aboveY = startY - 26 - menuHeight - 4;
+    const aboveY = startCellTop - gap - cr * 2 - menuHeight - 4;
     if (aboveY >= 0) {
       this.editMenu.style.top = aboveY + 'px';
     } else {
       // Below end handle
-      this.editMenu.style.top = (endY + 26 + 4) + 'px';
+      this.editMenu.style.top = (endCellBot + gap + cr * 2 + 4) + 'px';
     }
 
     this.editMenu.style.left = menuLeft + 'px';
@@ -355,9 +417,22 @@ export class SelectionOverlayAddon implements ITerminalAddon {
 
     this.dragTarget = target;
 
-    const handleEl = target === 'start' ? this.startHandle : this.endHandle;
-    if (handleEl) {
-      handleEl.setPointerCapture(e.pointerId);
+    // Capture offset between pointer and the actual cell boundary pixel.
+    // This keeps the bar stable under the finger instead of jumping.
+    const termEl = this.terminal?.element;
+    if (termEl && this.selection) {
+      const rect = termEl.getBoundingClientRect();
+      const cell = target === 'start' ? this.selection.start : this.selection.end;
+      const viewportY = this.terminal?.buffer.active.viewportY ?? 0;
+      const cellPixelX = rect.left + this.gridOffsetX + cell.x * this.cellWidth;
+      const cellPixelY = rect.top + this.gridOffsetY + (cell.y - viewportY) * this.cellHeight;
+      this.dragOffsetX = e.clientX - cellPixelX;
+      this.dragOffsetY = e.clientY - cellPixelY;
+    }
+
+    const circleEl = target === 'start' ? this.startCircle : this.endCircle;
+    if (circleEl) {
+      circleEl.setPointerCapture(e.pointerId);
     }
 
     this.boundOnPointerMove = (ev: PointerEvent) => this.onHandlePointerMove(ev);
@@ -378,14 +453,16 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     if (!termEl) return;
 
     const rect = termEl.getBoundingClientRect();
-    const relX = e.clientX - rect.left;
-    const relY = e.clientY - rect.top;
+    // Subtract the drag offset so the bar tracks the boundary, not the finger
+    const relX = e.clientX - this.dragOffsetX - rect.left - this.gridOffsetX;
+    const relY = e.clientY - this.dragOffsetY - rect.top - this.gridOffsetY;
 
     this.lastPointerX = e.clientX;
     this.lastPointerY = e.clientY;
 
     // Auto-scroll when pointer is beyond viewport edges
-    this.updateAutoScroll(relY, rect.height);
+    const gridHeight = this.terminal.rows * this.cellHeight;
+    this.updateAutoScroll(relY, gridHeight);
 
     // Convert pixel to cell
     const col = Math.max(0, Math.min(this.terminal.cols, Math.round(relX / this.cellWidth)));
@@ -407,9 +484,9 @@ export class SelectionOverlayAddon implements ITerminalAddon {
   private onHandlePointerUp(e: PointerEvent): void {
     this.stopAutoScroll();
 
-    const handleEl = this.dragTarget === 'start' ? this.startHandle : this.endHandle;
-    if (handleEl) {
-      handleEl.releasePointerCapture(e.pointerId);
+    const circleEl = this.dragTarget === 'start' ? this.startCircle : this.endCircle;
+    if (circleEl) {
+      circleEl.releasePointerCapture(e.pointerId);
     }
 
     if (this.boundOnPointerMove) {
@@ -449,8 +526,8 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     const termEl = this.terminal.element;
     if (!termEl) return;
     const rect = termEl.getBoundingClientRect();
-    const relX = this.lastPointerX - rect.left;
-    const relY = this.lastPointerY - rect.top;
+    const relX = this.lastPointerX - this.dragOffsetX - rect.left - this.gridOffsetX;
+    const relY = this.lastPointerY - this.dragOffsetY - rect.top - this.gridOffsetY;
 
     const col = Math.max(0, Math.min(this.terminal.cols, Math.round(relX / this.cellWidth)));
     const viewportRow = Math.max(0, Math.min(this.terminal.rows - 1, Math.floor(relY / this.cellHeight)));
