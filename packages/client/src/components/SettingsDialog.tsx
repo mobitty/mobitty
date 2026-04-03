@@ -102,6 +102,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
   const [optionIsMeta, setOptionIsMeta] = useState(true);
   const [notificationMode, setNotificationMode] = useState<'iterm' | 'kitty' | 'ghostty' | 'off'>('ghostty');
   const [remoteEditor, setRemoteEditor] = useState(false);
+  const [copyOnSelect, setCopyOnSelect] = useState(false);
   const [hotkeyError, setHotkeyError] = useState<string | undefined>();
   const [status, setStatus] = useState('');
   const [fieldErrors, setFieldErrors] = useState<ProfileFieldErrors>(new Map());
@@ -170,6 +171,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
     setOptionIsMeta(profile.optionIsMeta);
     setNotificationMode(profile.notificationMode);
     setRemoteEditor(profile.remoteEditor);
+    setCopyOnSelect(profile.copyOnSelect);
     setHotkeyError(undefined);
     setFieldErrors(new Map());
   }, []);
@@ -228,6 +230,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
       optionIsMeta,
       notificationMode,
       remoteEditor,
+      copyOnSelect,
     };
     if (Object.keys(gestures).length > 0) {
       candidate['gestures'] = gestures;
@@ -660,6 +663,18 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
                 className="accent-primary"
               />
               <HelpTip>Allow programs (e.g. Claude Code) to open files in the browser for editing via $EDITOR/$VISUAL. Applies to new sessions only.</HelpTip>
+            </div>
+
+            {/* Copy on Select */}
+            <div className="flex items-center gap-2">
+              <Label className="min-w-[100px] text-xs text-muted-foreground">Copy on Select</Label>
+              <input
+                type="checkbox"
+                checked={copyOnSelect}
+                onChange={e => setCopyOnSelect(e.target.checked)}
+                className="accent-primary"
+              />
+              <HelpTip>Automatically copy text to clipboard when selected in the terminal</HelpTip>
             </div>
 
             {/* Notification mode */}

@@ -86,6 +86,7 @@ export interface Profile {
   optionIsMeta: boolean;
   notificationMode: 'iterm' | 'kitty' | 'ghostty' | 'off';
   remoteEditor: boolean;
+  copyOnSelect: boolean;
 }
 
 // ── Declarative Field Schema ─────────────────────────────────────────────────
@@ -291,6 +292,13 @@ export const PROFILE_FIELD_RULES: Readonly<Record<string, FieldRule>> = {
     },
   },
   remoteEditor: {
+    type: 'boolean',
+    default: false,
+    errors: {
+      type: 'Must be true or false',
+    },
+  },
+  copyOnSelect: {
     type: 'boolean',
     default: false,
     errors: {

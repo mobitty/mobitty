@@ -8,6 +8,7 @@ import { WebglAddon } from '@xterm/addon-webgl';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { OverlayAddon } from './overlay';
+import { SelectionOverlayAddon } from './selection-overlay';
 import type { Profile, ProfileTheme, SoftkeyKeySettings } from './profiles';
 import type { KeyBehavior, ModifierFlags, VirtualKey, ComboStep, KeySpec } from './softkey-types';
 import { getKeySpec, emptyModifiers } from './softkey-types';
@@ -106,6 +107,7 @@ export class TerminalCore {
   private terminal!: Terminal;
   private fitAddon = new FitAddon();
   private overlayAddon = new OverlayAddon();
+  private selectionOverlay?: SelectionOverlayAddon;
   private webLinksAddon = new WebLinksAddon();
   private webglAddon?: WebglAddon;
   private canvasAddon?: CanvasAddon;
@@ -138,6 +140,7 @@ export class TerminalCore {
   private imagePasteDir?: string;
   private notificationMode: 'iterm' | 'kitty' | 'ghostty' | 'off' = 'ghostty';
   private remoteEditor = false;
+  private copyOnSelect = false;
   private themeForeground?: string;
   private themeBackground?: string;
   private scrollbarHealthTimer?: ReturnType<typeof setInterval>;
@@ -153,6 +156,8 @@ export class TerminalCore {
     this.reconnectKeyDisposable = undefined;
     this.gestureDetector?.dispose();
     this.gestureDetector = undefined;
+    this.selectionOverlay?.dispose();
+    this.selectionOverlay = undefined;
     for (const d of this.disposables) d.dispose();
     this.disposables.length = 0;
   }
@@ -254,6 +259,9 @@ export class TerminalCore {
     terminal.loadAddon(webLinksAddon);
 
     terminal.open(parent);
+
+    this.selectionOverlay = new SelectionOverlayAddon({ isTouchDevice: () => this.isTouchDevice() });
+    terminal.loadAddon(this.selectionOverlay);
     this.registerKeyInterceptor();
     this.registerNativePasteImageHandler();
     this.syncPageBackground();
@@ -279,6 +287,7 @@ export class TerminalCore {
     if (themeColors) {
       this.terminal.options.theme = { ...this.terminal.options.theme, ...themeColors };
     }
+    this.copyOnSelect = profile.copyOnSelect;
     this.syncPageBackground();
     this.fitAddon.fit();
   }
@@ -500,10 +509,12 @@ export class TerminalCore {
       },
       onDoubleTapDefault: (clientX, clientY) => {
         this.dispatchTouchMultiClick(2, clientX, clientY);
+        requestAnimationFrame(() => this.selectionOverlay?.show());
       },
       onTripleTapDefault: (clientX, clientY) => {
         if (!this.modifierSource) {
           this.dispatchTouchMultiClick(3, clientX, clientY);
+          requestAnimationFrame(() => this.selectionOverlay?.show());
           return;
         }
         const selectVisible = this.modifierSource.consumeModifierForTapSelection('shift');
@@ -515,6 +526,7 @@ export class TerminalCore {
         } else {
           this.dispatchTouchMultiClick(3, clientX, clientY);
         }
+        requestAnimationFrame(() => this.selectionOverlay?.show());
       },
     }, this.computeContinuousScrollGestures());
   }
@@ -610,19 +622,28 @@ export class TerminalCore {
   }
 
   private onSelectionChange() {
-    if (this.modifierSource) return;
+    if (!this.copyOnSelect) return;
 
-    const selection = this.terminal?.getSelection() ?? '';
+    const selection = this.terminal.getSelection();
     if (selection === '') return;
+
+    void this.autoCopySelection(selection);
+  }
+
+  private async autoCopySelection(text: string): Promise<void> {
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        this.overlayAddon.showOverlay('\u2702', 300);
+        return;
+      } catch { /* fall through to execCommand */ }
+    }
+
     let copied = false;
     try {
       copied = typeof document.execCommand === 'function' && document.execCommand('copy');
     } catch { /* ignore */ }
-    if (copied) {
-      this.overlayAddon?.showOverlay('\u2702', 300);
-      return;
-    }
-    this.overlayAddon?.showOverlay('Copy failed', 700);
+    this.overlayAddon.showOverlay(copied ? '\u2702' : 'Copy failed', copied ? 300 : 700);
   }
 
   /** Capture-phase paste listener: intercepts images from native paste events. */

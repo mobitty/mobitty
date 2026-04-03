@@ -57,6 +57,7 @@ export const DEFAULT_PROFILE: Profile = {
   optionIsMeta: true,
   notificationMode: 'ghostty',
   remoteEditor: false,
+  copyOnSelect: false,
 };
 
 // ── localStorage ─────────────────────────────────────────────────────────────

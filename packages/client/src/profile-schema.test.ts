@@ -10,7 +10,7 @@ function validThemeMap() {
 }
 
 function validCandidate(): Record<string, unknown> {
-  return { name: 'test', fontSize: { mobile: 14, desktop: 14 }, fontFamily: 'monospace', theme: validThemeMap(), scrollback: 5000, padding: { mobile: 4, desktop: 4 }, optionIsMeta: true, notificationMode: 'ghostty' };
+  return { name: 'test', fontSize: { mobile: 14, desktop: 14 }, fontFamily: 'monospace', theme: validThemeMap(), scrollback: 5000, padding: { mobile: 4, desktop: 4 }, optionIsMeta: true, notificationMode: 'ghostty', remoteEditor: false, copyOnSelect: false };
 }
 
 describe('validateProfileFields', () => {
