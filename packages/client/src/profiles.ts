@@ -55,7 +55,7 @@ export const DEFAULT_PROFILE: Profile = {
   softkeySettings: DEFAULT_SOFTKEY_SETTINGS,
   imagePasteDir: 'tmp',
   optionIsMeta: true,
-  notificationMode: 'iterm',
+  notificationMode: 'ghostty',
   remoteEditor: false,
 };
 

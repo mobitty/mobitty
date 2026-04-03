@@ -284,7 +284,7 @@ export const PROFILE_FIELD_RULES: Readonly<Record<string, FieldRule>> = {
   },
   notificationMode: {
     type: 'enum',
-    default: 'iterm',
+    default: 'ghostty',
     values: ['iterm', 'kitty', 'ghostty', 'off'] as const,
     errors: {
       invalid: 'Must be iterm, kitty, ghostty, or off',

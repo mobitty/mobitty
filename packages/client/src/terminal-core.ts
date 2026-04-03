@@ -136,7 +136,7 @@ export class TerminalCore {
   private softkeySettings: Record<string, SoftkeyKeySettings> = {};
   private scrollback: number;
   private imagePasteDir?: string;
-  private notificationMode: 'iterm' | 'kitty' | 'ghostty' | 'off' = 'iterm';
+  private notificationMode: 'iterm' | 'kitty' | 'ghostty' | 'off' = 'ghostty';
   private remoteEditor = false;
   private themeForeground?: string;
   private themeBackground?: string;

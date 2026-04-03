@@ -100,7 +100,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
   const [sessionSwitcherHotkey, setSessionSwitcherHotkey] = useState('');
   const [imagePasteDir, setImagePasteDir] = useState('tmp');
   const [optionIsMeta, setOptionIsMeta] = useState(true);
-  const [notificationMode, setNotificationMode] = useState<'iterm' | 'kitty' | 'ghostty' | 'off'>('iterm');
+  const [notificationMode, setNotificationMode] = useState<'iterm' | 'kitty' | 'ghostty' | 'off'>('ghostty');
   const [remoteEditor, setRemoteEditor] = useState(false);
   const [hotkeyError, setHotkeyError] = useState<string | undefined>();
   const [status, setStatus] = useState('');
