@@ -375,6 +375,9 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         editorEnv['VISUAL'] = EDITOR_BIN_PATH;
         editorEnv['MOBITTY_EDITOR_PORT'] = String(state.config.port);
         editorEnv['MOBITTY_EDITOR_HOST'] = state.config.host;
+        if (state.config.tls) {
+          editorEnv['MOBITTY_EDITOR_TLS'] = '1';
+        }
       }
 
       // Try to attach to existing session

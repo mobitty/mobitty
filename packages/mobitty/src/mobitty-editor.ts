@@ -6,7 +6,8 @@
 // finishes editing in the browser, then writes the result back.
 
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
-import { request } from 'node:http';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
 import { resolve } from 'node:path';
 
 function fail(msg: string): never {
@@ -17,6 +18,7 @@ function fail(msg: string): never {
 const sessionId = process.env['MOBITTY_SESSION_ID'];
 const port = process.env['MOBITTY_EDITOR_PORT'];
 const host = process.env['MOBITTY_EDITOR_HOST'] ?? '127.0.0.1';
+const useTls = process.env['MOBITTY_EDITOR_TLS'] === '1';
 const rawPath = process.argv[2];
 
 if (!sessionId || !port || !rawPath) {
@@ -31,6 +33,7 @@ if (existsSync(filePath)) {
 
 const postData = JSON.stringify({ filePath, content });
 
+const request = useTls ? httpsRequest : httpRequest;
 const req = request(
   {
     hostname: host,
@@ -41,6 +44,7 @@ const req = request(
       'Content-Type': 'application/json',
       'Content-Length': Buffer.byteLength(postData),
     },
+    rejectUnauthorized: false,
   },
   (res) => {
     const chunks: Buffer[] = [];
