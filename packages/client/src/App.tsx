@@ -10,8 +10,8 @@ import { SessionPanel } from '@/components/SessionPanel';
 import { SystemMeterPanel } from '@/components/SystemMeterPanel';
 import { SystemMetrics } from '@/system-metrics';
 import type { TerminalCoreOptions, TerminalCoreCallbacks, ImagePasteErrorInfo } from '@/terminal-core';
-import type { Profile, ProfileTheme, ProfileThemeMap } from '@/profiles';
-import { fetchProfile, getCachedProfile, getSelectedProfileName, setSelectedProfileName, DEFAULT_SCROLLBACK, DEFAULT_PROFILE } from '@/profiles';
+import type { Profile, ProfileTheme } from '@/profiles';
+import { fetchProfile, getCachedProfile, getSelectedProfileName, setSelectedProfileName, DEFAULT_SCROLLBACK, DEFAULT_DESKTOP_PROFILE, DEFAULT_MOBILE_PROFILE } from '@/profiles';
 import { fetchTheme } from '@/themes';
 import {
   DEFAULT_MOBILE_PAGES, DEFAULT_MOBILE_CUSTOM_KEYS, DEFAULT_MOBILE_CONTAINERS, DEFAULT_DESKTOP_PAGES,
@@ -52,8 +52,8 @@ const defaultTheme: ITheme = {
 };
 
 const defaultTermOptions: ITerminalOptions = {
-  fontSize: DEFAULT_PROFILE.fontSize.desktop,
-  fontFamily: DEFAULT_PROFILE.fontFamily,
+  fontSize: DEFAULT_DESKTOP_PROFILE.fontSize,
+  fontFamily: DEFAULT_DESKTOP_PROFILE.fontFamily,
   theme: defaultTheme,
   scrollback: DEFAULT_SCROLLBACK,
   allowProposedApi: true,
@@ -181,8 +181,10 @@ export function App() {
 
   // Load profile on mount (optimistic cache → background reconciliation)
   useEffect(() => {
-    const name = getSelectedProfileName();
+    const device = isMobile ? 'mobile' : 'desktop';
+    const name = getSelectedProfileName(device);
     const cached = getCachedProfile(name);
+    const fallback = isMobile ? DEFAULT_MOBILE_PROFILE : DEFAULT_DESKTOP_PROFILE;
 
     const apply = async (p: Profile) => {
       const option = findFontOption(p.fontFamily);
@@ -206,25 +208,20 @@ export function App() {
     } else {
       // No cache (first load or default profile): blocking fetch
       fetchProfile(name).then(async p => {
-        if (!p) { setProfile(DEFAULT_PROFILE); setProfileReady(true); return; }
+        if (!p) { setProfile(fallback); setProfileReady(true); return; }
         await apply(p);
-      }).catch(() => { setProfile(DEFAULT_PROFILE); setProfileReady(true); });
+      }).catch(() => { setProfile(fallback); setProfileReady(true); });
     }
   }, []);
 
-  // Fetch theme colors based on device type and OS color scheme.
+  // Fetch theme colors based on OS color scheme.
   // Listens for OS light/dark changes to switch between the appropriate theme slot.
   useEffect(() => {
-    if (!profile?.theme) return;
-
-    const resolveActiveTheme = (themeMap: ProfileThemeMap): string => {
-      const isLight = window.matchMedia('(prefers-color-scheme: light)').matches;
-      if (isMobile) return isLight ? themeMap.mobileLight : themeMap.mobileDark;
-      return isLight ? themeMap.desktopLight : themeMap.desktopDark;
-    };
+    if (!profile) return;
 
     const loadColors = () => {
-      const themeName = resolveActiveTheme(profile.theme);
+      const isLight = window.matchMedia('(prefers-color-scheme: light)').matches;
+      const themeName = isLight ? profile.themeLight : profile.themeDark;
       fetchTheme(themeName).then(theme => {
         if (theme) setThemeColors(theme.colors);
       }).catch(() => {});
@@ -236,16 +233,16 @@ export function App() {
     const handler = () => loadColors();
     mql.addEventListener('change', handler);
     return () => mql.removeEventListener('change', handler);
-  }, [profile?.theme, isMobile]);
+  }, [profile?.themeLight, profile?.themeDark]);
 
   // Apply horizontal padding from profile
   useEffect(() => {
     const root = document.getElementById('root');
     if (!root) return;
-    const px = `${isMobile ? (profile?.padding.mobile ?? 4) : (profile?.padding.desktop ?? 4)}px`;
+    const px = `${profile?.padding ?? 4}px`;
     root.style.paddingLeft = px;
     root.style.paddingRight = px;
-  }, [profile?.padding, isMobile]);
+  }, [profile?.padding]);
 
   // Desktop-only hotkey to toggle session panel
   useEffect(() => {
@@ -294,8 +291,7 @@ export function App() {
   const softkeyConfig = useMemo((): { pages: string[][]; customKeys: SoftkeyCustomKeySpec[]; containers: SoftkeyContainerSpec[] } => {
     const sk = profile?.softkeys;
     if (sk) {
-      const cfg = isMobile ? sk.mobile : sk.desktop;
-      return { pages: cfg.pages, customKeys: cfg.customKeys, containers: cfg.containers ?? [] };
+      return { pages: sk.pages, customKeys: sk.customKeys, containers: sk.containers ?? [] };
     }
     return {
       pages: isMobile ? DEFAULT_MOBILE_PAGES : DEFAULT_DESKTOP_PAGES,
@@ -403,10 +399,11 @@ export function App() {
     };
   }, []);
 
-  const handleApplyProfile = useCallback((p: Profile) => {
-    setProfile(p);
-    setSelectedProfileName(p.name);
-  }, []);
+  const handleApplyProfile = useCallback((p: Profile, device: 'desktop' | 'mobile') => {
+    setSelectedProfileName(device, p.name);
+    // Only update runtime if the applied profile is for the current device
+    if ((device === 'mobile') === isMobile) setProfile(p);
+  }, [isMobile]);
 
 
   const handleContainerToggle = useCallback((containerId: string) => {
@@ -493,7 +490,6 @@ export function App() {
             options={termOptions}
             profile={profile}
             themeColors={themeColors}
-            isMobile={isMobile}
             modifierSource={modifierSource}
             callbacks={termCallbacks}
             gestureMapping={gestureMapping}

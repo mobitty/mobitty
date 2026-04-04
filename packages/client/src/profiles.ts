@@ -5,13 +5,13 @@ import {
 } from './softkey-types';
 import {
   isProfile, isProfileName,
-  DEFAULT_PROFILE_NAME, DEFAULT_SCROLLBACK,
+  DEFAULT_SCROLLBACK,
 } from './profile-schema';
-import type { Profile, ProfileSoftkeys, GestureMapping, SoftkeyKeySettings } from './profile-schema';
+import type { Profile, SoftkeyKeySettings } from './profile-schema';
 
 export type {
-  ProfileTheme, ProfileThemeMap, SoftkeyCustomKeySpec, SoftkeyContainerSpec, SoftkeyConfig,
-  ProfileSoftkeys, GestureMapping, SoftkeyKeySettings, Profile, ProfileFieldName, ProfileFieldErrors,
+  ProfileTheme, SoftkeyCustomKeySpec, SoftkeyContainerSpec, SoftkeyConfig,
+  GestureMapping, SoftkeyKeySettings, Profile, ProfileFieldName, ProfileFieldErrors,
 } from './profile-schema';
 
 export {
@@ -20,39 +20,27 @@ export {
   PROFILE_FIELD_RULES, SOFTKEY_SETTINGS_FIELD_RULES,
   PROFILE_NAME_RE, HEX_COLOR_RE, CUSTOM_KEY_ID_RE,
   BUILTIN_KEY_IDS, VALID_GESTURE_IDS, THEME_KEYS,
-  DEFAULT_PROFILE_NAME, DEFAULT_SCROLLBACK,
+  DEFAULT_PROFILE_NAMES, DEFAULT_SCROLLBACK,
 } from './profile-schema';
 
-// ── Default Profile (single source of truth) ────────────────────────────────
-
-export const DEFAULT_SOFTKEYS: ProfileSoftkeys = {
-  mobile: { pages: DEFAULT_MOBILE_PAGES.map(p => [...p]), customKeys: [...DEFAULT_MOBILE_CUSTOM_KEYS], containers: [...DEFAULT_MOBILE_CONTAINERS] },
-  desktop: { pages: DEFAULT_DESKTOP_PAGES.map(p => [...p]), customKeys: [], containers: [] },
-};
-
-export const DEFAULT_GESTURES: GestureMapping = { ...DEFAULT_GESTURE_MAPPING };
+// ── Default Profiles (single source of truth) ──────────────────────────────
 
 export const DEFAULT_SOFTKEY_SETTINGS: Record<string, SoftkeyKeySettings> = {
   wheel_up: { wheelDelta: 100 },
   wheel_down: { wheelDelta: 100 },
 };
 
-export const DEFAULT_PROFILE: Profile = {
-  name: DEFAULT_PROFILE_NAME,
-  fontSize: { mobile: 10, desktop: 13 },
+export const DEFAULT_DESKTOP_PROFILE: Profile = {
+  name: 'default-desktop',
+  fontSize: 13,
   fontFamily: '"CaskaydiaCove NFM", monospace',
-  theme: {
-    desktopLight: 'default-light',
-    desktopDark: 'default-dark',
-    mobileLight: 'default-light',
-    mobileDark: 'default-dark',
-  },
+  themeLight: 'default-light',
+  themeDark: 'default-dark',
   scrollback: DEFAULT_SCROLLBACK,
-  padding: { mobile: 4, desktop: 4 },
+  padding: 4,
   softkeySize: 44,
-  softkeys: DEFAULT_SOFTKEYS,
-  gestures: DEFAULT_GESTURES,
-  softkeySettings: DEFAULT_SOFTKEY_SETTINGS,
+  softkeys: { pages: DEFAULT_DESKTOP_PAGES.map(p => [...p]), customKeys: [], containers: [] },
+  softkeySettings: { ...DEFAULT_SOFTKEY_SETTINGS },
   imagePasteDir: 'tmp',
   optionIsMeta: true,
   notificationMode: 'ghostty',
@@ -60,23 +48,45 @@ export const DEFAULT_PROFILE: Profile = {
   copyOnSelect: false,
 };
 
+export const DEFAULT_MOBILE_PROFILE: Profile = {
+  name: 'default-mobile',
+  fontSize: 10,
+  fontFamily: '"CaskaydiaCove NFM", monospace',
+  themeLight: 'default-light',
+  themeDark: 'default-dark',
+  scrollback: DEFAULT_SCROLLBACK,
+  padding: 4,
+  softkeySize: 44,
+  softkeys: { pages: DEFAULT_MOBILE_PAGES.map(p => [...p]), customKeys: [...DEFAULT_MOBILE_CUSTOM_KEYS], containers: [...DEFAULT_MOBILE_CONTAINERS] },
+  gestures: { ...DEFAULT_GESTURE_MAPPING },
+  softkeySettings: { ...DEFAULT_SOFTKEY_SETTINGS },
+  imagePasteDir: 'tmp',
+  optionIsMeta: true,
+  notificationMode: 'ghostty',
+  remoteEditor: true,
+  copyOnSelect: false,
+};
+
 // ── localStorage ─────────────────────────────────────────────────────────────
 
-const STORAGE_KEY = 'mobitty-profile';
+const STORAGE_KEY_DESKTOP = 'mobitty-profile-desktop';
+const STORAGE_KEY_MOBILE = 'mobitty-profile-mobile';
 
-export function getSelectedProfileName(): string {
+export function getSelectedProfileName(device: 'desktop' | 'mobile'): string {
+  const key = device === 'desktop' ? STORAGE_KEY_DESKTOP : STORAGE_KEY_MOBILE;
   try {
-    const stored = localStorage.getItem(STORAGE_KEY);
+    const stored = localStorage.getItem(key);
     if (stored !== null && isProfileName(stored)) return stored;
   } catch {
     // localStorage may be unavailable
   }
-  return 'default';
+  return device === 'desktop' ? 'default-desktop' : 'default-mobile';
 }
 
-export function setSelectedProfileName(name: string): void {
+export function setSelectedProfileName(device: 'desktop' | 'mobile', name: string): void {
+  const key = device === 'desktop' ? STORAGE_KEY_DESKTOP : STORAGE_KEY_MOBILE;
   try {
-    localStorage.setItem(STORAGE_KEY, name);
+    localStorage.setItem(key, name);
   } catch {
     // localStorage may be unavailable
   }
@@ -126,33 +136,12 @@ export async function fetchProfileList(): Promise<string[]> {
   return [];
 }
 
-function migrateProfile(data: Record<string, unknown>): void {
-  if (typeof data['theme'] === 'string') {
-    const old = data['theme'];
-    if (old === 'default') {
-      data['theme'] = {
-        desktopLight: 'default-light',
-        desktopDark: 'default-dark',
-        mobileLight: 'default-light',
-        mobileDark: 'default-dark',
-      };
-    } else {
-      data['theme'] = {
-        desktopLight: old,
-        desktopDark: old,
-        mobileLight: old,
-        mobileDark: old,
-      };
-    }
-  }
-}
-
 export async function fetchProfile(name: string): Promise<Profile | undefined> {
-  if (name === DEFAULT_PROFILE_NAME) return DEFAULT_PROFILE;
+  if (name === 'default-desktop') return DEFAULT_DESKTOP_PROFILE;
+  if (name === 'default-mobile') return DEFAULT_MOBILE_PROFILE;
   const resp = await fetch(buildApiUrl(`/api/profiles/${encodeURIComponent(name)}`));
   if (!resp.ok) return undefined;
   const data = await resp.json() as Record<string, unknown>;
-  migrateProfile(data);
   if (isProfile(data)) {
     cacheProfile(data);
     return data;

@@ -40,30 +40,8 @@ export interface SoftkeyConfig {
   containers?: SoftkeyContainerSpec[];
 }
 
-export interface ProfileSoftkeys {
-  mobile: SoftkeyConfig;
-  desktop: SoftkeyConfig;
-}
-
 export interface GestureMapping {
   [key: string]: string;
-}
-
-export interface ProfileFontSize {
-  mobile: number;
-  desktop: number;
-}
-
-export interface ProfilePadding {
-  mobile: number;
-  desktop: number;
-}
-
-export interface ProfileThemeMap {
-  desktopLight: string;
-  desktopDark: string;
-  mobileLight: string;
-  mobileDark: string;
 }
 
 export interface SoftkeyKeySettings {
@@ -72,12 +50,13 @@ export interface SoftkeyKeySettings {
 
 export interface Profile {
   name: string;
-  fontSize: ProfileFontSize;
+  fontSize: number;
   fontFamily: string;
-  theme: ProfileThemeMap;
+  themeLight: string;
+  themeDark: string;
   scrollback: number;
-  padding: ProfilePadding;
-  softkeys?: ProfileSoftkeys;
+  padding: number;
+  softkeys?: SoftkeyConfig;
   softkeySize?: number;
   gestures?: GestureMapping;
   softkeySettings?: Record<string, SoftkeyKeySettings>;
@@ -150,17 +129,7 @@ export const PROFILE_FIELD_RULES: Readonly<Record<string, FieldRule>> = {
       pattern: 'Only letters, numbers, hyphens, and underscores',
     },
   },
-  fontSizeMobile: {
-    type: 'number',
-    default: 10,
-    min: 8,
-    max: 72,
-    errors: {
-      type: 'Must be a number',
-      range: 'Must be between 8 and 72',
-    },
-  },
-  fontSizeDesktop: {
+  fontSize: {
     type: 'number',
     default: 13,
     min: 8,
@@ -179,7 +148,7 @@ export const PROFILE_FIELD_RULES: Readonly<Record<string, FieldRule>> = {
       maxLength: 'Must be 256 characters or fewer',
     },
   },
-  themeDesktopLight: {
+  themeLight: {
     type: 'string',
     default: 'default-light',
     maxLength: 64,
@@ -190,29 +159,7 @@ export const PROFILE_FIELD_RULES: Readonly<Record<string, FieldRule>> = {
       pattern: 'Only letters, numbers, hyphens, and underscores',
     },
   },
-  themeDesktopDark: {
-    type: 'string',
-    default: 'default-dark',
-    maxLength: 64,
-    pattern: /^[a-zA-Z0-9_-]+$/,
-    errors: {
-      required: 'Theme is required',
-      maxLength: 'Must be 64 characters or fewer',
-      pattern: 'Only letters, numbers, hyphens, and underscores',
-    },
-  },
-  themeMobileLight: {
-    type: 'string',
-    default: 'default-light',
-    maxLength: 64,
-    pattern: /^[a-zA-Z0-9_-]+$/,
-    errors: {
-      required: 'Theme is required',
-      maxLength: 'Must be 64 characters or fewer',
-      pattern: 'Only letters, numbers, hyphens, and underscores',
-    },
-  },
-  themeMobileDark: {
+  themeDark: {
     type: 'string',
     default: 'default-dark',
     maxLength: 64,
@@ -246,17 +193,7 @@ export const PROFILE_FIELD_RULES: Readonly<Record<string, FieldRule>> = {
       range: 'Must be between 28 and 60',
     },
   },
-  paddingMobile: {
-    type: 'number',
-    default: 4,
-    min: 0,
-    max: 48,
-    errors: {
-      type: 'Must be a number',
-      range: 'Must be between 0 and 48',
-    },
-  },
-  paddingDesktop: {
+  padding: {
     type: 'number',
     default: 4,
     min: 0,
@@ -325,7 +262,7 @@ export const SOFTKEY_SETTINGS_FIELD_RULES: Readonly<Record<string, FieldRule>> =
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
-export const DEFAULT_PROFILE_NAME = 'default';
+export const DEFAULT_PROFILE_NAMES = new Set(['default-desktop', 'default-mobile']);
 export const DEFAULT_SCROLLBACK = 5000;
 
 export const PROFILE_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
@@ -388,25 +325,10 @@ export function validateField(rule: FieldRule, value: unknown): string | undefin
 export type ProfileFieldName = keyof typeof PROFILE_FIELD_RULES;
 export type ProfileFieldErrors = Map<ProfileFieldName, string>;
 
-/** Font-size field rules use nested paths instead of top-level candidate keys. */
-const NESTED_FIELD_PATHS: Record<string, [string, string]> = {
-  fontSizeMobile: ['fontSize', 'mobile'],
-  fontSizeDesktop: ['fontSize', 'desktop'],
-  paddingMobile: ['padding', 'mobile'],
-  paddingDesktop: ['padding', 'desktop'],
-  themeDesktopLight: ['theme', 'desktopLight'],
-  themeDesktopDark: ['theme', 'desktopDark'],
-  themeMobileLight: ['theme', 'mobileLight'],
-  themeMobileDark: ['theme', 'mobileDark'],
-};
-
 export function validateProfileFields(candidate: Record<string, unknown>): ProfileFieldErrors {
   const errors: ProfileFieldErrors = new Map();
   for (const [field, rule] of Object.entries(PROFILE_FIELD_RULES)) {
-    const path = NESTED_FIELD_PATHS[field];
-    const value = path
-      ? (candidate[path[0]] as Record<string, unknown> | undefined)?.[path[1]]
-      : candidate[field];
+    const value = candidate[field];
     if ('optional' in rule && rule.optional && value === undefined) continue;
     const error = validateField(rule, value);
     if (error !== undefined) errors.set(field, error);
@@ -489,37 +411,6 @@ function isSoftkeyConfig(obj: unknown, customKeyIds: Set<string>, containerIds: 
   return true;
 }
 
-function isProfileSoftkeys(obj: unknown): obj is ProfileSoftkeys {
-  if (typeof obj !== 'object' || obj === null) return false;
-  const r = obj as Record<string, unknown>;
-  const allCustomIds = new Set<string>();
-  const allContainerIds = new Set<string>();
-  for (const key of ['mobile', 'desktop'] as const) {
-    const cfg = r[key];
-    if (typeof cfg !== 'object' || cfg === null) return false;
-    const cfgRecord = cfg as Record<string, unknown>;
-    if (Array.isArray(cfgRecord['customKeys'])) {
-      for (const ck of cfgRecord['customKeys'] as unknown[]) {
-        if (typeof ck === 'object' && ck !== null) {
-          const id = (ck as Record<string, unknown>)['id'];
-          if (typeof id === 'string') allCustomIds.add(id);
-        }
-      }
-    }
-    if (Array.isArray(cfgRecord['containers'])) {
-      for (const c of cfgRecord['containers'] as unknown[]) {
-        if (typeof c === 'object' && c !== null) {
-          const id = (c as Record<string, unknown>)['id'];
-          if (typeof id === 'string') allContainerIds.add(id);
-        }
-      }
-    }
-  }
-  if (!isSoftkeyConfig(r['mobile'], allCustomIds, allContainerIds)) return false;
-  if (!isSoftkeyConfig(r['desktop'], allCustomIds, allContainerIds)) return false;
-  return true;
-}
-
 // ── Gesture Validation ───────────────────────────────────────────────────────
 
 export function isGestureMapping(obj: unknown, customKeyIds: Set<string>): obj is GestureMapping {
@@ -580,65 +471,26 @@ export function validateHotkeyString(input: string): string | null {
 
 // ── Combined Profile Validation ──────────────────────────────────────────────
 
-function isProfileFontSize(obj: unknown): obj is ProfileFontSize {
-  if (typeof obj !== 'object' || obj === null) return false;
-  const r = obj as Record<string, unknown>;
-  if (typeof r['mobile'] !== 'number' || !Number.isFinite(r['mobile'])) return false;
-  if (r['mobile'] < 8 || r['mobile'] > 72) return false;
-  if (typeof r['desktop'] !== 'number' || !Number.isFinite(r['desktop'])) return false;
-  if (r['desktop'] < 8 || r['desktop'] > 72) return false;
-  return true;
-}
-
-const THEME_MAP_KEYS = ['desktopLight', 'desktopDark', 'mobileLight', 'mobileDark'] as const;
-const THEME_NAME_PATTERN = /^[a-zA-Z0-9_-]+$/;
-
-function isProfileThemeMap(obj: unknown): obj is ProfileThemeMap {
-  if (typeof obj !== 'object' || obj === null) return false;
-  const r = obj as Record<string, unknown>;
-  for (const key of THEME_MAP_KEYS) {
-    const val = r[key];
-    if (typeof val !== 'string' || val.length === 0 || val.length > 64) return false;
-    if (!THEME_NAME_PATTERN.test(val)) return false;
-  }
-  return true;
-}
-
-function isProfilePadding(obj: unknown): obj is ProfilePadding {
-  if (typeof obj !== 'object' || obj === null) return false;
-  const r = obj as Record<string, unknown>;
-  if (typeof r['mobile'] !== 'number' || !Number.isFinite(r['mobile'])) return false;
-  if (r['mobile'] < 0 || r['mobile'] > 48) return false;
-  if (typeof r['desktop'] !== 'number' || !Number.isFinite(r['desktop'])) return false;
-  if (r['desktop'] < 0 || r['desktop'] > 48) return false;
-  return true;
-}
-
-function collectAllKeyIds(softkeys: unknown): { customKeyIds: Set<string>; containerIds: Set<string> } {
+function collectKeyIds(softkeys: unknown): { customKeyIds: Set<string>; containerIds: Set<string> } {
   const customKeyIds = new Set<string>();
   const containerIds = new Set<string>();
   if (typeof softkeys !== 'object' || softkeys === null) return { customKeyIds, containerIds };
-  const sk = softkeys as Record<string, unknown>;
-  for (const key of ['mobile', 'desktop']) {
-    const cfg = sk[key];
-    if (typeof cfg !== 'object' || cfg === null) continue;
-    const cfgRecord = cfg as Record<string, unknown>;
-    const arr = cfgRecord['customKeys'];
-    if (Array.isArray(arr)) {
-      for (const ck of arr) {
-        if (typeof ck === 'object' && ck !== null) {
-          const id = (ck as Record<string, unknown>)['id'];
-          if (typeof id === 'string') customKeyIds.add(id);
-        }
+  const cfg = softkeys as Record<string, unknown>;
+  const arr = cfg['customKeys'];
+  if (Array.isArray(arr)) {
+    for (const ck of arr) {
+      if (typeof ck === 'object' && ck !== null) {
+        const id = (ck as Record<string, unknown>)['id'];
+        if (typeof id === 'string') customKeyIds.add(id);
       }
     }
-    const containers = cfgRecord['containers'];
-    if (Array.isArray(containers)) {
-      for (const c of containers) {
-        if (typeof c === 'object' && c !== null) {
-          const id = (c as Record<string, unknown>)['id'];
-          if (typeof id === 'string') containerIds.add(id);
-        }
+  }
+  const containers = cfg['containers'];
+  if (Array.isArray(containers)) {
+    for (const c of containers) {
+      if (typeof c === 'object' && c !== null) {
+        const id = (c as Record<string, unknown>)['id'];
+        if (typeof id === 'string') containerIds.add(id);
       }
     }
   }
@@ -648,21 +500,17 @@ function collectAllKeyIds(softkeys: unknown): { customKeyIds: Set<string>; conta
 export function isProfile(obj: unknown): obj is Profile {
   if (typeof obj !== 'object' || obj === null) return false;
   const record = obj as Record<string, unknown>;
-  // Schema-driven field validation (skips nested fields — handled below)
   for (const [field, rule] of Object.entries(PROFILE_FIELD_RULES)) {
-    if (field in NESTED_FIELD_PATHS) continue;
     const value = record[field];
     if ('optional' in rule && rule.optional && value === undefined) continue;
     if (validateField(rule, value) !== undefined) return false;
   }
-  // Nested field validation
-  if (!isProfileFontSize(record['fontSize'])) return false;
-  if (!isProfilePadding(record['padding'])) return false;
-  if (!isProfileThemeMap(record['theme'])) return false;
-  // Structural validation
-  if (record['softkeys'] !== undefined && !isProfileSoftkeys(record['softkeys'])) return false;
+  if (record['softkeys'] !== undefined) {
+    const { customKeyIds, containerIds } = collectKeyIds(record['softkeys']);
+    if (!isSoftkeyConfig(record['softkeys'], customKeyIds, containerIds)) return false;
+  }
   if (record['gestures'] !== undefined) {
-    const { customKeyIds } = collectAllKeyIds(record['softkeys']);
+    const { customKeyIds } = collectKeyIds(record['softkeys']);
     if (!isGestureMapping(record['gestures'], customKeyIds)) return false;
   }
   if (record['softkeySettings'] !== undefined && !isSoftkeySettings(record['softkeySettings'])) return false;

@@ -6,17 +6,24 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
+import { Switch } from '@/components/ui/switch';
 import { SoftkeyEditor } from '@/components/SoftkeyEditor';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { CircleHelp, ExternalLink } from 'lucide-react';
 import { GestureEditor } from '@/components/GestureEditor';
 import { SoftkeySettingsEditor } from '@/components/SoftkeySettingsEditor';
-import type { Profile, ProfileTheme, ProfileSoftkeys, SoftkeyConfig, GestureMapping, SoftkeyKeySettings, ProfileFieldErrors, ProfileFieldName } from '@/profiles';
+import type { Profile, ProfileTheme, SoftkeyConfig, GestureMapping, SoftkeyKeySettings, ProfileFieldErrors, ProfileFieldName } from '@/profiles';
 import {
   fetchProfileList, fetchProfile, saveProfile, deleteProfile,
   getSelectedProfileName, setSelectedProfileName, isProfile, validateProfileFields,
-  validateHotkeyString, DEFAULT_SOFTKEYS, DEFAULT_GESTURES, DEFAULT_SOFTKEY_SETTINGS,
+  validateHotkeyString, DEFAULT_SOFTKEY_SETTINGS, DEFAULT_PROFILE_NAMES,
+  DEFAULT_DESKTOP_PROFILE, DEFAULT_MOBILE_PROFILE,
 } from '@/profiles';
+import {
+  DEFAULT_MOBILE_PAGES, DEFAULT_MOBILE_CUSTOM_KEYS,
+  DEFAULT_DESKTOP_PAGES, type SoftkeyCustomKeySpec,
+} from '@/softkey-types';
+import { DEFAULT_GESTURE_MAPPING } from '@/gesture-types';
 import { fetchThemeList, fetchTheme, saveTheme, deleteTheme, isBuiltinTheme, getThemeCredit } from '@/themes';
 import { fetchShells, saveShell, deleteShell, rediscoverShells, type ShellInfo } from '@/shells';
 import { FONT_OPTIONS, CUSTOM_FONT_VALUE, findFontOption, loadFont } from '@/fonts';
@@ -26,6 +33,7 @@ function FieldError({ error }: { error: string | undefined }) {
   return (
     <div className="flex items-start gap-2">
       <span className="min-w-[100px]" />
+      <span className="w-4 shrink-0" />
       <p className="text-destructive text-xs">{error}</p>
     </div>
   );
@@ -69,33 +77,46 @@ const THEME_FIELDS: ReadonlyArray<{ key: keyof ProfileTheme; label: string }> = 
   { key: 'brightWhite', label: 'BrtWhite' },
 ];
 
+function defaultSoftkeyConfig(device: 'desktop' | 'mobile'): SoftkeyConfig {
+  return device === 'desktop' ? DEFAULT_DESKTOP_PROFILE.softkeys! : DEFAULT_MOBILE_PROFILE.softkeys!;
+}
+
+function defaultSoftkeyPages(device: 'desktop' | 'mobile'): string[][] {
+  return device === 'desktop' ? DEFAULT_DESKTOP_PAGES : DEFAULT_MOBILE_PAGES;
+}
+
+function defaultSoftkeyCustomKeys(device: 'desktop' | 'mobile'): SoftkeyCustomKeySpec[] {
+  return device === 'desktop' ? [] : [...DEFAULT_MOBILE_CUSTOM_KEYS];
+}
+
 interface SettingsDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   currentProfile?: Profile;
   isMobile: boolean;
-  onApply: (profile: Profile) => void;
+  onApply: (profile: Profile, device: 'desktop' | 'mobile') => void;
 }
 
 export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, onApply }: SettingsDialogProps) {
   const [profileList, setProfileList] = useState<string[]>([]);
-  const [selectedName, setSelectedName] = useState('default');
+  // Device assignment dropdowns
+  const [desktopProfileName, setDesktopProfileName] = useState(() => getSelectedProfileName('desktop'));
+  const [mobileProfileName, setMobileProfileName] = useState(() => getSelectedProfileName('mobile'));
+  // Which device slot is being edited
+  const [editingDevice, setEditingDevice] = useState<'desktop' | 'mobile'>(isMobile ? 'mobile' : 'desktop');
+
+  // Profile form state (flat)
   const [name, setName] = useState('');
-  const [fontSizeMobile, setFontSizeMobile] = useState('');
-  const [fontSizeDesktop, setFontSizeDesktop] = useState('');
+  const [fontSize, setFontSize] = useState('');
   const [fontFamily, setFontFamily] = useState('');
   const [customFontFamily, setCustomFontFamily] = useState('');
-  const [themeDesktopLight, setThemeDesktopLight] = useState('default-light');
-  const [themeDesktopDark, setThemeDesktopDark] = useState('default-dark');
-  const [themeMobileLight, setThemeMobileLight] = useState('default-light');
-  const [themeMobileDark, setThemeMobileDark] = useState('default-dark');
+  const [themeLight, setThemeLight] = useState('default-light');
+  const [themeDark, setThemeDark] = useState('default-dark');
   const [softkeySize, setSoftkeySize] = useState('');
-  const [generalDeviceTab, setGeneralDeviceTab] = useState<'mobile' | 'desktop'>(isMobile ? 'mobile' : 'desktop');
-  const [paddingMobile, setPaddingMobile] = useState('');
-  const [paddingDesktop, setPaddingDesktop] = useState('');
+  const [padding, setPadding] = useState('');
   const [scrollback, setScrollback] = useState('');
-  const [softkeys, setSoftkeys] = useState<ProfileSoftkeys>(DEFAULT_SOFTKEYS);
-  const [gestures, setGestures] = useState<GestureMapping>({ ...DEFAULT_GESTURES });
+  const [softkeys, setSoftkeys] = useState<SoftkeyConfig>(defaultSoftkeyConfig('desktop'));
+  const [gestures, setGestures] = useState<GestureMapping>({});
   const [softkeySettings, setSoftkeySettings] = useState<Record<string, SoftkeyKeySettings>>({ ...DEFAULT_SOFTKEY_SETTINGS });
   const [sessionSwitcherHotkey, setSessionSwitcherHotkey] = useState('');
   const [imagePasteDir, setImagePasteDir] = useState('tmp');
@@ -127,9 +148,10 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
   const [shellEditName, setShellEditName] = useState('');
   const [shellEditCommand, setShellEditCommand] = useState('');
   const [shellEditEnv, setShellEditEnv] = useState<Array<{ key: string; value: string }>>([]);
-  const [shellEditing, setShellEditing] = useState<string | null>(null); // name of shell being edited, null = adding new
+  const [shellEditing, setShellEditing] = useState<string | null>(null);
 
-  const isDefaultProfile = selectedName === 'default';
+  const editingProfileName = editingDevice === 'desktop' ? desktopProfileName : mobileProfileName;
+  const isDefaultProfile = DEFAULT_PROFILE_NAMES.has(editingProfileName);
   const isReadonlyTheme = isBuiltinTheme(selectedThemeName);
 
   const showStatus = useCallback((msg: string) => {
@@ -149,22 +171,18 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
 
   const populateForm = useCallback((profile: Profile) => {
     setName(profile.name);
-    setFontSizeMobile(String(profile.fontSize.mobile));
-    setFontSizeDesktop(String(profile.fontSize.desktop));
+    setFontSize(String(profile.fontSize));
     setFontFamily(profile.fontFamily);
     if (!findFontOption(profile.fontFamily)) {
       setCustomFontFamily(profile.fontFamily);
     }
-    setThemeDesktopLight(profile.theme.desktopLight);
-    setThemeDesktopDark(profile.theme.desktopDark);
-    setThemeMobileLight(profile.theme.mobileLight);
-    setThemeMobileDark(profile.theme.mobileDark);
+    setThemeLight(profile.themeLight);
+    setThemeDark(profile.themeDark);
     setSoftkeySize(String(profile.softkeySize ?? 44));
-    setPaddingMobile(String(profile.padding.mobile));
-    setPaddingDesktop(String(profile.padding.desktop));
+    setPadding(String(profile.padding));
     setScrollback(String(profile.scrollback));
-    setSoftkeys(profile.softkeys ?? DEFAULT_SOFTKEYS);
-    setGestures(profile.gestures ?? { ...DEFAULT_GESTURES });
+    setSoftkeys(profile.softkeys ?? defaultSoftkeyConfig('desktop'));
+    setGestures(profile.gestures ?? { ...DEFAULT_GESTURE_MAPPING });
     setSoftkeySettings(profile.softkeySettings ?? { ...DEFAULT_SOFTKEY_SETTINGS });
     setSessionSwitcherHotkey(profile.sessionSwitcherHotkey ?? '');
     setImagePasteDir(profile.imagePasteDir ?? 'tmp');
@@ -176,10 +194,10 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
     setFieldErrors(new Map());
   }, []);
 
-  const loadTheme = useCallback(async (name: string) => {
-    const theme = await fetchTheme(name);
+  const loadTheme = useCallback(async (themeName: string) => {
+    const theme = await fetchTheme(themeName);
     if (theme) {
-      setSelectedThemeName(name);
+      setSelectedThemeName(themeName);
       setThemeName(theme.name);
       const c: Record<string, string> = {};
       for (const f of THEME_FIELDS) c[f.key] = theme.colors[f.key];
@@ -192,38 +210,36 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
     if (profile) populateForm(profile);
   }, [populateForm]);
 
-  // On open: refresh lists and load current profile + theme
+  // On open: refresh lists and load the profile for the active device
   useEffect(() => {
     if (!open) return;
     refreshProfileList();
     refreshThemeList();
-    const profileName = getSelectedProfileName();
-    setSelectedName(profileName);
-    if (currentProfile) {
+    const device = isMobile ? 'mobile' : 'desktop';
+    setEditingDevice(device);
+    const desktopName = getSelectedProfileName('desktop');
+    const mobileName = getSelectedProfileName('mobile');
+    setDesktopProfileName(desktopName);
+    setMobileProfileName(mobileName);
+    const activeName = device === 'desktop' ? desktopName : mobileName;
+    if (currentProfile && currentProfile.name === activeName) {
       populateForm(currentProfile);
       const isLight = window.matchMedia('(prefers-color-scheme: light)').matches;
-      const activeTheme = isMobile
-        ? (isLight ? currentProfile.theme.mobileLight : currentProfile.theme.mobileDark)
-        : (isLight ? currentProfile.theme.desktopLight : currentProfile.theme.desktopDark);
-      loadTheme(activeTheme);
+      loadTheme(isLight ? currentProfile.themeLight : currentProfile.themeDark);
     } else {
-      loadProfile(profileName).then(() => {});
+      loadProfile(activeName);
     }
-  }, [open, currentProfile, refreshProfileList, refreshThemeList, populateForm, loadProfile, loadTheme]);
+  }, [open, currentProfile, isMobile, refreshProfileList, refreshThemeList, populateForm, loadProfile, loadTheme]);
 
   const readProfile = (): Profile | undefined => {
     const candidate: Record<string, unknown> = {
       name: name.trim(),
-      fontSize: { mobile: parseInt(fontSizeMobile, 10), desktop: parseInt(fontSizeDesktop, 10) },
+      fontSize: parseInt(fontSize, 10),
       fontFamily: fontFamily.trim(),
-      theme: {
-        desktopLight: themeDesktopLight,
-        desktopDark: themeDesktopDark,
-        mobileLight: themeMobileLight,
-        mobileDark: themeMobileDark,
-      },
+      themeLight,
+      themeDark,
       scrollback: parseInt(scrollback, 10),
-      padding: { mobile: parseInt(paddingMobile, 10), desktop: parseInt(paddingDesktop, 10) },
+      padding: parseInt(padding, 10),
       softkeys,
       softkeySize: parseInt(softkeySize, 10),
       imagePasteDir: imagePasteDir.trim() || undefined,
@@ -255,26 +271,19 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
     return undefined;
   };
 
-  const handleApply = async () => {
+  const handleSave = async () => {
+    if (isDefaultProfile) { showStatus('Cannot modify a default profile'); return; }
     const profile = readProfile();
     if (!profile) { showStatus('Invalid profile data'); return; }
     const option = findFontOption(profile.fontFamily);
     if (option) await loadFont(option);
-    setSelectedProfileName(profile.name);
-    onApply(profile);
-    showStatus('Applied');
-  };
-
-  const handleSave = async () => {
-    if (isDefaultProfile) { showStatus('Cannot modify the default profile'); return; }
-    const profile = readProfile();
-    if (!profile) { showStatus('Invalid profile data'); return; }
     const ok = await saveProfile(profile);
     if (ok) {
-      setSelectedProfileName(profile.name);
-      onApply(profile);
+      // Update the assignment if the profile was renamed
+      if (editingDevice === 'desktop') setDesktopProfileName(profile.name);
+      else setMobileProfileName(profile.name);
+      onApply(profile, editingDevice);
       await refreshProfileList();
-      setSelectedName(profile.name);
       showStatus('Saved');
     } else {
       showStatus('Failed to save');
@@ -284,19 +293,21 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
   const handleSaveAsNew = async () => {
     const profile = readProfile();
     if (!profile) { showStatus('Invalid profile data'); return; }
-    if (profile.name === selectedName || profile.name === 'default') {
+    if (profile.name === editingProfileName || DEFAULT_PROFILE_NAMES.has(profile.name)) {
       const newName = prompt('Enter new profile name:', `${profile.name}-copy`);
       if (!newName) return;
       profile.name = newName.trim();
       if (!isProfile(profile)) { showStatus('Invalid profile name'); return; }
     }
+    const option = findFontOption(profile.fontFamily);
+    if (option) await loadFont(option);
     const ok = await saveProfile(profile);
     if (ok) {
       setName(profile.name);
-      setSelectedProfileName(profile.name);
-      onApply(profile);
+      if (editingDevice === 'desktop') setDesktopProfileName(profile.name);
+      else setMobileProfileName(profile.name);
+      onApply(profile, editingDevice);
       await refreshProfileList();
-      setSelectedName(profile.name);
       showStatus(`Saved as "${profile.name}"`);
     } else {
       showStatus('Failed to save');
@@ -304,30 +315,50 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
   };
 
   const handleDelete = async () => {
-    if (!selectedName || selectedName === 'default') {
-      showStatus('Cannot delete the default profile');
+    if (!editingProfileName || DEFAULT_PROFILE_NAMES.has(editingProfileName)) {
+      showStatus('Cannot delete a default profile');
       return;
     }
-    if (!confirm(`Delete profile "${selectedName}"?`)) return;
-    const ok = await deleteProfile(selectedName);
+    if (!confirm(`Delete profile "${editingProfileName}"?`)) return;
+    const ok = await deleteProfile(editingProfileName);
     if (ok) {
-      setSelectedProfileName('default');
+      const defaultName = editingDevice === 'desktop' ? 'default-desktop' : 'default-mobile';
+      setSelectedProfileName(editingDevice, defaultName);
+      if (editingDevice === 'desktop') setDesktopProfileName(defaultName);
+      else setMobileProfileName(defaultName);
       await refreshProfileList();
-      setSelectedName('default');
-      await loadProfile('default');
-      showStatus(`Deleted "${selectedName}"`);
+      await loadProfile(defaultName);
+      showStatus(`Deleted "${editingProfileName}"`);
     } else {
       showStatus('Failed to delete');
     }
   };
 
-  const handleProfileSelect = async (value: string) => {
-    setSelectedName(value);
-    await loadProfile(value);
+  // When user changes the desktop/mobile profile assignment dropdown
+  const handleAssignmentChange = async (device: 'desktop' | 'mobile', profileName: string) => {
+    if (device === 'desktop') setDesktopProfileName(profileName);
+    else setMobileProfileName(profileName);
+    setSelectedProfileName(device, profileName);
+    // If this is the currently-editing device, load the profile into the editor
+    if (device === editingDevice) {
+      await loadProfile(profileName);
+    }
+    // If this device is the current runtime device, apply immediately
+    if ((device === 'mobile') === isMobile) {
+      const profile = await fetchProfile(profileName);
+      if (profile) {
+        const option = findFontOption(profile.fontFamily);
+        if (option) await loadFont(option);
+        onApply(profile, device);
+      }
+    }
   };
 
-  const handleSoftkeyConfigChange = (device: 'mobile' | 'desktop', config: SoftkeyConfig) => {
-    setSoftkeys(prev => ({ ...prev, [device]: config }));
+  // Switch which device slot we're editing
+  const handleEditDevice = async (device: 'desktop' | 'mobile') => {
+    setEditingDevice(device);
+    const profileName = device === 'desktop' ? desktopProfileName : mobileProfileName;
+    await loadProfile(profileName);
   };
 
   // --- Theme tab handlers ---
@@ -466,33 +497,59 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
 
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto px-4 py-4">
+        {/* Device profile assignment */}
+        <div className="space-y-2 mb-4">
+          <div className="flex items-center gap-2">
+            <Label className="min-w-[100px] text-xs text-muted-foreground">Desktop Profile</Label>
+            <Select value={desktopProfileName} onValueChange={v => handleAssignmentChange('desktop', v)}>
+              <SelectTrigger className="flex-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {profileList.map(n => <SelectItem key={n} value={n}>{n}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2">
+            <Label className="min-w-[100px] text-xs text-muted-foreground">Mobile Profile</Label>
+            <Select value={mobileProfileName} onValueChange={v => handleAssignmentChange('mobile', v)}>
+              <SelectTrigger className="flex-1">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {profileList.map(n => <SelectItem key={n} value={n}>{n}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <Separator className="mb-4" />
+
+        {/* Profile editor device tabs */}
+        <div className="flex items-center gap-2 mb-4">
+          <Tabs value={editingDevice} onValueChange={v => handleEditDevice(v as 'desktop' | 'mobile')}>
+            <TabsList>
+              <TabsTrigger value="desktop">Desktop</TabsTrigger>
+              <TabsTrigger value="mobile">Mobile</TabsTrigger>
+            </TabsList>
+          </Tabs>
+          <span className="text-xs text-muted-foreground ml-2">Editing: {editingProfileName}</span>
+        </div>
+
         <Tabs defaultValue="general">
           <TabsList>
             <TabsTrigger value="general">General</TabsTrigger>
             <TabsTrigger value="shells">Shells</TabsTrigger>
             <TabsTrigger value="softkeys">Softkeys</TabsTrigger>
-            <TabsTrigger value="gestures">Gestures</TabsTrigger>
+            {editingDevice === 'mobile' && <TabsTrigger value="gestures">Gestures</TabsTrigger>}
             <TabsTrigger value="themes">Themes</TabsTrigger>
           </TabsList>
 
           <TabsContent value="general" className="space-y-4 mt-4">
-            {/* Profile selector */}
-            <div className="flex items-center gap-2">
-              <Label className="min-w-[100px] text-xs text-muted-foreground">Profile</Label>
-              <Select value={selectedName} onValueChange={handleProfileSelect}>
-                <SelectTrigger className="flex-1">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {profileList.map(n => <SelectItem key={n} value={n}>{n}</SelectItem>)}
-                </SelectContent>
-              </Select>
-              <Button variant="destructive" size="sm" onClick={handleDelete} disabled={isDefaultProfile}>Delete</Button>
-            </div>
-
             {/* Name */}
             <div className="flex items-center gap-2">
               <Label className="min-w-[100px] text-xs text-muted-foreground">Name</Label>
+              <HelpTip>Profile name. Only letters, numbers, hyphens, and underscores.</HelpTip>
               <Input
                 value={name}
                 onChange={e => { setName(e.target.value); clearFieldError('name'); }}
@@ -500,12 +557,14 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
                 disabled={isDefaultProfile}
                 aria-invalid={fieldErrors.has('name') || undefined}
               />
+              <Button variant="destructive" size="sm" onClick={handleDelete} disabled={isDefaultProfile}>Delete</Button>
             </div>
             <FieldError error={fieldErrors.get('name')} />
 
             {/* Font family */}
             <div className="flex items-center gap-2">
               <Label className="min-w-[100px] text-xs text-muted-foreground">Font Family</Label>
+              <HelpTip>Font used for terminal text rendering.</HelpTip>
               <Select
                 value={findFontOption(fontFamily)?.fontFamily ?? CUSTOM_FONT_VALUE}
                 onValueChange={value => {
@@ -533,6 +592,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
             {!findFontOption(fontFamily) && (
               <div className="flex items-center gap-2">
                 <Label className="min-w-[100px] text-xs text-muted-foreground" />
+                <span className="w-4 shrink-0" />
                 <Input
                   value={customFontFamily}
                   onChange={e => { setCustomFontFamily(e.target.value); setFontFamily(e.target.value); clearFieldError('fontFamily'); }}
@@ -543,48 +603,36 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
             )}
             <FieldError error={fieldErrors.get('fontFamily')} />
 
-            {/* Device-specific settings */}
-            <Tabs value={generalDeviceTab} onValueChange={v => setGeneralDeviceTab(v as 'mobile' | 'desktop')}>
-              <TabsList>
-                <TabsTrigger value="mobile">Mobile</TabsTrigger>
-                <TabsTrigger value="desktop">Desktop</TabsTrigger>
-              </TabsList>
-            </Tabs>
-
             {/* Font size */}
             <div className="flex items-center gap-2">
               <Label className="min-w-[100px] text-xs text-muted-foreground">Font Size</Label>
+              <HelpTip>Terminal font size in pixels. Range: 8–72.</HelpTip>
               <Input
                 type="number" min="8" max="72"
-                value={generalDeviceTab === 'mobile' ? fontSizeMobile : fontSizeDesktop}
-                onChange={e => {
-                  if (generalDeviceTab === 'mobile') { setFontSizeMobile(e.target.value); clearFieldError('fontSizeMobile'); }
-                  else { setFontSizeDesktop(e.target.value); clearFieldError('fontSizeDesktop'); }
-                }}
-                aria-invalid={fieldErrors.has(generalDeviceTab === 'mobile' ? 'fontSizeMobile' : 'fontSizeDesktop') || undefined}
+                value={fontSize}
+                onChange={e => { setFontSize(e.target.value); clearFieldError('fontSize'); }}
+                aria-invalid={fieldErrors.has('fontSize') || undefined}
               />
             </div>
-            <FieldError error={fieldErrors.get(generalDeviceTab === 'mobile' ? 'fontSizeMobile' : 'fontSizeDesktop')} />
+            <FieldError error={fieldErrors.get('fontSize')} />
 
             {/* Padding */}
             <div className="flex items-center gap-2">
               <Label className="min-w-[100px] text-xs text-muted-foreground">Padding</Label>
+              <HelpTip>Left and right padding of the application in pixels.</HelpTip>
               <Input
                 type="number" min="0" max="48"
-                value={generalDeviceTab === 'mobile' ? paddingMobile : paddingDesktop}
-                onChange={e => {
-                  if (generalDeviceTab === 'mobile') { setPaddingMobile(e.target.value); clearFieldError('paddingMobile'); }
-                  else { setPaddingDesktop(e.target.value); clearFieldError('paddingDesktop'); }
-                }}
-                aria-invalid={fieldErrors.has(generalDeviceTab === 'mobile' ? 'paddingMobile' : 'paddingDesktop') || undefined}
+                value={padding}
+                onChange={e => { setPadding(e.target.value); clearFieldError('padding'); }}
+                aria-invalid={fieldErrors.has('padding') || undefined}
               />
-              <HelpTip>Left and right padding of the application in pixels.</HelpTip>
             </div>
-            <FieldError error={fieldErrors.get(generalDeviceTab === 'mobile' ? 'paddingMobile' : 'paddingDesktop')} />
+            <FieldError error={fieldErrors.get('padding')} />
 
             {/* Key size */}
             <div className="flex items-center gap-2">
               <Label className="min-w-[100px] text-xs text-muted-foreground">Key Size</Label>
+              <HelpTip>Height of softkey buttons in pixels. Range: 28–60.</HelpTip>
               <Input
                 type="number" min="28" max="60" step="2"
                 value={softkeySize}
@@ -597,44 +645,45 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
             {/* Scrollback */}
             <div className="flex items-center gap-2">
               <Label className="min-w-[100px] text-xs text-muted-foreground">Scrollback</Label>
+              <HelpTip>Number of lines of terminal history to keep. Higher values use more memory. Range: 100–50,000.</HelpTip>
               <Input
                 type="number" min="100" max="50000" step="100" value={scrollback}
                 onChange={e => { setScrollback(e.target.value); clearFieldError('scrollback'); }}
                 aria-invalid={fieldErrors.has('scrollback') || undefined}
               />
-              <HelpTip>Number of lines of terminal history to keep. Higher values use more memory. Range: 100–50,000.</HelpTip>
             </div>
             <FieldError error={fieldErrors.get('scrollback')} />
 
             {/* Image paste directory */}
             <div className="flex items-center gap-2">
-              <Label className="min-w-[72px] text-xs text-muted-foreground">Img Paste Dir</Label>
+              <Label className="min-w-[100px] text-xs text-muted-foreground">Img Paste Dir</Label>
+              <HelpTip>Relative directory for image paste file fallback. Resolved from the shell's CWD at paste time.</HelpTip>
               <Input
                 value={imagePasteDir}
                 onChange={e => { setImagePasteDir(e.target.value); clearFieldError('imagePasteDir'); }}
                 placeholder="tmp"
                 aria-invalid={fieldErrors.has('imagePasteDir') || undefined}
               />
-              <HelpTip>Relative directory for image paste file fallback. Resolved from the shell's CWD at paste time.</HelpTip>
             </div>
             <FieldError error={fieldErrors.get('imagePasteDir')} />
 
             {/* Session switcher hotkey (desktop only) */}
-            {!isMobile && (
+            {editingDevice === 'desktop' && (
               <>
                 <div className="flex items-center gap-2">
                   <Label className="min-w-[100px] text-xs text-muted-foreground">Hotkey</Label>
+                  <HelpTip>Keyboard shortcut to toggle the session panel. Format: Ctrl+Shift+s. Leave empty to disable.</HelpTip>
                   <Input
                     value={sessionSwitcherHotkey}
                     onChange={e => { setSessionSwitcherHotkey(e.target.value); setHotkeyError(undefined); }}
                     placeholder="Ctrl+Shift+s"
                     aria-invalid={!!hotkeyError || undefined}
                   />
-                  <HelpTip>Keyboard shortcut to toggle the session panel. Format: Ctrl+Shift+s. Leave empty to disable.</HelpTip>
                 </div>
                 {hotkeyError && (
                   <div className="flex items-start gap-2">
                     <span className="min-w-[100px]" />
+                    <span className="w-4 shrink-0" />
                     <p className="text-destructive text-xs">{hotkeyError}</p>
                   </div>
                 )}
@@ -644,42 +693,37 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
             {/* Option as Meta (macOS) */}
             <div className="flex items-center gap-2">
               <Label className="min-w-[100px] text-xs text-muted-foreground">Option as Meta</Label>
-              <input
-                type="checkbox"
-                checked={optionIsMeta}
-                onChange={e => setOptionIsMeta(e.target.checked)}
-                className="accent-primary"
-              />
               <HelpTip>Send ESC+key for Option shortcuts (macOS)</HelpTip>
+              <Switch
+                checked={optionIsMeta}
+                onCheckedChange={setOptionIsMeta}
+              />
             </div>
 
             {/* Remote Editor */}
             <div className="flex items-center gap-2">
               <Label className="min-w-[100px] text-xs text-muted-foreground">Remote Editor</Label>
-              <input
-                type="checkbox"
-                checked={remoteEditor}
-                onChange={e => setRemoteEditor(e.target.checked)}
-                className="accent-primary"
-              />
               <HelpTip>Allow programs (e.g. Claude Code) to open files in the browser for editing via $EDITOR/$VISUAL. Applies to new sessions only.</HelpTip>
+              <Switch
+                checked={remoteEditor}
+                onCheckedChange={setRemoteEditor}
+              />
             </div>
 
             {/* Copy on Select */}
             <div className="flex items-center gap-2">
               <Label className="min-w-[100px] text-xs text-muted-foreground">Copy on Select</Label>
-              <input
-                type="checkbox"
-                checked={copyOnSelect}
-                onChange={e => setCopyOnSelect(e.target.checked)}
-                className="accent-primary"
-              />
               <HelpTip>Automatically copy text to clipboard when selected in the terminal</HelpTip>
+              <Switch
+                checked={copyOnSelect}
+                onCheckedChange={setCopyOnSelect}
+              />
             </div>
 
             {/* Notification mode */}
             <div className="flex items-center gap-2">
               <Label className="min-w-[100px] text-xs text-muted-foreground">Notifications</Label>
+              <HelpTip>Terminal notification emulation. Sets TERM_PROGRAM so programs send notifications via the selected protocol. Applies to new sessions only.</HelpTip>
               <Select value={notificationMode} onValueChange={v => setNotificationMode(v as 'iterm' | 'kitty' | 'ghostty' | 'off')}>
                 <SelectTrigger className="flex-1">
                   <SelectValue />
@@ -691,7 +735,6 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
                   <SelectItem value="off">Off</SelectItem>
                 </SelectContent>
               </Select>
-              <HelpTip>Terminal notification emulation. Sets TERM_PROGRAM so programs send notifications via the selected protocol. Applies to new sessions only.</HelpTip>
             </div>
 
           </TabsContent>
@@ -806,8 +849,9 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
           <TabsContent value="softkeys" className="space-y-4 mt-4">
             <SoftkeyEditor
               softkeys={softkeys}
-              isMobile={isMobile}
-              onChange={handleSoftkeyConfigChange}
+              onChange={setSoftkeys}
+              defaultPages={defaultSoftkeyPages(editingDevice)}
+              defaultCustomKeys={defaultSoftkeyCustomKeys(editingDevice)}
             />
             <Separator />
             <SoftkeySettingsEditor
@@ -816,22 +860,22 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
             />
           </TabsContent>
 
-          <TabsContent value="gestures" className="space-y-4 mt-4">
-            <GestureEditor
-              gestures={gestures}
-              customKeys={softkeys[isMobile ? 'mobile' : 'desktop'].customKeys}
-              onChange={setGestures}
-            />
-          </TabsContent>
+          {editingDevice === 'mobile' && (
+            <TabsContent value="gestures" className="space-y-4 mt-4">
+              <GestureEditor
+                gestures={gestures}
+                customKeys={softkeys.customKeys}
+                onChange={setGestures}
+              />
+            </TabsContent>
+          )}
 
           <TabsContent value="themes" className="space-y-4 mt-4">
             {/* Profile theme assignments */}
             <Label className="text-xs text-muted-foreground block">Profile Themes</Label>
             {([
-              ['Desktop Light', themeDesktopLight, setThemeDesktopLight, 'themeDesktopLight'] as const,
-              ['Desktop Dark', themeDesktopDark, setThemeDesktopDark, 'themeDesktopDark'] as const,
-              ['Mobile Light', themeMobileLight, setThemeMobileLight, 'themeMobileLight'] as const,
-              ['Mobile Dark', themeMobileDark, setThemeMobileDark, 'themeMobileDark'] as const,
+              ['Light Theme', themeLight, setThemeLight, 'themeLight'] as const,
+              ['Dark Theme', themeDark, setThemeDark, 'themeDark'] as const,
             ]).map(([label, value, setter, field]) => (
               <div key={field}>
                 <div className="flex items-center gap-2">
@@ -929,8 +973,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
           <span className="text-xs text-primary mr-auto">{status}</span>
         )}
         <Button variant="outline" size="sm" onClick={handleSaveAsNew}>Save As New</Button>
-        <Button variant="outline" size="sm" onClick={handleSave} disabled={isDefaultProfile}>Save</Button>
-        <Button size="sm" onClick={handleApply}>Apply</Button>
+        <Button size="sm" onClick={handleSave} disabled={isDefaultProfile}>Save</Button>
       </div>
     </div>
   );

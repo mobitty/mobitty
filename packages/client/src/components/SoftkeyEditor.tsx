@@ -1,18 +1,18 @@
 import { useState, useEffect, useCallback } from 'react';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Separator } from '@/components/ui/separator';
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@/components/ui/select';
-import type { ProfileSoftkeys, SoftkeyConfig, SoftkeyCustomKeySpec, SoftkeyContainerSpec } from '@/profiles';
-import { KEY_REGISTRY, BUILTIN_KEY_IDS, DEFAULT_MOBILE_PAGES, DEFAULT_MOBILE_CUSTOM_KEYS, DEFAULT_DESKTOP_PAGES, validateComboString, comboToDisplayString } from '@/softkey-types';
+import type { SoftkeyConfig, SoftkeyCustomKeySpec, SoftkeyContainerSpec } from '@/profiles';
+import { KEY_REGISTRY, BUILTIN_KEY_IDS, validateComboString, comboToDisplayString } from '@/softkey-types';
 
 interface SoftkeyEditorProps {
-  softkeys: ProfileSoftkeys;
-  isMobile: boolean;
-  onChange: (device: 'mobile' | 'desktop', config: SoftkeyConfig) => void;
+  softkeys: SoftkeyConfig;
+  onChange: (config: SoftkeyConfig) => void;
+  defaultPages: string[][];
+  defaultCustomKeys: SoftkeyCustomKeySpec[];
 }
 
 function getAllAvailableKeyIds(customKeys: SoftkeyCustomKeySpec[], containers?: SoftkeyContainerSpec[]): string[] {
@@ -442,22 +442,20 @@ function ContainerKeyEditor({ containers, allKeyIds, customKeys, onChange }: Con
 
 // --- Main SoftkeyEditor ---
 
-export function SoftkeyEditor({ softkeys, isMobile, onChange }: SoftkeyEditorProps) {
-  const [deviceTab, setDeviceTab] = useState<'mobile' | 'desktop'>(isMobile ? 'mobile' : 'desktop');
-
-  const config = softkeys[deviceTab];
+export function SoftkeyEditor({ softkeys, onChange, defaultPages, defaultCustomKeys }: SoftkeyEditorProps) {
+  const config = softkeys;
 
   const updatePages = useCallback((pages: string[][]) => {
-    onChange(deviceTab, { ...config, pages });
-  }, [deviceTab, config, onChange]);
+    onChange({ ...config, pages });
+  }, [config, onChange]);
 
   const updateCustomKeys = useCallback((customKeys: SoftkeyCustomKeySpec[]) => {
-    onChange(deviceTab, { ...config, customKeys });
-  }, [deviceTab, config, onChange]);
+    onChange({ ...config, customKeys });
+  }, [config, onChange]);
 
   const updateContainers = useCallback((containers: SoftkeyContainerSpec[]) => {
-    onChange(deviceTab, { ...config, containers });
-  }, [deviceTab, config, onChange]);
+    onChange({ ...config, containers });
+  }, [config, onChange]);
 
   const addPage = () => {
     updatePages([...config.pages, []]);
@@ -474,22 +472,13 @@ export function SoftkeyEditor({ softkeys, isMobile, onChange }: SoftkeyEditorPro
   };
 
   const resetDefaults = () => {
-    const defaults = deviceTab === 'mobile' ? DEFAULT_MOBILE_PAGES : DEFAULT_DESKTOP_PAGES;
-    const defaultCustomKeys = deviceTab === 'mobile' ? [...DEFAULT_MOBILE_CUSTOM_KEYS] : [];
-    onChange(deviceTab, { pages: defaults.map(p => [...p]), customKeys: defaultCustomKeys, containers: [] });
+    onChange({ pages: defaultPages.map(p => [...p]), customKeys: [...defaultCustomKeys], containers: [] });
   };
 
   const allKeyIds = getAllAvailableKeyIds(config.customKeys, config.containers);
 
   return (
     <div className="space-y-4">
-      <Tabs value={deviceTab} onValueChange={v => setDeviceTab(v as 'mobile' | 'desktop')}>
-        <TabsList>
-          <TabsTrigger value="mobile">Mobile</TabsTrigger>
-          <TabsTrigger value="desktop">Desktop</TabsTrigger>
-        </TabsList>
-      </Tabs>
-
       {/* Pages */}
       <div className="space-y-2">
         {config.pages.map((page, idx) => (

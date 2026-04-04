@@ -268,9 +268,8 @@ export class TerminalCore {
     fitAddon.fit();
   }
 
-  applyProfile(profile: Profile, themeColors?: ProfileTheme, isMobile?: boolean): void {
-    const fontSize = isMobile ? profile.fontSize.mobile : profile.fontSize.desktop;
-    this.options.termOptions.fontSize = fontSize;
+  applyProfile(profile: Profile, themeColors?: ProfileTheme): void {
+    this.options.termOptions.fontSize = profile.fontSize;
     this.options.termOptions.fontFamily = profile.fontFamily;
     this.options.termOptions.scrollback = profile.scrollback;
     this.options.termOptions.macOptionIsMeta = profile.optionIsMeta;
@@ -279,7 +278,7 @@ export class TerminalCore {
       this.themeForeground = themeColors.foreground;
       this.themeBackground = themeColors.background;
     }
-    this.terminal.options.fontSize = fontSize;
+    this.terminal.options.fontSize = profile.fontSize;
     this.terminal.options.fontFamily = profile.fontFamily;
     this.terminal.options.scrollback = profile.scrollback;
     this.terminal.options.macOptionIsMeta = profile.optionIsMeta;

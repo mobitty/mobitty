@@ -4,7 +4,7 @@ import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { brotliCompressSync, gzipSync, constants } from 'node:zlib';
-import type { ProfileStore } from './profiles.ts';
+import { type ProfileStore, DEFAULT_PROFILE_NAMES } from './profiles.ts';
 import { type ThemeStore, BUILTIN_THEME_NAMES } from './themes.ts';
 import type { ShellStore } from './shells.ts';
 import type { SessionRegistry } from './sessions.ts';
@@ -136,8 +136,8 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
     }
 
     if (method === 'PUT') {
-      if (profileName === 'default') {
-        jsonResponse(res, 400, { error: 'Cannot modify the default profile' });
+      if (DEFAULT_PROFILE_NAMES.has(profileName)) {
+        jsonResponse(res, 400, { error: 'Cannot modify a default profile' });
         return;
       }
       readBody(req).then(body => {
@@ -157,8 +157,8 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
     }
 
     if (method === 'DELETE') {
-      if (profileName === 'default') {
-        jsonResponse(res, 400, { error: 'Cannot delete the default profile' });
+      if (DEFAULT_PROFILE_NAMES.has(profileName)) {
+        jsonResponse(res, 400, { error: 'Cannot delete a default profile' });
         return;
       }
       const deleted = profileStore.delete(profileName);

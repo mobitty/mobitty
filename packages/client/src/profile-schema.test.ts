@@ -5,12 +5,8 @@ import {
   isProfile, isProfileTheme, validateHotkeyString,
 } from './profile-schema.ts';
 
-function validThemeMap() {
-  return { desktopLight: 'default-light', desktopDark: 'default-dark', mobileLight: 'default-light', mobileDark: 'default-dark' };
-}
-
 function validCandidate(): Record<string, unknown> {
-  return { name: 'test', fontSize: { mobile: 14, desktop: 14 }, fontFamily: 'monospace', theme: validThemeMap(), scrollback: 5000, padding: { mobile: 4, desktop: 4 }, optionIsMeta: true, notificationMode: 'ghostty', remoteEditor: false, copyOnSelect: false };
+  return { name: 'test', fontSize: 14, fontFamily: 'monospace', themeLight: 'default-light', themeDark: 'default-dark', scrollback: 5000, padding: 4, optionIsMeta: true, notificationMode: 'ghostty', remoteEditor: false, copyOnSelect: false };
 }
 
 describe('validateProfileFields', () => {
@@ -43,42 +39,23 @@ describe('validateProfileFields', () => {
     assert.equal(validateProfileFields(c).get('name'), 'Must be 64 characters or fewer');
   });
 
-  // fontSize (mobile)
-  it('errors on NaN fontSizeMobile', () => {
+  // fontSize
+  it('errors on NaN fontSize', () => {
     const c = validCandidate();
-    c['fontSize'] = { mobile: NaN, desktop: 14 };
-    assert.equal(validateProfileFields(c).get('fontSizeMobile'), 'Must be a number');
+    c['fontSize'] = NaN;
+    assert.equal(validateProfileFields(c).get('fontSize'), 'Must be a number');
   });
 
-  it('errors on fontSizeMobile too small', () => {
+  it('errors on fontSize too small', () => {
     const c = validCandidate();
-    c['fontSize'] = { mobile: 5, desktop: 14 };
-    assert.equal(validateProfileFields(c).get('fontSizeMobile'), 'Must be between 8 and 72');
+    c['fontSize'] = 5;
+    assert.equal(validateProfileFields(c).get('fontSize'), 'Must be between 8 and 72');
   });
 
-  it('errors on fontSizeMobile too large', () => {
+  it('errors on fontSize too large', () => {
     const c = validCandidate();
-    c['fontSize'] = { mobile: 100, desktop: 14 };
-    assert.equal(validateProfileFields(c).get('fontSizeMobile'), 'Must be between 8 and 72');
-  });
-
-  // fontSize (desktop)
-  it('errors on NaN fontSizeDesktop', () => {
-    const c = validCandidate();
-    c['fontSize'] = { mobile: 14, desktop: NaN };
-    assert.equal(validateProfileFields(c).get('fontSizeDesktop'), 'Must be a number');
-  });
-
-  it('errors on fontSizeDesktop too small', () => {
-    const c = validCandidate();
-    c['fontSize'] = { mobile: 14, desktop: 5 };
-    assert.equal(validateProfileFields(c).get('fontSizeDesktop'), 'Must be between 8 and 72');
-  });
-
-  it('errors on fontSizeDesktop too large', () => {
-    const c = validCandidate();
-    c['fontSize'] = { mobile: 14, desktop: 100 };
-    assert.equal(validateProfileFields(c).get('fontSizeDesktop'), 'Must be between 8 and 72');
+    c['fontSize'] = 100;
+    assert.equal(validateProfileFields(c).get('fontSize'), 'Must be between 8 and 72');
   });
 
   // fontFamily
@@ -94,17 +71,17 @@ describe('validateProfileFields', () => {
     assert.equal(validateProfileFields(c).get('fontFamily'), 'Must be 256 characters or fewer');
   });
 
-  // theme (nested fields)
-  it('errors on empty themeDesktopLight', () => {
+  // theme
+  it('errors on empty themeLight', () => {
     const c = validCandidate();
-    c['theme'] = { ...validThemeMap(), desktopLight: '' };
-    assert.equal(validateProfileFields(c).get('themeDesktopLight'), 'Theme is required');
+    c['themeLight'] = '';
+    assert.equal(validateProfileFields(c).get('themeLight'), 'Theme is required');
   });
 
-  it('errors on themeDesktopDark with invalid chars', () => {
+  it('errors on themeDark with invalid chars', () => {
     const c = validCandidate();
-    c['theme'] = { ...validThemeMap(), desktopDark: 'my theme!' };
-    assert.equal(validateProfileFields(c).get('themeDesktopDark'), 'Only letters, numbers, hyphens, and underscores');
+    c['themeDark'] = 'my theme!';
+    assert.equal(validateProfileFields(c).get('themeDark'), 'Only letters, numbers, hyphens, and underscores');
   });
 
   // scrollback
@@ -132,6 +109,13 @@ describe('validateProfileFields', () => {
     assert.equal(validateProfileFields(c).get('scrollback'), 'Must be between 100 and 50,000');
   });
 
+  // padding
+  it('errors on padding too small', () => {
+    const c = validCandidate();
+    c['padding'] = -1;
+    assert.equal(validateProfileFields(c).get('padding'), 'Must be between 0 and 48');
+  });
+
   // optional fields — absent is valid
   it('skips optional softkeySize when absent', () => {
     const c = validCandidate();
@@ -149,16 +133,14 @@ describe('validateProfileFields', () => {
   it('returns multiple errors simultaneously', () => {
     const c = validCandidate();
     c['name'] = '';
-    c['fontSize'] = { mobile: NaN, desktop: NaN };
-    c['padding'] = { mobile: -1, desktop: -1 };
+    c['fontSize'] = NaN;
+    c['padding'] = -1;
     c['scrollback'] = -1;
     const errors = validateProfileFields(c);
-    assert.equal(errors.size, 6);
+    assert.equal(errors.size, 4);
     assert.ok(errors.has('name'));
-    assert.ok(errors.has('fontSizeMobile'));
-    assert.ok(errors.has('fontSizeDesktop'));
-    assert.ok(errors.has('paddingMobile'));
-    assert.ok(errors.has('paddingDesktop'));
+    assert.ok(errors.has('fontSize'));
+    assert.ok(errors.has('padding'));
     assert.ok(errors.has('scrollback'));
   });
 });
@@ -169,7 +151,7 @@ describe('validateField', () => {
   });
 
   it('returns undefined for valid number field', () => {
-    assert.equal(validateField(PROFILE_FIELD_RULES['fontSizeMobile']!, 14), undefined);
+    assert.equal(validateField(PROFILE_FIELD_RULES['fontSize']!, 14), undefined);
   });
 
   it('returns undefined for valid optional number field when in range', () => {
@@ -190,10 +172,7 @@ describe('isProfile', () => {
     assert.ok(isProfile({
       ...validCandidate(),
       softkeySize: 44,
-      softkeys: {
-        mobile: { pages: [['esc']], customKeys: [], containers: [] },
-        desktop: { pages: [], customKeys: [], containers: [] },
-      },
+      softkeys: { pages: [['esc']], customKeys: [], containers: [] },
       gestures: { 'long-press': 'esc' },
     }));
   });
@@ -202,28 +181,24 @@ describe('isProfile', () => {
     assert.ok(!isProfile(null));
   });
 
-  it('rejects fontSize as a plain number', () => {
-    assert.ok(!isProfile({ ...validCandidate(), fontSize: 14 }));
+  it('rejects fontSize as a nested object (old format)', () => {
+    assert.ok(!isProfile({ ...validCandidate(), fontSize: { mobile: 14, desktop: 14 } }));
   });
 
-  it('rejects fontSize.mobile below 8', () => {
-    assert.ok(!isProfile({ ...validCandidate(), fontSize: { mobile: 7, desktop: 14 } }));
+  it('rejects fontSize below 8', () => {
+    assert.ok(!isProfile({ ...validCandidate(), fontSize: 7 }));
   });
 
-  it('rejects fontSize.desktop above 72', () => {
-    assert.ok(!isProfile({ ...validCandidate(), fontSize: { mobile: 14, desktop: 73 } }));
+  it('rejects fontSize above 72', () => {
+    assert.ok(!isProfile({ ...validCandidate(), fontSize: 73 }));
   });
 
-  it('rejects non-finite fontSize.mobile', () => {
-    assert.ok(!isProfile({ ...validCandidate(), fontSize: { mobile: Infinity, desktop: 14 } }));
+  it('rejects non-finite fontSize', () => {
+    assert.ok(!isProfile({ ...validCandidate(), fontSize: Infinity }));
   });
 
-  it('rejects theme as a plain string (old format)', () => {
-    assert.ok(!isProfile({ ...validCandidate(), theme: 'default' }));
-  });
-
-  it('rejects theme with missing key', () => {
-    assert.ok(!isProfile({ ...validCandidate(), theme: { desktopLight: 'default-light', desktopDark: 'default-dark', mobileLight: 'default-light' } }));
+  it('rejects theme as a nested object (old format)', () => {
+    assert.ok(!isProfile({ ...validCandidate(), themeLight: undefined, theme: { desktopLight: 'default-light', desktopDark: 'default-dark' } }));
   });
 
   it('accepts profile with sessionSwitcherHotkey', () => {
@@ -305,4 +280,3 @@ describe('isProfileTheme', () => {
     assert.ok(!isProfileTheme({ ...validTheme(), red: 'not-a-color' }));
   });
 });
-

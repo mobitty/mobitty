@@ -2,7 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from 
 import { join } from 'node:path';
 
 export const PROFILE_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
-export const DEFAULT_PROFILE_NAME = 'default';
+export const DEFAULT_PROFILE_NAMES = new Set(['default-desktop', 'default-mobile']);
 
 export class ProfileStore {
   private profilesDir: string;
@@ -21,15 +21,15 @@ export class ProfileStore {
       const names = files
         .filter(f => f.endsWith('.json'))
         .map(f => f.slice(0, -5))
-        .filter(name => PROFILE_NAME_RE.test(name) && name !== DEFAULT_PROFILE_NAME);
-      return [DEFAULT_PROFILE_NAME, ...names];
+        .filter(name => PROFILE_NAME_RE.test(name) && !DEFAULT_PROFILE_NAMES.has(name));
+      return [...DEFAULT_PROFILE_NAMES, ...names];
     } catch {
-      return [DEFAULT_PROFILE_NAME];
+      return [...DEFAULT_PROFILE_NAMES];
     }
   }
 
   get(name: string): unknown {
-    if (name === DEFAULT_PROFILE_NAME) return undefined;
+    if (DEFAULT_PROFILE_NAMES.has(name)) return undefined;
     if (!PROFILE_NAME_RE.test(name)) return undefined;
     try {
       const raw = readFileSync(join(this.profilesDir, `${name}.json`), 'utf-8');
@@ -40,7 +40,7 @@ export class ProfileStore {
   }
 
   save(name: string, data: unknown): void {
-    if (name === DEFAULT_PROFILE_NAME) throw new Error('Cannot overwrite default profile');
+    if (DEFAULT_PROFILE_NAMES.has(name)) throw new Error('Cannot overwrite default profile');
     if (!PROFILE_NAME_RE.test(name)) throw new Error('Invalid profile name');
     writeFileSync(
       join(this.profilesDir, `${name}.json`),
@@ -49,7 +49,7 @@ export class ProfileStore {
   }
 
   delete(name: string): boolean {
-    if (name === DEFAULT_PROFILE_NAME) return false;
+    if (DEFAULT_PROFILE_NAMES.has(name)) return false;
     if (!PROFILE_NAME_RE.test(name)) return false;
     try {
       unlinkSync(join(this.profilesDir, `${name}.json`));

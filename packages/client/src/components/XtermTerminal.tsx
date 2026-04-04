@@ -12,7 +12,6 @@ interface XtermTerminalProps {
   options: TerminalCoreOptions;
   profile?: Profile;
   themeColors?: ProfileTheme;
-  isMobile?: boolean;
   modifierSource?: ModifierSource;
   callbacks?: TerminalCoreCallbacks;
   gestureMapping?: GestureMapping;
@@ -20,7 +19,7 @@ interface XtermTerminalProps {
 }
 
 export const XtermTerminal = forwardRef<XtermTerminalHandle, XtermTerminalProps>(
-  function XtermTerminal({ options, profile, themeColors, isMobile, modifierSource, callbacks, gestureMapping, customKeyMap }, ref) {
+  function XtermTerminal({ options, profile, themeColors, modifierSource, callbacks, gestureMapping, customKeyMap }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const coreRef = useRef<TerminalCore | null>(null);
 
@@ -61,14 +60,14 @@ export const XtermTerminal = forwardRef<XtermTerminalHandle, XtermTerminalProps>
     // Apply profile changes
     useEffect(() => {
       if (profile && coreRef.current) {
-        coreRef.current.applyProfile(profile, themeColors, isMobile);
+        coreRef.current.applyProfile(profile, themeColors);
         coreRef.current.setScrollback(profile.scrollback);
         coreRef.current.setSoftkeySettings(profile.softkeySettings ?? DEFAULT_SOFTKEY_SETTINGS);
         coreRef.current.setImagePasteDir(profile.imagePasteDir ?? 'tmp');
         coreRef.current.setNotificationMode(profile.notificationMode);
         coreRef.current.setRemoteEditor(profile.remoteEditor);
       }
-    }, [profile, themeColors, isMobile]);
+    }, [profile, themeColors]);
 
     // Update gesture mapping
     useEffect(() => {
