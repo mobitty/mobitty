@@ -82,6 +82,33 @@ export function setSelectedProfileName(name: string): void {
   }
 }
 
+// ── Profile cache ────────────────────────────────────────────────────────────
+
+const CACHE_KEY_PREFIX = 'mobitty-profile-cache:';
+
+export function getCachedProfile(name: string): Profile | undefined {
+  try {
+    const raw = localStorage.getItem(CACHE_KEY_PREFIX + name);
+    if (raw === null) return undefined;
+    const data: unknown = JSON.parse(raw);
+    if (isProfile(data)) return data;
+    localStorage.removeItem(CACHE_KEY_PREFIX + name);
+  } catch { /* localStorage unavailable */ }
+  return undefined;
+}
+
+function cacheProfile(profile: Profile): void {
+  try {
+    localStorage.setItem(CACHE_KEY_PREFIX + profile.name, JSON.stringify(profile));
+  } catch { /* full or unavailable */ }
+}
+
+function clearCachedProfile(name: string): void {
+  try {
+    localStorage.removeItem(CACHE_KEY_PREFIX + name);
+  } catch { /* unavailable */ }
+}
+
 // ── API ──────────────────────────────────────────────────────────────────────
 
 function buildApiUrl(path: string): string {
@@ -126,7 +153,10 @@ export async function fetchProfile(name: string): Promise<Profile | undefined> {
   if (!resp.ok) return undefined;
   const data = await resp.json() as Record<string, unknown>;
   migrateProfile(data);
-  if (isProfile(data)) return data;
+  if (isProfile(data)) {
+    cacheProfile(data);
+    return data;
+  }
   return undefined;
 }
 
@@ -136,6 +166,7 @@ export async function saveProfile(profile: Profile): Promise<boolean> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(profile),
   });
+  if (resp.ok) cacheProfile(profile);
   return resp.ok;
 }
 
@@ -143,5 +174,6 @@ export async function deleteProfile(name: string): Promise<boolean> {
   const resp = await fetch(buildApiUrl(`/api/profiles/${encodeURIComponent(name)}`), {
     method: 'DELETE',
   });
+  if (resp.ok) clearCachedProfile(name);
   return resp.ok;
 }

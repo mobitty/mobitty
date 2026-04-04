@@ -36,5 +36,6 @@ export async function loadFont(option: FontOption): Promise<void> {
   link.href = `${CDN_BASE}${option.cssFile}`;
   link.dataset.font = option.cssFile;
   document.head.appendChild(link);
+  try { localStorage.setItem('mobitty-font-css', option.cssFile); } catch { /* unavailable */ }
   await document.fonts.ready;
 }

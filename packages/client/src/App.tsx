@@ -11,7 +11,7 @@ import { SystemMeterPanel } from '@/components/SystemMeterPanel';
 import { SystemMetrics } from '@/system-metrics';
 import type { TerminalCoreOptions, TerminalCoreCallbacks, ImagePasteErrorInfo } from '@/terminal-core';
 import type { Profile, ProfileTheme, ProfileThemeMap } from '@/profiles';
-import { fetchProfile, getSelectedProfileName, setSelectedProfileName, DEFAULT_SCROLLBACK, DEFAULT_PROFILE } from '@/profiles';
+import { fetchProfile, getCachedProfile, getSelectedProfileName, setSelectedProfileName, DEFAULT_SCROLLBACK, DEFAULT_PROFILE } from '@/profiles';
 import { fetchTheme } from '@/themes';
 import {
   DEFAULT_MOBILE_PAGES, DEFAULT_MOBILE_CUSTOM_KEYS, DEFAULT_MOBILE_CONTAINERS, DEFAULT_DESKTOP_PAGES,
@@ -179,23 +179,37 @@ export function App() {
     return () => m.dispose();
   }, []);
 
-  // Load profile on mount
+  // Load profile on mount (optimistic cache → background reconciliation)
   useEffect(() => {
     const name = getSelectedProfileName();
-    fetchProfile(name).then(async p => {
-      if (!p) {
-        setProfile(DEFAULT_PROFILE);
-        setProfileReady(true);
-        return;
-      }
+    const cached = getCachedProfile(name);
+
+    const apply = async (p: Profile) => {
       const option = findFontOption(p.fontFamily);
       if (option) await loadFont(option);
       setProfile(p);
       setProfileReady(true);
-    }).catch(() => {
-      setProfile(DEFAULT_PROFILE);
-      setProfileReady(true);
-    });
+    };
+
+    if (cached) {
+      // Use cache immediately, reconcile with server in background
+      apply(cached).catch(() => { setProfile(cached); setProfileReady(true); });
+
+      fetchProfile(name).then(async server => {
+        if (!server) return;
+        if (JSON.stringify(server) !== JSON.stringify(cached)) {
+          const option = findFontOption(server.fontFamily);
+          if (option) await loadFont(option);
+          setProfile(server);
+        }
+      }).catch(() => {});
+    } else {
+      // No cache (first load or default profile): blocking fetch
+      fetchProfile(name).then(async p => {
+        if (!p) { setProfile(DEFAULT_PROFILE); setProfileReady(true); return; }
+        await apply(p);
+      }).catch(() => { setProfile(DEFAULT_PROFILE); setProfileReady(true); });
+    }
   }, []);
 
   // Fetch theme colors based on device type and OS color scheme.
