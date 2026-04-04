@@ -123,7 +123,6 @@ export class TerminalCore {
   private closeOnDisconnect = false;
   private reconnectDelay = 0;
   private reconnectKeyDisposable?: IDisposable;
-  private parent?: HTMLElement;
   private gestureDetector?: GestureDetector;
   private gestureMapping: GestureMapping = DEFAULT_GESTURE_MAPPING;
   private customKeyMap?: Map<string, KeySpec>;
@@ -145,12 +144,18 @@ export class TerminalCore {
   private themeBackground?: string;
   private scrollbarHealthTimer?: ReturnType<typeof setInterval>;
   private scrollbarStuckCount = 0;
+  private resizeObserver?: ResizeObserver;
+  private pendingConnectRaf?: number;
 
   constructor(private options: TerminalCoreOptions) {
     this.scrollback = this.options.termOptions.scrollback ?? 5000;
   }
 
   dispose() {
+    if (this.pendingConnectRaf !== undefined) {
+      cancelAnimationFrame(this.pendingConnectRaf);
+      this.pendingConnectRaf = undefined;
+    }
     this.stopScrollbarHealthCheck();
     this.reconnectKeyDisposable?.dispose();
     this.reconnectKeyDisposable = undefined;
@@ -160,6 +165,14 @@ export class TerminalCore {
     this.selectionOverlay = undefined;
     for (const d of this.disposables) d.dispose();
     this.disposables.length = 0;
+  }
+
+  /** Full teardown — call on unmount (not on reconnect). */
+  destroy() {
+    this.dispose();
+    this.resizeObserver?.disconnect();
+    this.resizeObserver = undefined;
+    this.terminal?.dispose();
   }
 
   private register<T extends IDisposable>(d: T): T {
@@ -250,7 +263,6 @@ export class TerminalCore {
   }
 
   open(parent: HTMLElement) {
-    this.parent = parent;
     this.terminal = new Terminal(this.options.termOptions);
     const { terminal, fitAddon, overlayAddon, webLinksAddon } = this;
 
@@ -266,6 +278,11 @@ export class TerminalCore {
     this.registerNativePasteImageHandler();
     this.syncPageBackground();
     fitAddon.fit();
+
+    // Observe container size immediately — survives reconnections so the
+    // terminal tracks layout changes even while disconnected.
+    this.resizeObserver = new ResizeObserver(() => this.fitAddon.fit());
+    this.resizeObserver.observe(parent);
   }
 
   applyProfile(profile: Profile, themeColors?: ProfileTheme): void {
@@ -767,14 +784,6 @@ export class TerminalCore {
 
     this.register(addEventListener(window, 'beforeunload', (e) => this.onWindowUnload(e as BeforeUnloadEvent)));
     this.registerGestureDetection();
-
-    // Detect container size changes (keyboard open/close, panel open/close,
-    // window resize) and refit the terminal.
-    if (this.parent) {
-      const resizeObserver = new ResizeObserver(() => this.fitAddon.fit());
-      resizeObserver.observe(this.parent);
-      this.register({ dispose: () => resizeObserver.disconnect() });
-    }
   }
 
   private onWindowUnload(event: BeforeUnloadEvent) {
@@ -789,38 +798,13 @@ export class TerminalCore {
       sendToServer: (payload) => { if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(payload); },
     });
     this.logger.info('websocket opened');
-    const { textEncoder, terminal, fitAddon, overlayAddon } = this;
-
-    // Sync terminal dimensions with actual viewport before sending handshake —
-    // the window may have been resized while disconnected (resize listener was disposed).
-    fitAddon.fit();
-
-    const handshake: Record<string, unknown> = {
-      AuthToken: this.token,
-      columns: terminal.cols,
-      rows: terminal.rows,
-    };
-    if (this.options.sessionId) {
-      handshake['sessionId'] = this.options.sessionId;
-    }
-    if (this.options.shellName) {
-      handshake['shell'] = this.options.shellName;
-    }
-    handshake['scrollback'] = this.scrollback;
-    if (this.imagePasteDir !== undefined) {
-      handshake['imagePasteDir'] = this.imagePasteDir;
-    }
-    handshake['notificationMode'] = this.notificationMode;
-    handshake['remoteEditor'] = this.remoteEditor;
-    if (this.themeForeground) handshake['themeForeground'] = this.themeForeground;
-    if (this.themeBackground) handshake['themeBackground'] = this.themeBackground;
-    this.socket?.send(textEncoder.encode(JSON.stringify(handshake)));
+    const { overlayAddon } = this;
 
     // Clear any lingering overlay (e.g. "Reconnecting..." from failed initial attempts)
     overlayAddon.hideOverlay();
 
     if (this.opened) {
-      terminal.options.disableStdin = false;
+      this.terminal.options.disableStdin = false;
       overlayAddon.showOverlay('Reconnected', 300);
     } else {
       this.opened = true;
@@ -830,10 +814,44 @@ export class TerminalCore {
     this.reconnectDelay = 0;
     this.reconnectKeyDisposable?.dispose();
     this.reconnectKeyDisposable = undefined;
-    this.registerWakeDetection();
-    this.initListeners();
-    this.startScrollbarHealthCheck();
-    terminal.focus();
+
+    // Defer fit + handshake to the next animation frame so the browser has
+    // settled the flex layout (SoftkeyBar / ContainerPanel heights finalised).
+    // Without this, fitAddon.fit() can read stale container dimensions and
+    // send wrong rows/cols in the handshake.
+    this.pendingConnectRaf = requestAnimationFrame(() => {
+      this.pendingConnectRaf = undefined;
+      if (this.socket?.readyState !== WebSocket.OPEN) return;
+
+      const { textEncoder, terminal, fitAddon } = this;
+      fitAddon.fit();
+
+      const handshake: Record<string, unknown> = {
+        AuthToken: this.token,
+        columns: terminal.cols,
+        rows: terminal.rows,
+      };
+      if (this.options.sessionId) {
+        handshake['sessionId'] = this.options.sessionId;
+      }
+      if (this.options.shellName) {
+        handshake['shell'] = this.options.shellName;
+      }
+      handshake['scrollback'] = this.scrollback;
+      if (this.imagePasteDir !== undefined) {
+        handshake['imagePasteDir'] = this.imagePasteDir;
+      }
+      handshake['notificationMode'] = this.notificationMode;
+      handshake['remoteEditor'] = this.remoteEditor;
+      if (this.themeForeground) handshake['themeForeground'] = this.themeForeground;
+      if (this.themeBackground) handshake['themeBackground'] = this.themeBackground;
+      this.socket?.send(textEncoder.encode(JSON.stringify(handshake)));
+
+      this.registerWakeDetection();
+      this.initListeners();
+      this.startScrollbarHealthCheck();
+      terminal.focus();
+    });
   }
 
   private scheduleReconnect() {

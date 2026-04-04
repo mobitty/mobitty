@@ -38,7 +38,7 @@ export const XtermTerminal = forwardRef<XtermTerminalHandle, XtermTerminalProps>
       core.refreshToken().then(() => core.connect());
 
       return () => {
-        core.dispose();
+        core.destroy();
         coreRef.current = null;
       };
       // Only run on mount
