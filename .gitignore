@@ -1,9 +1,11 @@
 node_modules/
+.pnpm-store/
 dist/
 *.tsbuildinfo
 /workspace
 /logs/
 /tmp/
+.devcontainer
 
 # Playwright test artifacts
 /.playwright-cli/
