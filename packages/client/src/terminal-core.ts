@@ -99,6 +99,10 @@ function addEventListener(target: EventTarget, type: string, listener: EventList
 }
 
 export class TerminalCore {
+  // Cleared on every reconnect (dispose()) — only socket-scoped listeners belong here.
+  // DOM listeners on terminal.element that must survive reconnections should be
+  // managed as standalone fields cleaned up in destroy() instead.
+  // See: workspace/docs/bug-image-paste-lost-on-reconnect.md
   private disposables: IDisposable[] = [];
   private textEncoder = new TextEncoder();
   private textDecoder = new TextDecoder();
@@ -128,6 +132,7 @@ export class TerminalCore {
   private customKeyMap?: Map<string, KeySpec>;
   private clipboardImageRequestId = 0;
   private pendingClipboardImageResolve?: (result: { status: number; errorInfo?: ImagePasteErrorInfo }) => void;
+  private pasteImageListenerDisposable?: IDisposable;
 
   private modifierSource?: ModifierSource;
   private logger?: ClientLogger;
@@ -170,6 +175,8 @@ export class TerminalCore {
   /** Full teardown — call on unmount (not on reconnect). */
   destroy() {
     this.dispose();
+    this.pasteImageListenerDisposable?.dispose();
+    this.pasteImageListenerDisposable = undefined;
     this.resizeObserver?.disconnect();
     this.resizeObserver = undefined;
     this.terminal?.dispose();
@@ -693,7 +700,10 @@ export class TerminalCore {
       }
     };
     el.addEventListener('paste', onPaste, { capture: true });
-    this.register({ dispose: () => el.removeEventListener('paste', onPaste, { capture: true }) });
+    // Stored separately from this.disposables so it survives reconnections
+    // (dispose() clears disposables on every socket close, but the paste
+    // listener is on the terminal element which persists across reconnects).
+    this.pasteImageListenerDisposable = { dispose: () => el.removeEventListener('paste', onPaste, { capture: true }) };
   }
 
   /** Handle an image blob from a native paste event. */
