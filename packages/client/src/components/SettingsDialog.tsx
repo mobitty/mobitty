@@ -150,6 +150,9 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
   const [shellEditEnv, setShellEditEnv] = useState<Array<{ key: string; value: string }>>([]);
   const [shellEditing, setShellEditing] = useState<string | null>(null);
 
+  // Top-level section toggle
+  const [settingsSection, setSettingsSection] = useState<'profile' | 'shells'>('profile');
+
   const editingProfileName = editingDevice === 'desktop' ? desktopProfileName : mobileProfileName;
   const isDefaultProfile = DEFAULT_PROFILE_NAMES.has(editingProfileName);
   const isReadonlyTheme = isBuiltinTheme(selectedThemeName);
@@ -284,7 +287,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
       else setMobileProfileName(profile.name);
       onApply(profile, editingDevice);
       await refreshProfileList();
-      showStatus('Saved');
+      onOpenChange(false);
     } else {
       showStatus('Failed to save');
     }
@@ -524,6 +527,15 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
 
         <Separator className="mb-4" />
 
+        {/* Top-level section tabs */}
+        <Tabs value={settingsSection} onValueChange={v => setSettingsSection(v as 'profile' | 'shells')} className="mb-4">
+          <TabsList>
+            <TabsTrigger value="profile">Profile</TabsTrigger>
+            <TabsTrigger value="shells">Shells</TabsTrigger>
+          </TabsList>
+        </Tabs>
+
+        {settingsSection === 'profile' && (<>
         {/* Profile editor device tabs */}
         <div className="flex items-center gap-2 mb-4">
           <Tabs value={editingDevice} onValueChange={v => handleEditDevice(v as 'desktop' | 'mobile')}>
@@ -538,7 +550,6 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
         <Tabs defaultValue="general">
           <TabsList>
             <TabsTrigger value="general">General</TabsTrigger>
-            <TabsTrigger value="shells">Shells</TabsTrigger>
             <TabsTrigger value="softkeys">Softkeys</TabsTrigger>
             {editingDevice === 'mobile' && <TabsTrigger value="gestures">Gestures</TabsTrigger>}
             <TabsTrigger value="themes">Themes</TabsTrigger>
@@ -628,9 +639,9 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
             </div>
             <FieldError error={fieldErrors.get('padding')} />
 
-            {/* Key size */}
+            {/* Softkey size */}
             <div className="flex items-center gap-2">
-              <Label className="min-w-[100px] text-xs text-muted-foreground">Key Size</Label>
+              <Label className="min-w-[100px] text-xs text-muted-foreground">Softkey Size</Label>
               <HelpTip>Height of softkey buttons in pixels. Range: 28–60.</HelpTip>
               <Input
                 type="number" min="28" max="60" step="2"
@@ -736,113 +747,6 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
               </Select>
             </div>
 
-          </TabsContent>
-
-          <TabsContent value="shells" className="space-y-4 mt-4">
-            {/* Shell list */}
-            {shellList.length === 0 && (
-              <p className="text-sm text-muted-foreground">No shells found</p>
-            )}
-            {shellList.map(shell => (
-              <div key={shell.name} className="flex items-center gap-2 px-3 py-2 rounded-md border border-border">
-                <div className="flex-1 min-w-0">
-                  <span className="text-sm font-medium">{shell.name}</span>
-                  <div className="text-xs text-muted-foreground truncate">{shell.command ?? shell.argv.join(' ')}</div>
-                  {shell.env && Object.keys(shell.env).length > 0 && (
-                    <div className="text-xs text-muted-foreground truncate">
-                      env: {Object.entries(shell.env).map(([k, v]) => `${k}=${v}`).join(', ')}
-                    </div>
-                  )}
-                </div>
-                <Badge variant={shell.source === 'saved' ? 'default' : 'outline'} className="shrink-0 text-xs">
-                  {shell.source === 'saved' ? 'saved' : 'auto'}
-                </Badge>
-                <Button variant="ghost" size="sm" className="h-7 px-2 text-xs shrink-0" onClick={() => handleShellEdit(shell)}>
-                  {shell.source === 'saved' ? 'Edit' : 'Save As'}
-                </Button>
-                {shell.source === 'saved' && (
-                  <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-destructive shrink-0" onClick={() => handleShellDelete(shell.name)}>
-                    Delete
-                  </Button>
-                )}
-              </div>
-            ))}
-
-            <Separator />
-
-            {/* Add / Edit form */}
-            <div className="space-y-2">
-              <h3 className="text-sm font-medium">{shellEditing ? `Edit: ${shellEditing}` : 'Add Shell'}</h3>
-              <div className="flex items-center gap-2">
-                <Label className="min-w-[100px] text-xs text-muted-foreground">Name</Label>
-                <Input
-                  value={shellEditName}
-                  onChange={e => setShellEditName(e.target.value)}
-                  placeholder="e.g. bash"
-                  disabled={!!shellEditing}
-                />
-              </div>
-              <div className="flex items-center gap-2">
-                <Label className="min-w-[100px] text-xs text-muted-foreground">Command</Label>
-                <Input
-                  value={shellEditCommand}
-                  onChange={e => setShellEditCommand(e.target.value)}
-                  placeholder="e.g. /bin/bash -i -l"
-                />
-              </div>
-
-              {/* Env vars */}
-              <div className="space-y-1">
-                <div className="flex items-center gap-2">
-                  <Label className="min-w-[100px] text-xs text-muted-foreground">Env Vars</Label>
-                  <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => setShellEditEnv(prev => [...prev, { key: '', value: '' }])}>
-                    + Add
-                  </Button>
-                </div>
-                {shellEditEnv.map((entry, i) => (
-                  <div key={i} className="flex items-center gap-1 ml-[108px]">
-                    <Input
-                      value={entry.key}
-                      onChange={e => {
-                        const next = [...shellEditEnv];
-                        next[i] = { ...entry, key: e.target.value };
-                        setShellEditEnv(next);
-                      }}
-                      placeholder="KEY"
-                      className="flex-1 h-7 text-xs"
-                    />
-                    <span className="text-xs text-muted-foreground">=</span>
-                    <Input
-                      value={entry.value}
-                      onChange={e => {
-                        const next = [...shellEditEnv];
-                        next[i] = { ...entry, value: e.target.value };
-                        setShellEditEnv(next);
-                      }}
-                      placeholder="value"
-                      className="flex-1 h-7 text-xs"
-                    />
-                    <Button variant="ghost" size="sm" className="h-7 px-1 text-xs text-destructive" onClick={() => setShellEditEnv(prev => prev.filter((_, j) => j !== i))}>
-                      &#215;
-                    </Button>
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={handleShellSave}>
-                  {shellEditing ? 'Save' : 'Add'}
-                </Button>
-                {shellEditing && (
-                  <Button variant="ghost" size="sm" onClick={shellEditReset}>Cancel</Button>
-                )}
-              </div>
-            </div>
-
-            <Separator />
-            <Button variant="outline" size="sm" onClick={handleShellRediscover}>
-              Rediscover Shells
-            </Button>
           </TabsContent>
 
           <TabsContent value="softkeys" className="space-y-4 mt-4">
@@ -964,6 +868,116 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
             </div>
           </TabsContent>
         </Tabs>
+        </>)}
+
+        {settingsSection === 'shells' && (
+          <div className="space-y-4">
+            {/* Shell list */}
+            {shellList.length === 0 && (
+              <p className="text-sm text-muted-foreground">No shells found</p>
+            )}
+            {shellList.map(shell => (
+              <div key={shell.name} className="flex items-center gap-2 px-3 py-2 rounded-md border border-border">
+                <div className="flex-1 min-w-0">
+                  <span className="text-sm font-medium">{shell.name}</span>
+                  <div className="text-xs text-muted-foreground truncate">{shell.command ?? shell.argv.join(' ')}</div>
+                  {shell.env && Object.keys(shell.env).length > 0 && (
+                    <div className="text-xs text-muted-foreground truncate">
+                      env: {Object.entries(shell.env).map(([k, v]) => `${k}=${v}`).join(', ')}
+                    </div>
+                  )}
+                </div>
+                <Badge variant={shell.source === 'saved' ? 'default' : 'outline'} className="shrink-0 text-xs">
+                  {shell.source === 'saved' ? 'saved' : 'auto'}
+                </Badge>
+                <Button variant="ghost" size="sm" className="h-7 px-2 text-xs shrink-0" onClick={() => handleShellEdit(shell)}>
+                  {shell.source === 'saved' ? 'Edit' : 'Save As'}
+                </Button>
+                {shell.source === 'saved' && (
+                  <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-destructive shrink-0" onClick={() => handleShellDelete(shell.name)}>
+                    Delete
+                  </Button>
+                )}
+              </div>
+            ))}
+
+            <Separator />
+
+            {/* Add / Edit form */}
+            <div className="space-y-2">
+              <h3 className="text-sm font-medium">{shellEditing ? `Edit: ${shellEditing}` : 'Add Shell'}</h3>
+              <div className="flex items-center gap-2">
+                <Label className="min-w-[100px] text-xs text-muted-foreground">Name</Label>
+                <Input
+                  value={shellEditName}
+                  onChange={e => setShellEditName(e.target.value)}
+                  placeholder="e.g. bash"
+                  disabled={!!shellEditing}
+                />
+              </div>
+              <div className="flex items-center gap-2">
+                <Label className="min-w-[100px] text-xs text-muted-foreground">Command</Label>
+                <Input
+                  value={shellEditCommand}
+                  onChange={e => setShellEditCommand(e.target.value)}
+                  placeholder="e.g. /bin/bash -i -l"
+                />
+              </div>
+
+              {/* Env vars */}
+              <div className="space-y-1">
+                <div className="flex items-center gap-2">
+                  <Label className="min-w-[100px] text-xs text-muted-foreground">Env Vars</Label>
+                  <Button variant="outline" size="sm" className="h-6 text-xs" onClick={() => setShellEditEnv(prev => [...prev, { key: '', value: '' }])}>
+                    + Add
+                  </Button>
+                </div>
+                {shellEditEnv.map((entry, i) => (
+                  <div key={i} className="flex items-center gap-1 ml-[108px]">
+                    <Input
+                      value={entry.key}
+                      onChange={e => {
+                        const next = [...shellEditEnv];
+                        next[i] = { ...entry, key: e.target.value };
+                        setShellEditEnv(next);
+                      }}
+                      placeholder="KEY"
+                      className="flex-1 h-7 text-xs"
+                    />
+                    <span className="text-xs text-muted-foreground">=</span>
+                    <Input
+                      value={entry.value}
+                      onChange={e => {
+                        const next = [...shellEditEnv];
+                        next[i] = { ...entry, value: e.target.value };
+                        setShellEditEnv(next);
+                      }}
+                      placeholder="value"
+                      className="flex-1 h-7 text-xs"
+                    />
+                    <Button variant="ghost" size="sm" className="h-7 px-1 text-xs text-destructive" onClick={() => setShellEditEnv(prev => prev.filter((_, j) => j !== i))}>
+                      &#215;
+                    </Button>
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex gap-2">
+                <Button variant="outline" size="sm" onClick={handleShellSave}>
+                  {shellEditing ? 'Save' : 'Add'}
+                </Button>
+                {shellEditing && (
+                  <Button variant="ghost" size="sm" onClick={shellEditReset}>Cancel</Button>
+                )}
+              </div>
+            </div>
+
+            <Separator />
+            <Button variant="outline" size="sm" onClick={handleShellRediscover}>
+              Rediscover Shells
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* Footer */}
@@ -971,8 +985,10 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
         {status && (
           <span className="text-xs text-primary mr-auto">{status}</span>
         )}
-        <Button variant="outline" size="sm" onClick={handleSaveAsNew}>Save As New</Button>
-        <Button size="sm" onClick={handleSave} disabled={isDefaultProfile}>Save</Button>
+        {settingsSection === 'profile' && (<>
+          <Button variant="outline" size="sm" onClick={handleSaveAsNew}>Save As New</Button>
+          <Button size="sm" onClick={handleSave} disabled={isDefaultProfile}>Save</Button>
+        </>)}
       </div>
     </div>
   );
