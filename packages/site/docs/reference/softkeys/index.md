@@ -16,7 +16,7 @@ The soft key bar is configured per profile. Each profile defines which keys appe
 
 - **Modifier keys** — Ctrl, Alt, Shift. These toggle on/off and apply to the next key you press.
 - **Navigation and special keys** — Esc, Tab, arrow keys, Home, End, Page Up/Down, Enter, Space. Arrow keys and scroll keys support hold-to-repeat.
-- **Input controls** — Batch input panel and inline input for entering longer text.
+- **Input controls** — Batch input panel, inline input for entering longer text, and paste for quick clipboard insertion.
 - **System meter** — Toggles the connection health overlay.
 - **Custom keys** — User-defined macros that send key combinations (e.g. Ctrl+C, or multi-step sequences).
 - **Containers** — Expandable groups that hold additional keys in a slide-up panel.

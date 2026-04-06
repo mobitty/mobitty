@@ -23,6 +23,7 @@ type DragTarget = 'start' | 'end';
 
 export interface SelectionOverlayOptions {
   isTouchDevice: () => boolean;
+  onPaste?: (text: string) => void;
 }
 
 export class SelectionOverlayAddon implements ITerminalAddon {
@@ -63,8 +64,11 @@ export class SelectionOverlayAddon implements ITerminalAddon {
   private boundOnTerminalPointerDown: ((e: PointerEvent) => void) | null = null;
   private boundBlockTouch: ((e: TouchEvent) => void) | null = null;
 
+  private onPasteCallback?: (text: string) => void;
+
   constructor(options: SelectionOverlayOptions) {
     this.isTouchDevice = options.isTouchDevice;
+    this.onPasteCallback = options.onPaste;
   }
 
   activate(terminal: Terminal): void {
@@ -251,6 +255,13 @@ export class SelectionOverlayAddon implements ITerminalAddon {
 
     const copyBtn = this.createMenuButton('Copy', () => void this.onCopy());
     menu.appendChild(copyBtn);
+
+    const divider = document.createElement('div');
+    Object.assign(divider.style, { width: '1px', background: '#545458' });
+    menu.appendChild(divider);
+
+    const pasteBtn = this.createMenuButton('Paste', () => void this.onPaste());
+    menu.appendChild(pasteBtn);
 
     return menu;
   }
@@ -608,6 +619,19 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     }
 
     this.dismiss();
+  }
+
+  private async onPaste(): Promise<void> {
+    let text = '';
+    if (navigator.clipboard?.readText) {
+      try {
+        text = await navigator.clipboard.readText();
+      } catch { /* clipboard access denied or unavailable */ }
+    }
+    this.dismiss();
+    if (text !== '') {
+      this.onPasteCallback?.(text);
+    }
   }
 
   // ── Event Handlers ────────────────────────────────────────────────────────

@@ -272,7 +272,7 @@ export const CUSTOM_KEY_ID_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 export const BUILTIN_KEY_IDS = new Set([
   'esc', 'tab', 'up', 'down', 'left', 'right', 'home', 'end', 'pageup', 'pagedown',
   'wheel_up', 'wheel_down', 'enter', 'space', 'ctrl', 'alt', 'shift',
-  'batch_input', 'inline_input', 'system_meter',
+  'batch_input', 'inline_input', 'paste', 'system_meter',
 ]);
 
 export const VALID_GESTURE_IDS = new Set([

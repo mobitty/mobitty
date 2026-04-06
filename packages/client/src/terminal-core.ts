@@ -279,7 +279,10 @@ export class TerminalCore {
 
     terminal.open(parent);
 
-    this.selectionOverlay = new SelectionOverlayAddon({ isTouchDevice: () => this.isTouchDevice() });
+    this.selectionOverlay = new SelectionOverlayAddon({
+      isTouchDevice: () => this.isTouchDevice(),
+      onPaste: (text) => this.handleBatchInput(text),
+    });
     terminal.loadAddon(this.selectionOverlay);
     this.registerKeyInterceptor();
     this.registerNativePasteImageHandler();

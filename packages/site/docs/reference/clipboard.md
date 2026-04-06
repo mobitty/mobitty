@@ -10,7 +10,7 @@ description: How copy, paste, and image paste work on mobile and desktop.
 
 ### Mobile
 
-Tap and hold on the terminal to start a selection. Two draggable handles appear at the edges of the selected text — drag them to adjust. A floating **Copy** button appears between the handles. Tap it to copy.
+Tap and hold on the terminal to start a selection. Two draggable handles appear at the edges of the selected text — drag them to adjust. A floating menu with **Copy** and **Paste** buttons appears between the handles. Tap **Copy** to copy the selected text.
 
 A brief scissors icon confirms the copy succeeded.
 
@@ -24,11 +24,20 @@ You can enable **Copy on Select** in Settings so that any text you select is aut
 
 ## Pasting text
 
-Paste uses your platform's native method — there is no paste soft key.
+### Mobile
 
-- **Desktop:** **Ctrl+V** (Linux/Windows) or **Cmd+V** (macOS)
+When a selection is active, the floating edit menu shows both **Copy** and **Paste** buttons. Tap **Paste** to insert clipboard text at the cursor.
+
+You can also add the `paste` soft key to your soft key layout for quick one-tap pasting without a selection — see [Input Control](/docs/reference/softkeys/input-control#paste).
+
+The platform's native paste gesture still works too:
+
 - **iOS:** Tap with three fingers to bring up the context menu, then tap **Paste**
 - **Android:** Long-press the terminal, then tap **Paste** from the context menu
+
+### Desktop
+
+Use your system's paste shortcut: **Ctrl+V** (Linux/Windows) or **Cmd+V** (macOS).
 
 ## Pasting images
 

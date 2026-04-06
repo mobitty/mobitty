@@ -437,6 +437,16 @@ export function App() {
     terminalRef.current?.core?.handleBatchInput(text);
   }, []);
 
+  const handlePaste = useCallback(async () => {
+    let text = '';
+    if (navigator.clipboard?.readText) {
+      try { text = await navigator.clipboard.readText(); } catch { /* clipboard access denied */ }
+    }
+    if (text !== '') {
+      terminalRef.current?.core?.handleBatchInput(text);
+    }
+  }, []);
+
   const handleSwitchSession = useCallback((sessionId: string) => {
     setLastSessionId(sessionId);
     setCurrentSessionId(sessionId);
@@ -526,6 +536,7 @@ export function App() {
         onSessionsOpen={() => setSessionPanelOpen(true)}
         onMeterToggle={() => setMeterOpen(prev => !prev)}
         onAction={(action, mods) => terminalRef.current?.core?.handleSoftkeyAction(action, mods)}
+        onPaste={handlePaste}
         onBatchInputToggle={() => setBatchInputOpen(prev => !prev)}
         onBatchSubmit={handleBatchSubmit}
         onContainerToggle={handleContainerToggle}

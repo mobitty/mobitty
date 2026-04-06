@@ -28,6 +28,7 @@ interface SoftkeyBarProps {
   onSessionsOpen: () => void;
   onMeterToggle: () => void;
   onAction: (action: KeyBehavior, modifiers: ModifierFlags) => void;
+  onPaste: () => void;
   onBatchInputToggle: () => void;
   onBatchSubmit?: (text: string) => void;
   onContainerToggle: (containerId: string) => void;
@@ -123,7 +124,7 @@ function InlineInput({ softkeySize, onSubmit, onKeepFocus }: InlineInputProps) {
 // --- SoftkeyBar ---
 
 export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
-  function SoftkeyBar({ pages, customKeys, containers, activeContainerId, softkeySize = 44, hasAlerts, onSessionsOpen, onMeterToggle, onAction, onBatchInputToggle, onBatchSubmit, onContainerToggle, onKeepFocus, onModifiersChange }, ref) {
+  function SoftkeyBar({ pages, customKeys, containers, activeContainerId, softkeySize = 44, hasAlerts, onSessionsOpen, onMeterToggle, onAction, onPaste, onBatchInputToggle, onBatchSubmit, onContainerToggle, onKeepFocus, onModifiersChange }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const [currentPage, setCurrentPage] = useState(0);
     const [modifiers, setModifiers] = useState<ModifierFlags>(emptyModifiers());
@@ -221,6 +222,11 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
         return;
       }
 
+      if (keySpec.behavior.kind === 'paste') {
+        onPaste();
+        return;
+      }
+
       if (keySpec.behavior.kind === 'batch-input-toggle') {
         onBatchInputToggle();
         return;
@@ -238,7 +244,7 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
 
       const mods = keySpec.consumesModifiers ? consumeModifiers() : emptyModifiers();
       onAction(keySpec.behavior, mods);
-    }, [consumeModifiers, handleToggleModifier, onAction, onBatchInputToggle, onContainerToggle]);
+    }, [consumeModifiers, handleToggleModifier, onAction, onPaste, onBatchInputToggle, onContainerToggle]);
 
     const nextPage = useCallback(() => {
       if (pages.length <= 1) return;

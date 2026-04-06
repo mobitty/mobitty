@@ -22,6 +22,7 @@ export type KeyBehavior =
   | { kind: 'toggle-modifier'; modifier: keyof ModifierFlags }
   | { kind: 'batch-input-toggle' }
   | { kind: 'inline-input' }
+  | { kind: 'paste' }
   | { kind: 'meter-toggle' }
   | { kind: 'container-toggle'; containerId: string };
 
@@ -73,6 +74,7 @@ export const KEY_REGISTRY: Record<string, KeySpec> = {
   shift: { id: 'shift', label: 'Shift', behavior: { kind: 'toggle-modifier', modifier: 'shift' }, repeat: { kind: 'none' }, consumesModifiers: false },
   batch_input: { id: 'batch_input', label: 'Input', behavior: { kind: 'batch-input-toggle' }, repeat: { kind: 'none' }, consumesModifiers: false },
   inline_input: { id: 'inline_input', label: 'Input', behavior: { kind: 'inline-input' }, repeat: { kind: 'none' }, consumesModifiers: false },
+  paste: { id: 'paste', label: 'Paste', behavior: { kind: 'paste' }, repeat: { kind: 'none' }, consumesModifiers: false },
   system_meter: { id: 'system_meter', label: 'Meter', behavior: { kind: 'meter-toggle' }, repeat: { kind: 'none' }, consumesModifiers: false },
 };
 
