@@ -354,8 +354,10 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         notificationModeEnv['TERM_PROGRAM'] = 'ghostty';
       }
 
-      // Parse remote editor setting
-      if (parsed.remoteEditor === true) {
+      // Parse remote editor setting.
+      // If no EDITOR is set in the environment, always enable the remote
+      // editor so the user has *some* editor available inside the PTY.
+      if (parsed.remoteEditor === true || !process.env['EDITOR']) {
         remoteEditor = true;
       }
 
