@@ -173,7 +173,7 @@ describe('isProfile', () => {
       ...validCandidate(),
       softkeySize: 44,
       softkeys: { pages: [['esc']], customKeys: [], containers: [] },
-      gestures: { 'long-press': 'esc' },
+      gestures: { 'double-tap': 'esc' },
     }));
   });
 
