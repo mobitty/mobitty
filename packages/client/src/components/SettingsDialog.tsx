@@ -435,7 +435,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
   const handleShellEdit = (shell: ShellInfo) => {
     setShellEditing(shell.name);
     setShellEditName(shell.name);
-    setShellEditCommand(shell.argv.join(' '));
+    setShellEditCommand(shell.command ?? shell.argv.join(' '));
     const envEntries = shell.env
       ? Object.entries(shell.env).map(([key, value]) => ({ key, value }))
       : [];
@@ -447,13 +447,12 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
     const trimmedCommand = shellEditCommand.trim();
     if (!trimmedName || !trimmedCommand) { showStatus('Name and command are required'); return; }
     if (!/^[a-zA-Z0-9_-]{1,64}$/.test(trimmedName)) { showStatus('Invalid shell name'); return; }
-    const argv = trimmedCommand.split(/\s+/);
     const env: Record<string, string> = {};
     for (const entry of shellEditEnv) {
       const k = entry.key.trim();
       if (k) env[k] = entry.value;
     }
-    const data: { name: string; argv: string[]; env?: Record<string, string> } = { name: trimmedName, argv };
+    const data: { name: string; command: string; env?: Record<string, string> } = { name: trimmedName, command: trimmedCommand };
     if (Object.keys(env).length > 0) data.env = env;
     const ok = await saveShell(trimmedName, data);
     if (ok) {
@@ -748,7 +747,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
               <div key={shell.name} className="flex items-center gap-2 px-3 py-2 rounded-md border border-border">
                 <div className="flex-1 min-w-0">
                   <span className="text-sm font-medium">{shell.name}</span>
-                  <div className="text-xs text-muted-foreground truncate">{shell.argv.join(' ')}</div>
+                  <div className="text-xs text-muted-foreground truncate">{shell.command ?? shell.argv.join(' ')}</div>
                   {shell.env && Object.keys(shell.env).length > 0 && (
                     <div className="text-xs text-muted-foreground truncate">
                       env: {Object.entries(shell.env).map(([k, v]) => `${k}=${v}`).join(', ')}

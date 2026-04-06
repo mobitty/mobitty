@@ -8,7 +8,22 @@ export const SHELL_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 export interface Shell {
   name: string;
   argv: string[];
+  command?: string;
   env?: Record<string, string>;
+}
+
+/**
+ * Wrap a raw command string in the platform's default shell so that
+ * operators (`&&`, `|`, `;`), builtins (`cd`), tilde expansion, etc.
+ * are interpreted correctly by node-pty.
+ */
+function commandToArgv(command: string): string[] {
+  if (process.platform === 'win32') {
+    const comspec = process.env['COMSPEC'] || 'cmd.exe';
+    return [comspec, '/c', command];
+  }
+  const shell = process.env['SHELL'] || '/bin/sh';
+  return [shell, '-c', command];
 }
 
 export interface ShellInfo extends Shell {
@@ -42,10 +57,21 @@ export class ShellStore {
         try {
           const raw = readFileSync(join(this.shellsDir, f), 'utf-8');
           const data = JSON.parse(raw) as Record<string, unknown>;
-          if (!Array.isArray(data['argv']) || data['argv'].length === 0) continue;
-          const argv = (data['argv'] as unknown[]).filter((a): a is string => typeof a === 'string');
+          const command = typeof data['command'] === 'string' && data['command'].trim()
+            ? data['command'].trim()
+            : undefined;
+          let argv: string[];
+          if (Array.isArray(data['argv'])) {
+            argv = (data['argv'] as unknown[]).filter((a): a is string => typeof a === 'string');
+          } else {
+            argv = [];
+          }
+          if (argv.length === 0 && command) {
+            argv = commandToArgv(command);
+          }
           if (argv.length === 0) continue;
           const shell: Shell = { name, argv };
+          if (command) shell.command = command;
           if (typeof data['env'] === 'object' && data['env'] !== null && !Array.isArray(data['env'])) {
             const env: Record<string, string> = {};
             for (const [k, v] of Object.entries(data['env'] as Record<string, unknown>)) {
@@ -85,19 +111,29 @@ export class ShellStore {
     try {
       const raw = readFileSync(join(this.shellsDir, `${name}.json`), 'utf-8');
       const data = JSON.parse(raw) as Record<string, unknown>;
-      if (Array.isArray(data['argv']) && data['argv'].length > 0) {
-        const argv = (data['argv'] as unknown[]).filter((a): a is string => typeof a === 'string');
-        if (argv.length > 0) {
-          const shell: ShellInfo = { name, argv, source: 'saved' };
-          if (typeof data['env'] === 'object' && data['env'] !== null && !Array.isArray(data['env'])) {
-            const env: Record<string, string> = {};
-            for (const [k, v] of Object.entries(data['env'] as Record<string, unknown>)) {
-              if (typeof v === 'string') env[k] = v;
-            }
-            if (Object.keys(env).length > 0) shell.env = env;
+      const command = typeof data['command'] === 'string' && data['command'].trim()
+        ? data['command'].trim()
+        : undefined;
+      let argv: string[];
+      if (Array.isArray(data['argv'])) {
+        argv = (data['argv'] as unknown[]).filter((a): a is string => typeof a === 'string');
+      } else {
+        argv = [];
+      }
+      if (argv.length === 0 && command) {
+        argv = commandToArgv(command);
+      }
+      if (argv.length > 0) {
+        const shell: ShellInfo = { name, argv, source: 'saved' };
+        if (command) shell.command = command;
+        if (typeof data['env'] === 'object' && data['env'] !== null && !Array.isArray(data['env'])) {
+          const env: Record<string, string> = {};
+          for (const [k, v] of Object.entries(data['env'] as Record<string, unknown>)) {
+            if (typeof v === 'string') env[k] = v;
           }
-          return shell;
+          if (Object.keys(env).length > 0) shell.env = env;
         }
+        return shell;
       }
     } catch {
       // not saved

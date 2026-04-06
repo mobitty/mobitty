@@ -1,6 +1,7 @@
 export interface ShellInfo {
   name: string;
   argv: string[];
+  command?: string;
   env?: Record<string, string>;
   source: 'saved' | 'discovered';
 }
@@ -20,7 +21,7 @@ export async function fetchShells(): Promise<ShellInfo[]> {
   return [];
 }
 
-export async function saveShell(name: string, data: { name: string; argv: string[]; env?: Record<string, string> }): Promise<boolean> {
+export async function saveShell(name: string, data: { name: string; command: string; env?: Record<string, string> }): Promise<boolean> {
   const resp = await fetch(buildApiUrl(`/api/shells/${encodeURIComponent(name)}`), {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },

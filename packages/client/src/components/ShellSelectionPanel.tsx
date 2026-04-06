@@ -60,7 +60,7 @@ export function ShellSelectionPanel({ shells, onSelect }: ShellSelectionPanelPro
             >
               <div className="flex-1 min-w-0">
                 <span className="text-sm font-medium">{shell.name}</span>
-                <div className="text-xs text-muted-foreground truncate">{shell.argv.join(' ')}</div>
+                <div className="text-xs text-muted-foreground truncate">{shell.command ?? shell.argv.join(' ')}</div>
               </div>
               <Badge variant={shell.source === 'saved' ? 'default' : 'outline'} className="shrink-0 text-xs">
                 {shell.source === 'saved' ? 'saved' : 'auto'}
