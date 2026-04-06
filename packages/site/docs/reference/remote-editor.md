@@ -1,5 +1,5 @@
 ---
-sidebar_position: 8
+sidebar_position: 11
 title: Remote Editor
 description: Edit remote files from your browser when programs need an editor.
 ---

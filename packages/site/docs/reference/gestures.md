@@ -1,5 +1,5 @@
 ---
-sidebar_position: 8
+sidebar_position: 9
 title: Gestures
 description: Touch gestures on mobile — swipe, flick, tap, pinch, and rotate.
 ---

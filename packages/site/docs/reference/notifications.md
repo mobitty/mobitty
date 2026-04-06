@@ -1,5 +1,5 @@
 ---
-sidebar_position: 9
+sidebar_position: 12
 title: Notifications
 description: Mobitty shows terminal notifications as in-app toasts. Supports Ghostty, iTerm2, and Kitty notification protocols.
 ---

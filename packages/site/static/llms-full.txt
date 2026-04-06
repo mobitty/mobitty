@@ -119,6 +119,20 @@ Sessions survive closing the browser tab, network interruptions, switching devic
 
 You can run multiple sessions simultaneously. Sessions are given auto-generated names and can be renamed. Only one client can send input to a session at a time.
 
+## Shells
+
+A shell defines which program runs when you create a session — for example, bash, zsh, fish, or powershell. Mobitty automatically discovers shells installed on the server and lets you manage them from the settings panel.
+
+Auto-discovered shells: On Linux and macOS, Mobitty reads /etc/shells. On Windows, it probes for PowerShell, cmd, Git Bash, and WSL. Common interactive shells are launched in interactive login mode automatically. Discovered shells appear with an "auto" badge and are detected fresh each server start.
+
+Custom shells: Create from Settings > Shells > Add Shell with a name, command, and optional environment variables. Click "Save As" on a discovered shell to create an editable copy. Custom shells persist across restarts.
+
+Choosing a shell: First connection shows a full-screen picker. New sessions show an inline picker if multiple shells exist. Each session remembers its shell.
+
+Environment variables: Per-shell env vars are merged into the process environment at session launch.
+
+Rediscovering: Click "Rediscover Shells" in Settings to re-scan without restarting.
+
 ## Profiles
 
 Mobitty maintains separate profiles for desktop and mobile. The active profile is chosen automatically based on your device.
@@ -126,6 +140,48 @@ Mobitty maintains separate profiles for desktop and mobile. The active profile i
 Settings include: font size, font family, theme (light/dark), scrollback lines, padding, soft key size, Option is Meta, notification mode, remote editor, copy on select, and image paste directory.
 
 Each profile includes a soft key layout that defines which keys appear in the bar at the bottom of the terminal.
+
+## Themes
+
+Each profile references two themes — one for light mode and one for dark mode. Follows OS color scheme preference.
+
+Built-in themes: Default, Dracula, Nord, Gruvbox, Catppuccin Mocha/Latte, Tokyo Night, One Dark, Solarized, Tango.
+
+## Fonts
+
+13 monospace font options. All except System Default are Nerd Font variants with icons and powerline glyphs. Default: Cascadia Code Nerd Font. Custom CSS font-family strings are supported.
+
+## Soft Keys
+
+Soft keys are customizable buttons at the bottom of the terminal screen providing quick access to modifier keys, navigation, macros, and tools.
+
+Key types:
+- Modifier keys: Ctrl, Alt, Shift (sticky toggles)
+- Navigation and special keys: Esc, Tab, arrows, Home, End, Page Up/Down, Enter, Space
+- Input controls: batch input panel, inline input, paste
+- System meter: connection health overlay
+- Custom keys: user-defined macros (e.g. Ctrl+C, multi-step sequences)
+- Containers: expandable groups holding additional keys
+
+## Keyboard Shortcuts
+
+Global: Ctrl+Shift+S toggles session panel (configurable).
+
+Session panel: Up/Down to navigate, Enter to switch, Escape to close, N for new, R to rename, Delete to remove, Shift+Up/Down to reorder.
+
+Remote editor: Ctrl+S / Cmd+S to save.
+
+Mobitty intercepts Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+L, Ctrl+R so they reach the terminal instead of the browser.
+
+## Gestures
+
+Touch gestures map touch actions to soft key actions. Configured per mobile profile.
+
+Available gestures: 1-finger swipe (horizontal), 1-finger flick, 2-finger swipe, 3-finger swipe, double-tap, triple-tap, pinch (in/out), rotate (CW/CCW).
+
+Built-in behaviors (not configurable): long-press selects word, 1-finger vertical swipe scrolls.
+
+Selection actions: select_line, select_visible, select_all — can be mapped to any gesture.
 
 ## Clipboard
 
@@ -141,57 +197,15 @@ Each profile includes a soft key layout that defines which keys appear in the ba
 ### Pasting images
 Paste images (screenshots, photos) directly into the terminal for AI agents. The image is either copied to the server's clipboard or saved as a file (if Image Paste Directory is configured). Supported formats: PNG, JPEG, GIF, WebP, BMP. Max size: 10 MB.
 
-## Soft Keys
-
-Soft keys are customizable buttons at the bottom of the terminal screen providing quick access to modifier keys, navigation, macros, and tools.
-
-Key types:
-- Modifier keys: Ctrl, Alt, Shift (sticky toggles)
-- Navigation and special keys: Esc, Tab, arrows, Home, End, Page Up/Down, Enter, Space
-- Input controls: batch input panel, inline input, paste
-- System meter: connection health overlay
-- Custom keys: user-defined macros (e.g. Ctrl+C, multi-step sequences)
-- Containers: expandable groups holding additional keys
-
-## Gestures
-
-Touch gestures map touch actions to soft key actions. Configured per mobile profile.
-
-Available gestures: 1-finger swipe (horizontal), 1-finger flick, 2-finger swipe, 3-finger swipe, double-tap, triple-tap, pinch (in/out), rotate (CW/CCW).
-
-Built-in behaviors (not configurable): long-press selects word, 1-finger vertical swipe scrolls.
-
-Selection actions: select_line, select_visible, select_all — can be mapped to any gesture.
-
 ## Remote Editor
 
 When a program needs a text editor ($EDITOR), Mobitty opens a full-screen editor panel in the browser instead of a terminal editor like vim. Especially useful on mobile. Toggle in Settings. Sets $EDITOR and $VISUAL environment variables in new sessions.
-
-## Keyboard Shortcuts
-
-Global: Ctrl+Shift+S toggles session panel (configurable).
-
-Session panel: Up/Down to navigate, Enter to switch, Escape to close, N for new, R to rename, Delete to remove, Shift+Up/Down to reorder.
-
-Remote editor: Ctrl+S / Cmd+S to save.
-
-Mobitty intercepts Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+L, Ctrl+R so they reach the terminal instead of the browser.
 
 ## Notifications
 
 Programs can send terminal notifications shown as in-app toasts. Background session notifications include a button to switch to that session. Bell alerts mark sessions in the session list.
 
 Notification modes: Ghostty (OSC 777, default), iTerm2 (OSC 9), Kitty (OSC 99), Off.
-
-## Themes
-
-Each profile references two themes — one for light mode and one for dark mode. Follows OS color scheme preference.
-
-Built-in themes: Default, Dracula, Nord, Gruvbox, Catppuccin Mocha/Latte, Tokyo Night, One Dark, Solarized, Tango.
-
-## Fonts
-
-13 monospace font options. All except System Default are Nerd Font variants with icons and powerline glyphs. Default: Cascadia Code Nerd Font. Custom CSS font-family strings are supported.
 
 ## Adaptive Protocol
 

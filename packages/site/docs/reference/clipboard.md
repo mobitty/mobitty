@@ -1,5 +1,5 @@
 ---
-sidebar_position: 6
+sidebar_position: 10
 title: Clipboard
 description: How copy, paste, and image paste work on mobile and desktop.
 ---
