@@ -23,7 +23,10 @@ export type KeyBehavior =
   | { kind: 'batch-input-toggle' }
   | { kind: 'inline-input' }
   | { kind: 'meter-toggle' }
-  | { kind: 'container-toggle'; containerId: string };
+  | { kind: 'container-toggle'; containerId: string }
+  | { kind: 'select-line' }
+  | { kind: 'select-visible-lines' }
+  | { kind: 'select-all' };
 
 export interface KeySpec {
   id: string;
@@ -74,6 +77,9 @@ export const KEY_REGISTRY: Record<string, KeySpec> = {
   batch_input: { id: 'batch_input', label: 'Input', behavior: { kind: 'batch-input-toggle' }, repeat: { kind: 'none' }, consumesModifiers: false },
   inline_input: { id: 'inline_input', label: 'Input', behavior: { kind: 'inline-input' }, repeat: { kind: 'none' }, consumesModifiers: false },
   system_meter: { id: 'system_meter', label: 'Meter', behavior: { kind: 'meter-toggle' }, repeat: { kind: 'none' }, consumesModifiers: false },
+  select_line: { id: 'select_line', label: 'Sel Line', behavior: { kind: 'select-line' }, repeat: { kind: 'none' }, consumesModifiers: false },
+  select_visible: { id: 'select_visible', label: 'Sel Visible', behavior: { kind: 'select-visible-lines' }, repeat: { kind: 'none' }, consumesModifiers: false },
+  select_all: { id: 'select_all', label: 'Sel All', behavior: { kind: 'select-all' }, repeat: { kind: 'none' }, consumesModifiers: false },
 };
 
 import { BUILTIN_KEY_IDS } from './profile-schema';

@@ -12,7 +12,6 @@ const DISABLED_VALUE = '__disabled__';
 const GESTURE_DISPLAY_LABELS: Partial<Record<GestureId, string>> = {
   'double-tap': 'Double-tap',
   'triple-tap': 'Triple-tap',
-  'long-press': 'Long-press',
   'pinch-in': 'Pinch in',
   'pinch-out': 'Pinch out',
   'rotate-cw': 'Clockwise',
@@ -29,11 +28,9 @@ function directionLabel(gestureId: GestureId): string {
 
 /** Notes about xterm.js default behaviors that gestures override. */
 const GESTURE_NOTES: Partial<Record<string, string>> = {
-  '1-Finger Swipe': 'Overrides native terminal scrolling when mapped.',
+  '1-Finger Swipe': 'Horizontal only; vertical always scrolls natively.',
   '1-Finger Flick': 'Quick gesture; fires alongside native scroll.',
   '2-Finger Swipe': 'Up/Down overrides native terminal scrolling when mapped.',
-  'Taps': 'Triple-tap defaults to line-select (Shift: visible lines, Alt: select all).',
-  'Press': 'Touch and hold (~500ms). Defaults to word-select when unmapped.',
   'Pinch': '2-finger squeeze (in) or spread (out).',
   'Rotate': '2-finger twist gesture.',
 };

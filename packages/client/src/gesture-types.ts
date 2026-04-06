@@ -5,7 +5,7 @@ export type GestureDirection = 'up' | 'down' | 'left' | 'right';
 export type SwipeGestureId = `swipe-${1 | 2 | 3}-${GestureDirection}`;
 export type FlickGestureId = `flick-1-${GestureDirection}`;
 export type GestureId = SwipeGestureId | FlickGestureId
-  | 'double-tap' | 'triple-tap' | 'long-press'
+  | 'double-tap' | 'triple-tap'
   | 'pinch-in' | 'pinch-out' | 'rotate-cw' | 'rotate-ccw';
 
 /** Maps gesture IDs to softkey key IDs. Absent = disabled. */
@@ -22,16 +22,15 @@ function flickIds(): FlickGestureId[] {
 }
 
 export const ALL_GESTURE_IDS: readonly GestureId[] = [
-  ...swipeIds(1), ...flickIds(), ...swipeIds(2), ...swipeIds(3),
-  'double-tap', 'triple-tap', 'long-press',
+  'swipe-1-left', 'swipe-1-right',
+  ...flickIds(), ...swipeIds(2), ...swipeIds(3),
+  'double-tap', 'triple-tap',
   'pinch-in', 'pinch-out', 'rotate-cw', 'rotate-ccw',
 ];
 
 export const VALID_GESTURE_IDS = new Set<string>(ALL_GESTURE_IDS);
 
-export const GESTURE_LABELS: Record<GestureId, string> = {
-  'swipe-1-up': '1-finger swipe up',
-  'swipe-1-down': '1-finger swipe down',
+export const GESTURE_LABELS: Partial<Record<GestureId, string>> = {
   'swipe-1-left': '1-finger swipe left',
   'swipe-1-right': '1-finger swipe right',
   'flick-1-up': '1-finger flick up',
@@ -48,7 +47,6 @@ export const GESTURE_LABELS: Record<GestureId, string> = {
   'swipe-3-right': '3-finger swipe right',
   'double-tap': 'Double-tap',
   'triple-tap': 'Triple-tap',
-  'long-press': 'Long-press',
   'pinch-in': 'Pinch in',
   'pinch-out': 'Pinch out',
   'rotate-cw': 'Rotate clockwise',
@@ -61,12 +59,11 @@ export interface GestureGroup {
 }
 
 export const GESTURE_GROUPS: readonly GestureGroup[] = [
-  { label: '1-Finger Swipe', gestures: [...swipeIds(1)] },
+  { label: '1-Finger Swipe', gestures: ['swipe-1-left', 'swipe-1-right'] },
   { label: '1-Finger Flick', gestures: [...flickIds()] },
   { label: '2-Finger Swipe', gestures: [...swipeIds(2)] },
   { label: '3-Finger Swipe', gestures: [...swipeIds(3)] },
   { label: 'Taps', gestures: ['double-tap', 'triple-tap'] },
-  { label: 'Press', gestures: ['long-press'] },
   { label: 'Pinch', gestures: ['pinch-in', 'pinch-out'] },
   { label: 'Rotate', gestures: ['rotate-cw', 'rotate-ccw'] },
 ];

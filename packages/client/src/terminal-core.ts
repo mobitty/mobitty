@@ -128,6 +128,7 @@ export class TerminalCore {
   private reconnectDelay = 0;
   private reconnectKeyDisposable?: IDisposable;
   private gestureDetector?: GestureDetector;
+  private lastGestureCenter: { x: number; y: number } = { x: 0, y: 0 };
   private gestureMapping: GestureMapping = DEFAULT_GESTURE_MAPPING;
   private customKeyMap?: Map<string, KeySpec>;
   private clipboardImageRequestId = 0;
@@ -381,6 +382,9 @@ export class TerminalCore {
       case 'send-char': this.sendDynamicChar(action.char, modifiers); break;
       case 'send-combo': this.modifierSource?.clearModifiers(); this.sendDynamicCombo(action.combo); break;
       case 'wheel-step': this.sendVirtualWheelStep(action.direction); break;
+      case 'select-line': this.selectLineAtPoint(this.lastGestureCenter); break;
+      case 'select-visible-lines': this.selectVisibleViewportLines(); break;
+      case 'select-all': this.terminal?.selectAll(); requestAnimationFrame(() => this.selectionOverlay?.show()); break;
       case 'toggle-modifier': break;
       case 'batch-input-toggle': break;
       case 'inline-input': break;
@@ -521,10 +525,11 @@ export class TerminalCore {
     if (!element) return;
 
     this.gestureDetector = new GestureDetector(element, this.gestureMapping, {
-      onGesture: (gestureId) => {
+      onGesture: (gestureId, center) => {
         const keyId = this.gestureMapping[gestureId];
         if (!keyId) return;
         const spec = getKeySpec(keyId, this.customKeyMap);
+        this.lastGestureCenter = center;
         this.dispatchKeyAction(spec.behavior, emptyModifiers());
       },
       onContinuousScroll: (deltaY) => {
@@ -534,33 +539,7 @@ export class TerminalCore {
         this.dispatchTouchMultiClick(2, clientX, clientY);
         requestAnimationFrame(() => this.selectionOverlay?.show());
       },
-      onTripleTapDefault: (clientX, clientY) => {
-        if (!this.modifierSource) {
-          this.dispatchTouchMultiClick(3, clientX, clientY);
-          requestAnimationFrame(() => this.selectionOverlay?.show());
-          return;
-        }
-        const selectVisible = this.modifierSource.consumeModifierForTapSelection('shift');
-        const selectAll = this.modifierSource.consumeModifierForTapSelection('alt');
-        if (selectVisible) {
-          this.selectVisibleViewportLines();
-        } else if (selectAll) {
-          this.terminal?.selectAll();
-        } else {
-          this.dispatchTouchMultiClick(3, clientX, clientY);
-        }
-        requestAnimationFrame(() => this.selectionOverlay?.show());
-      },
     }, this.computeContinuousScrollGestures());
-  }
-
-  private selectVisibleViewportLines() {
-    const terminal = this.terminal;
-    if (!terminal) return;
-    const start = Math.max(0, terminal.buffer.active.viewportY);
-    const end = Math.min(terminal.buffer.active.length - 1, start + Math.max(1, terminal.rows) - 1);
-    if (end < start) return;
-    terminal.selectLines(start, end);
   }
 
   private dispatchTouchMultiClick(detail: number, clientX: number, clientY: number) {
@@ -574,6 +553,21 @@ export class TerminalCore {
     };
     element.dispatchEvent(new MouseEvent('mousedown', init));
     element.dispatchEvent(new MouseEvent('mouseup', init));
+  }
+
+  private selectLineAtPoint(center: { x: number; y: number }) {
+    this.dispatchTouchMultiClick(3, center.x, center.y);
+    requestAnimationFrame(() => this.selectionOverlay?.show());
+  }
+
+  private selectVisibleViewportLines() {
+    const terminal = this.terminal;
+    if (!terminal) return;
+    const start = Math.max(0, terminal.buffer.active.viewportY);
+    const end = Math.min(terminal.buffer.active.length - 1, start + Math.max(1, terminal.rows) - 1);
+    if (end < start) return;
+    terminal.selectLines(start, end);
+    requestAnimationFrame(() => this.selectionOverlay?.show());
   }
 
   // --- Browser hotkey capture ---

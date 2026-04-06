@@ -1,7 +1,7 @@
 ---
 sidebar_position: 8
 title: Gestures
-description: Touch gestures on mobile — swipe, flick, tap, pinch, rotate, and long-press.
+description: Touch gestures on mobile — swipe, flick, tap, pinch, and rotate.
 ---
 
 # Gestures
@@ -14,13 +14,7 @@ By default no gestures are mapped — the terminal uses its native touch behavio
 
 ### 1-finger swipe
 
-Slide one finger across the terminal. Commonly mapped to scroll or arrow keys.
-
-When mapped to a scroll key (`wheel_up` / `wheel_down`), the terminal scrolls smoothly as your finger moves rather than jumping one step per swipe.
-
-:::note
-Mapping 1-finger swipes overrides native touch scrolling for the mapped directions. Unmapped directions still scroll normally.
-:::
+Slide one finger left or right across the terminal. Only horizontal directions are configurable — vertical 1-finger swipes always scroll natively.
 
 ### 1-finger flick
 
@@ -28,26 +22,19 @@ A quick, fast swipe. If a regular swipe is also mapped for the same direction, t
 
 ### 2-finger swipe
 
-Slide two fingers across the terminal. Vertical 2-finger swipes also support smooth scrolling when mapped to a scroll key.
+Slide two fingers across the terminal. Vertical 2-finger swipes also support smooth scrolling when mapped to a scroll key (`wheel_up` / `wheel_down`).
 
 ### 3-finger swipe
 
-Slide three fingers across the terminal. Same smooth-scrolling support as 1-finger and 2-finger swipe.
+Slide three fingers across the terminal. Same smooth-scrolling support as 2-finger swipe.
 
 ### Double-tap
 
-Tap twice quickly. When unmapped, double-tap selects the word under the tap (the terminal's built-in behavior).
+Tap twice quickly.
 
 ### Triple-tap
 
-Tap three times quickly. When unmapped, triple-tap selects the line under the tap. You can combine it with modifier soft keys:
-
-- **Shift + triple-tap** — select all visible lines
-- **Alt + triple-tap** — select all text
-
-### Long-press
-
-Touch and hold for about half a second. Does nothing unless mapped.
+Tap three times quickly.
 
 ### Pinch
 
@@ -57,8 +44,27 @@ Two-finger squeeze (pinch in) or spread (pinch out). Each direction is a separat
 
 Two-finger twist, clockwise or counter-clockwise. Each direction is a separate gesture.
 
+## Default behaviors
+
+These touch actions always use their built-in behavior and are not configurable:
+
+- **Long-press** (~500ms hold) — selects the word under the touch
+- **1-finger swipe up/down** — native terminal scrolling
+
+## Selection actions
+
+Three built-in soft keys are available for mapping to gestures:
+
+| Key ID | Label | Action |
+|---|---|---|
+| `select_line` | Sel Line | Select the line at the gesture position |
+| `select_visible` | Sel Visible | Select all visible viewport lines |
+| `select_all` | Sel All | Select all text in the terminal |
+
+For example, mapping triple-tap to `select_line` gives line-select on triple-tap, or mapping it to `select_all` selects everything.
+
 ## Configuring gestures
 
-Open **Settings**, select a mobile profile, and go to the **Gestures** tab. Each gesture has a dropdown listing all available soft keys (built-in and custom). Set a gesture to **disabled** to restore its default behavior.
+Open **Settings**, select a mobile profile, and go to the **Gestures** tab. Each gesture has a dropdown listing all available soft keys (built-in and custom). Set a gesture to **disabled** to clear it.
 
 Tap **Reset to Defaults** to clear all mappings.

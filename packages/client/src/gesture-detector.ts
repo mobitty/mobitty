@@ -12,10 +12,9 @@
 import Hammer from 'hammerjs';
 import type { GestureId, GestureMapping, GestureDirection } from './gesture-types';
 export interface GestureDetectorCallbacks {
-  onGesture: (gestureId: GestureId) => void;
+  onGesture: (gestureId: GestureId, center: { x: number; y: number }) => void;
   onContinuousScroll?: (deltaY: number) => void;
   onLongPressDefault: (clientX: number, clientY: number) => void;
-  onTripleTapDefault: (clientX: number, clientY: number) => void;
 }
 
 function hammerDirectionToGesture(direction: number): GestureDirection | undefined {
@@ -134,7 +133,7 @@ export class GestureDetector {
     this.manager.on('flick1', (e) => this.handleFlick(e));
 
     // Taps
-    this.manager.on('doubletap', () => this.handleDoubleTap());
+    this.manager.on('doubletap', (e) => this.handleDoubleTap(e));
     this.manager.on('tripletap', (e) => this.handleTripleTap(e));
 
     // Long-press
@@ -225,7 +224,7 @@ export class GestureDetector {
     if (!dir) return;
     const gestureId = `swipe-${fingers}-${dir}` as GestureId;
     if (this.mapping[gestureId]) {
-      this.callbacks.onGesture(gestureId);
+      this.callbacks.onGesture(gestureId, e.center);
     }
   }
 
@@ -256,7 +255,7 @@ export class GestureDetector {
         if (dir) {
           const gestureId = `swipe-1-${dir}` as GestureId;
           if (this.mapping[gestureId]) {
-            this.callbacks.onGesture(gestureId);
+            this.callbacks.onGesture(gestureId, e.center);
           }
         }
       }
@@ -279,37 +278,31 @@ export class GestureDetector {
     if (!dir) return;
     const gestureId = `flick-1-${dir}` as GestureId;
     if (this.mapping[gestureId]) {
-      this.callbacks.onGesture(gestureId);
+      this.callbacks.onGesture(gestureId, e.center);
     }
   }
 
-  private handleDoubleTap(): void {
+  private handleDoubleTap(e: HammerInput): void {
     if (this.mapping['double-tap']) {
-      this.callbacks.onGesture('double-tap');
+      this.callbacks.onGesture('double-tap', e.center);
     }
   }
 
   private handleTripleTap(e: HammerInput): void {
     if (this.mapping['triple-tap']) {
-      this.callbacks.onGesture('triple-tap');
-    } else {
-      this.callbacks.onTripleTapDefault(e.center.x, e.center.y);
+      this.callbacks.onGesture('triple-tap', e.center);
     }
   }
 
   private handleLongPress(e: HammerInput): void {
-    if (this.mapping['long-press']) {
-      this.callbacks.onGesture('long-press');
-    } else {
-      this.callbacks.onLongPressDefault(e.center.x, e.center.y);
-    }
+    this.callbacks.onLongPressDefault(e.center.x, e.center.y);
   }
 
   private handlePinchEnd(e: HammerInput): void {
     // scale < 1 = pinch in (fingers moved together), scale > 1 = pinch out (spread)
     const gestureId: GestureId = e.scale < 1 ? 'pinch-in' : 'pinch-out';
     if (this.mapping[gestureId]) {
-      this.callbacks.onGesture(gestureId);
+      this.callbacks.onGesture(gestureId, e.center);
     }
   }
 
@@ -317,7 +310,7 @@ export class GestureDetector {
     // rotation > 0 = clockwise, rotation < 0 = counter-clockwise
     const gestureId: GestureId = e.rotation > 0 ? 'rotate-cw' : 'rotate-ccw';
     if (this.mapping[gestureId]) {
-      this.callbacks.onGesture(gestureId);
+      this.callbacks.onGesture(gestureId, e.center);
     }
   }
 
@@ -326,8 +319,7 @@ export class GestureDetector {
   /** Returns true if touch events should be blocked for the given finger count. */
   private shouldBlockTouch(touchCount: number): boolean {
     if (touchCount === 1) {
-      return !!(this.mapping['swipe-1-up'] || this.mapping['swipe-1-down'] ||
-                this.mapping['swipe-1-left'] || this.mapping['swipe-1-right'] ||
+      return !!(this.mapping['swipe-1-left'] || this.mapping['swipe-1-right'] ||
                 this.mapping['flick-1-up'] || this.mapping['flick-1-down'] ||
                 this.mapping['flick-1-left'] || this.mapping['flick-1-right']);
     }
@@ -345,8 +337,7 @@ export class GestureDetector {
   }
 
   private hasVerticalGesture(): boolean {
-    return !!(this.mapping['swipe-1-up'] || this.mapping['swipe-1-down'] ||
-              this.mapping['flick-1-up'] || this.mapping['flick-1-down'] ||
+    return !!(this.mapping['flick-1-up'] || this.mapping['flick-1-down'] ||
               this.mapping['swipe-2-up'] || this.mapping['swipe-2-down']);
   }
 

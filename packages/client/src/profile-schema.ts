@@ -273,16 +273,16 @@ export const BUILTIN_KEY_IDS = new Set([
   'esc', 'tab', 'up', 'down', 'left', 'right', 'home', 'end', 'pageup', 'pagedown',
   'wheel_up', 'wheel_down', 'enter', 'space', 'ctrl', 'alt', 'shift',
   'batch_input', 'inline_input', 'system_meter',
+  'select_line', 'select_visible', 'select_all',
 ]);
 
 export const VALID_GESTURE_IDS = new Set([
-  'swipe-1-up', 'swipe-1-down', 'swipe-1-left', 'swipe-1-right',
+  'swipe-1-left', 'swipe-1-right',
   'flick-1-up', 'flick-1-down', 'flick-1-left', 'flick-1-right',
   'swipe-2-up', 'swipe-2-down', 'swipe-2-left', 'swipe-2-right',
   'swipe-3-up', 'swipe-3-down', 'swipe-3-left', 'swipe-3-right',
   'double-tap',
   'triple-tap',
-  'long-press',
   'pinch-in',
   'pinch-out',
   'rotate-cw',
@@ -418,7 +418,7 @@ export function isGestureMapping(obj: unknown, customKeyIds: Set<string>): obj i
   const entries = Object.entries(obj as Record<string, unknown>);
   if (entries.length > 27) return false;
   for (const [key, value] of entries) {
-    if (!VALID_GESTURE_IDS.has(key)) return false;
+    if (!VALID_GESTURE_IDS.has(key)) continue;
     if (typeof value !== 'string') return false;
     if (!BUILTIN_KEY_IDS.has(value) && value.length !== 1 && !customKeyIds.has(value)) return false;
   }
