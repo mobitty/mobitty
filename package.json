@@ -18,7 +18,9 @@
     "build": "pnpm -r run --if-present build",
     "dev": "pnpm --filter @mobitty/build start",
     "check": "pnpm -r run --if-present check",
-    "release": "pnpm --filter @mobitty/build release"
+    "release": "pnpm --filter @mobitty/build release",
+    "site:dev": "pnpm --filter @mobitty/site start",
+    "site:build": "pnpm --filter @mobitty/site build"
   },
   "pnpm": {
     "onlyBuiltDependencies": [

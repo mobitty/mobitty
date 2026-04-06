@@ -1,0 +1,101 @@
+/* ==========================================================================
+   Mobitty Design System
+   ========================================================================== */
+
+:root {
+  /* Brown/tan base palette */
+  --ifm-color-primary: #6b5b4e;
+  --ifm-color-primary-dark: #5e4f43;
+  --ifm-color-primary-darker: #574a3f;
+  --ifm-color-primary-darkest: #473d34;
+  --ifm-color-primary-light: #786759;
+  --ifm-color-primary-lighter: #7f6d5f;
+  --ifm-color-primary-lightest: #8f7e71;
+
+  /* Typography */
+  --ifm-font-family-base: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  --ifm-font-family-monospace: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+  --mobitty-font-display: 'JetBrains Mono', monospace;
+
+  /* Accent — amber/gold (light mode) */
+  --mobitty-accent: #c48a20;
+  --mobitty-accent-hover: #a87518;
+  --mobitty-accent-subtle: rgba(196, 138, 32, 0.1);
+
+  /* Trust — muted teal (light mode) */
+  --mobitty-trust: #3d9985;
+  --mobitty-trust-subtle: rgba(61, 153, 133, 0.08);
+
+  /* Surface */
+  --mobitty-surface: rgba(245, 245, 245, 0.92);
+  --mobitty-surface-border: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme='dark'] {
+  --ifm-color-primary: #c4b5a5;
+  --ifm-color-primary-dark: #b5a38f;
+  --ifm-color-primary-darker: #ad9985;
+  --ifm-color-primary-darkest: #8e7963;
+  --ifm-color-primary-light: #d3c7bb;
+  --ifm-color-primary-lighter: #dbd1c5;
+  --ifm-color-primary-lightest: #f2ede8;
+
+  /* Accent — amber/gold (dark mode) */
+  --mobitty-accent: #e5a843;
+  --mobitty-accent-hover: #f0b955;
+  --mobitty-accent-subtle: rgba(229, 168, 67, 0.1);
+
+  /* Trust — muted teal (dark mode) */
+  --mobitty-trust: #5bb8a5;
+  --mobitty-trust-subtle: rgba(91, 184, 165, 0.08);
+
+  /* Surface */
+  --mobitty-surface: rgba(30, 30, 30, 0.92);
+  --mobitty-surface-border: rgba(255, 255, 255, 0.06);
+}
+
+/* ==========================================================================
+   Navbar logo — SVG uses prefers-color-scheme for favicon, but <img> tags
+   don't reliably evaluate it. Force the right color via CSS filter per theme.
+   ========================================================================== */
+
+[data-theme='dark'] .navbar__logo img {
+  filter: brightness(0) invert(1);
+}
+
+[data-theme='light'] .navbar__logo img {
+  filter: brightness(0);
+}
+
+/* ==========================================================================
+   Docs reading experience
+   ========================================================================== */
+
+.markdown h2 {
+  border-top: 1px solid var(--mobitty-surface-border);
+  padding-top: 1.5rem;
+  margin-top: 2.5rem;
+}
+
+.markdown h2:first-child {
+  border-top: none;
+  padding-top: 0;
+  margin-top: 0;
+}
+
+/* External link icon for markdown content */
+.markdown a[href^="http"]::after {
+  content: '';
+  display: inline-block;
+  width: 0.75em;
+  height: 0.75em;
+  margin-left: 0.25em;
+  vertical-align: baseline;
+  background-color: currentColor;
+  mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z'/%3E%3C/svg%3E");
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  -webkit-mask-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M21 13v10h-21v-19h12v2h-10v15h17v-8h2zm3-12h-10.988l4.035 4-6.977 7.07 2.828 2.828 6.977-7.07 4.125 4.172v-11z'/%3E%3C/svg%3E");
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+}

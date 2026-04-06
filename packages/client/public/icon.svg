@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <!-- Solid background for home screen / app icon -->
+  <rect width="512" height="512" rx="96" fill="#2b2b2b"/>
+  <!-- Terminal prompt >_ -->
+  <text x="256" y="300" text-anchor="middle" font-family="ui-monospace, SFMono-Regular, monospace" font-size="180" font-weight="700" fill="#d4d4d4">&gt;_</text>
+</svg>

@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" fill="none">
+  <style>
+    .s { stroke: #2a2a2a; fill: none; }
+    .f { fill: #2a2a2a; }
+    @media (prefers-color-scheme: dark) {
+      .s { stroke: #d4d4d4; }
+      .f { fill: #d4d4d4; }
+    }
+  </style>
+  <rect x="14" y="4" width="36" height="56" rx="8" ry="8" class="s" stroke-width="3"/>
+  <rect x="18" y="12" width="28" height="36" rx="2" ry="2" class="f" opacity="0.08"/>
+  <text x="24" y="35" font-family="ui-monospace, SFMono-Regular, monospace" font-size="16" font-weight="700" class="f">&gt;_</text>
+  <rect x="26" y="52" width="12" height="3" rx="1.5" class="f" opacity="0.3"/>
+</svg>

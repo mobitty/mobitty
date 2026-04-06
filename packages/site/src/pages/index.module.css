@@ -1,0 +1,515 @@
+/* ==========================================================================
+   Landing page — warm industrial terminal aesthetic
+   ========================================================================== */
+
+.main {
+  overflow-x: hidden;
+}
+
+/* ==========================================================================
+   Hero
+   ========================================================================== */
+
+.hero {
+  min-height: 55vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 4rem 2rem 2rem;
+  position: relative;
+
+  /* Subtle scanline overlay */
+  background:
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 2px,
+      rgba(0, 0, 0, 0.03) 2px,
+      rgba(0, 0, 0, 0.03) 4px
+    );
+}
+
+.heroInner {
+  max-width: 720px;
+  animation: fadeInUp 600ms ease-out;
+}
+
+.heroBadge {
+  display: inline-block;
+  font-family: var(--mobitty-font-display);
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: var(--mobitty-accent);
+  background: var(--mobitty-accent-subtle);
+  padding: 0.3rem 0.85rem;
+  border-radius: 9999px;
+  margin-bottom: 1.5rem;
+}
+
+.heroTitle {
+  font-family: var(--mobitty-font-display);
+  font-size: 3.5rem;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  line-height: 1.15;
+  margin-bottom: 1.25rem;
+  white-space: pre-line;
+}
+
+.heroSubtitle {
+  font-size: 1.15rem;
+  color: var(--ifm-font-color-secondary);
+  line-height: 1.7;
+  margin-bottom: 2rem;
+  max-width: 520px;
+  margin-left: auto;
+  margin-right: auto;
+}
+
+.cursorBlink {
+  display: inline-block;
+  color: var(--mobitty-accent);
+  animation: blink 700ms step-end infinite;
+  margin-left: 2px;
+}
+
+@keyframes blink {
+  50% { opacity: 0; }
+}
+
+/* CTA buttons */
+.heroCta {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+
+.ctaPrimary {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.75rem 1.75rem;
+  border-radius: 0.625rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-decoration: none;
+  transition: all 200ms ease;
+  background: var(--mobitty-accent);
+  color: #1a1a1a;
+}
+
+.ctaPrimary:hover {
+  background: var(--mobitty-accent-hover);
+  color: #1a1a1a;
+  text-decoration: none;
+}
+
+.ctaSecondary {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.75rem 1.75rem;
+  border-radius: 0.625rem;
+  font-weight: 600;
+  font-size: 0.95rem;
+  text-decoration: none;
+  transition: all 200ms ease;
+  background: transparent;
+  color: var(--ifm-font-color-base);
+  border: 1px solid rgba(128, 128, 128, 0.3);
+}
+
+.ctaSecondary:hover {
+  border-color: rgba(128, 128, 128, 0.6);
+  color: var(--ifm-font-color-base);
+  text-decoration: none;
+}
+
+.heroTrust {
+  font-size: 0.8rem;
+  color: var(--mobitty-trust);
+  margin: 0;
+}
+
+@keyframes fadeInUp {
+  from {
+    opacity: 0;
+    transform: translateY(16px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 768px) {
+  .heroTitle {
+    font-size: 2.25rem;
+  }
+
+  .heroSubtitle {
+    font-size: 1rem;
+  }
+}
+
+/* ==========================================================================
+   Product Visual
+   ========================================================================== */
+
+.productVisual {
+  padding: 2rem 2rem 3rem;
+  text-align: center;
+}
+
+.visualPills {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-top: 1.5rem;
+}
+
+.pill {
+  font-family: var(--mobitty-font-display);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ifm-font-color-secondary);
+  background: var(--mobitty-surface);
+  border: 1px solid var(--mobitty-surface-border);
+  padding: 0.3rem 0.7rem;
+  border-radius: 9999px;
+}
+
+/* ==========================================================================
+   Audience Split
+   ========================================================================== */
+
+.audience {
+  padding: 3rem 2rem;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.audienceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 1.5rem;
+}
+
+@media (max-width: 768px) {
+  .audienceGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.audienceCard {
+  background: var(--mobitty-surface);
+  border: 1px solid var(--mobitty-surface-border);
+  border-radius: 0.625rem;
+  padding: 2rem 1.75rem;
+}
+
+.audienceCard:hover {
+  border-color: rgba(128, 128, 128, 0.15);
+}
+
+.audienceIcon {
+  color: var(--ifm-font-color-secondary);
+  margin-bottom: 1rem;
+}
+
+.audienceTitle {
+  font-family: var(--mobitty-font-display);
+  font-size: 1.1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 1rem;
+  line-height: 1.3;
+}
+
+.audienceList {
+  list-style: none;
+  padding: 0;
+  margin: 0 0 1.5rem;
+}
+
+.audienceList li {
+  font-size: 0.85rem;
+  color: var(--ifm-font-color-secondary);
+  padding: 0.3rem 0;
+  padding-left: 1.25em;
+  position: relative;
+}
+
+.audienceList li::before {
+  content: '\2713';
+  position: absolute;
+  left: 0;
+  color: var(--mobitty-trust);
+}
+
+.audienceCta {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--mobitty-accent);
+  text-decoration: none;
+}
+
+.audienceCta:hover {
+  text-decoration: underline;
+  color: var(--mobitty-accent-hover);
+}
+
+/* ==========================================================================
+   Features — primary + secondary tiers
+   ========================================================================== */
+
+.features {
+  padding: 3rem 2rem;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+/* Primary — 3 large cards */
+.primaryGrid {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.25rem;
+  margin-bottom: 1.25rem;
+}
+
+@media (max-width: 768px) {
+  .primaryGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.primaryCard {
+  background: var(--mobitty-surface);
+  border: 1px solid var(--mobitty-surface-border);
+  border-radius: 0.625rem;
+  padding: 1.75rem;
+  min-height: 180px;
+  animation: cardFadeIn 400ms ease-out backwards;
+}
+
+.primaryCard:hover {
+  border-color: rgba(128, 128, 128, 0.15);
+}
+
+.primaryIcon {
+  color: var(--mobitty-accent);
+  margin-bottom: 0.75rem;
+}
+
+.primaryTitle {
+  font-family: var(--mobitty-font-display);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.5rem;
+}
+
+.primaryDesc {
+  font-size: 0.85rem;
+  color: var(--ifm-font-color-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+
+/* Secondary — 4 compact cards */
+.secondaryGrid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1.25rem;
+}
+
+@media (max-width: 1024px) {
+  .secondaryGrid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 768px) {
+  .secondaryGrid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.secondaryCard {
+  background: var(--mobitty-surface);
+  border: 1px solid var(--mobitty-surface-border);
+  border-radius: 0.625rem;
+  padding: 1.25rem;
+  animation: cardFadeIn 400ms ease-out backwards;
+}
+
+.secondaryCard:hover {
+  border-color: rgba(128, 128, 128, 0.15);
+}
+
+.secondaryIcon {
+  color: var(--ifm-font-color-secondary);
+  margin-bottom: 0.5rem;
+}
+
+.secondaryTitle {
+  font-size: 0.9rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  margin-bottom: 0.35rem;
+}
+
+.secondaryDesc {
+  font-size: 0.8rem;
+  color: var(--ifm-font-color-secondary);
+  line-height: 1.6;
+  margin: 0;
+}
+
+@keyframes cardFadeIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+/* ==========================================================================
+   Quick Start — terminal window
+   ========================================================================== */
+
+.quickStart {
+  padding: 3rem 2rem;
+  max-width: 600px;
+  margin: 0 auto;
+  text-align: center;
+}
+
+.sectionTitle {
+  font-family: var(--mobitty-font-display);
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin-bottom: 1.5rem;
+}
+
+.terminalWindow {
+  border: 1px solid rgba(128, 128, 128, 0.15);
+  border-radius: 0.625rem;
+  overflow: hidden;
+  text-align: left;
+}
+
+.terminalBar {
+  background: #2b2b2b;
+  padding: 0.6rem 0.85rem;
+  display: flex;
+  gap: 6px;
+  border-bottom: 1px solid rgba(128, 128, 128, 0.15);
+}
+
+[data-theme='light'] .terminalBar {
+  background: #f0f0f0;
+}
+
+.terminalDot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.terminalDot[data-color='red'] { background: #ff5f57; }
+.terminalDot[data-color='yellow'] { background: #febc2e; }
+.terminalDot[data-color='green'] { background: #28c840; }
+
+.terminalBody {
+  background: #2b2b2b;
+  padding: 1.25rem;
+  font-size: 0.9rem;
+  line-height: 1.8;
+  font-family: var(--ifm-font-family-monospace);
+  color: #d4d4d4;
+}
+
+[data-theme='light'] .terminalBody {
+  background: #f5f5f5;
+  color: #1a1a1a;
+}
+
+.terminalPrompt {
+  color: #a3a3a3;
+  margin-right: 0.5em;
+  user-select: none;
+}
+
+.terminalSuccess {
+  color: var(--mobitty-trust);
+}
+
+[data-theme='light'] .terminalSuccess {
+  color: #3d9985;
+}
+
+.terminalMuted {
+  color: #737373;
+}
+
+.quickStartHint {
+  margin-top: 1rem;
+  font-size: 0.9rem;
+  color: var(--ifm-font-color-secondary);
+}
+
+/* ==========================================================================
+   Final CTA
+   ========================================================================== */
+
+.finalCta {
+  text-align: center;
+  padding: 3rem 2rem 5rem;
+}
+
+.finalCtaTitle {
+  font-family: var(--mobitty-font-display);
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  margin-bottom: 1.5rem;
+}
+
+.finalCtaButtons {
+  display: flex;
+  gap: 1rem;
+  justify-content: center;
+  flex-wrap: wrap;
+  margin-bottom: 1.25rem;
+}
+
+.finalCtaNote {
+  font-size: 0.85rem;
+  color: var(--ifm-font-color-secondary);
+  margin-bottom: 1rem;
+}
+
+.trustPills {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.trustPill {
+  font-family: var(--mobitty-font-display);
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--mobitty-trust);
+  background: var(--mobitty-trust-subtle);
+  padding: 0.3rem 0.7rem;
+  border-radius: 9999px;
+}
