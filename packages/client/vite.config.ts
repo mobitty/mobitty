@@ -2,7 +2,6 @@ import { readFileSync } from 'node:fs';
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
-import { viteSingleFile } from 'vite-plugin-singlefile';
 import path from 'path';
 
 const backendPort = process.env.MOBITTY_SERVER_PORT ?? '5172';
@@ -21,7 +20,7 @@ const httpsConfig = tlsCert !== undefined && tlsKey !== undefined
 
 export default defineConfig({
   root: '.',
-  plugins: [react(), tailwindcss(), viteSingleFile()],
+  plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

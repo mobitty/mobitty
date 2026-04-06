@@ -1,4 +1,4 @@
-import { cpSync, mkdirSync, rmSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { cpSync, rmSync, existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -18,8 +18,8 @@ if (existsSync(distDir)) {
 console.log('Building client...');
 execSync('pnpm run build', { cwd: clientDir, stdio: 'inherit' });
 
-const clientHtml = resolve(clientDir, 'dist', 'index.html');
-if (!existsSync(clientHtml)) {
+const clientDist = resolve(clientDir, 'dist');
+if (!existsSync(resolve(clientDist, 'index.html'))) {
   console.error('Client build failed: dist/index.html not found');
   process.exit(1);
 }
@@ -49,9 +49,8 @@ if (existsSync(npmignore)) {
 }
 cpSync(resolve(rootDir, 'README.md'), resolve(distDir, 'README.md'));
 
-// 5. Place built client HTML
-mkdirSync(resolve(distDir, 'client'), { recursive: true });
-cpSync(clientHtml, resolve(distDir, 'client', 'index.html'));
+// 5. Place built client assets
+cpSync(clientDist, resolve(distDir, 'client'), { recursive: true });
 
 // 6. Summary
 console.log('');

@@ -32,7 +32,7 @@
   "files": [
     "src/**/*.ts",
     "!src/**/*.test.ts",
-    "client/index.html"
+    "client/**"
   ],
   "engines": {
     "node": ">=20.0.0"

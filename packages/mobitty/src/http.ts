@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readFileSync } from 'node:fs';
-import { resolve, dirname } from 'node:path';
+import { resolve, dirname, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { brotliCompressSync, gzipSync, constants } from 'node:zlib';
@@ -15,32 +15,82 @@ const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
 const MAX_BODY_BYTES = 65536;
 const MAX_EDITOR_BODY_BYTES = 5 * 1024 * 1024; // 5 MB for editor content
 
-interface HtmlCache {
+const CLIENT_DIR = resolve(__dirname, '..', 'client');
+
+const MIME_TYPES: Record<string, string> = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.svg': 'image/svg+xml',
+};
+
+interface AssetCache {
   raw: Buffer;
   br: Buffer;
   gzip: Buffer;
   etag: string;
+  contentType: string;
+  immutable: boolean;
 }
 
-let htmlCache: HtmlCache | null = null;
+const assetCacheMap = new Map<string, AssetCache | false>();
 
-function getHtmlCache(): HtmlCache {
-  if (htmlCache !== null) return htmlCache;
-  const htmlPath = resolve(__dirname, '..', 'client', 'index.html');
-  let html: string;
-  try {
-    html = readFileSync(htmlPath, 'utf-8');
-  } catch {
-    html = '<html><body><h1>Frontend not built. Run: pnpm run build</h1></body></html>';
+function loadAsset(urlPath: string): AssetCache | undefined {
+  const cached = assetCacheMap.get(urlPath);
+  if (cached === false) return undefined;
+  if (cached !== undefined) return cached;
+
+  const filePath = resolve(CLIENT_DIR, '.' + urlPath);
+  if (!filePath.startsWith(CLIENT_DIR + '/')) {
+    assetCacheMap.set(urlPath, false);
+    return undefined;
   }
-  const raw = Buffer.from(html, 'utf-8');
-  const etag = '"' + createHash('sha256').update(raw).digest('hex').slice(0, 16) + '"';
-  const br = brotliCompressSync(raw, {
-    params: { [constants.BROTLI_PARAM_QUALITY]: constants.BROTLI_MAX_QUALITY },
-  });
-  const gzip = gzipSync(raw, { level: 9 });
-  htmlCache = { raw, br, gzip, etag };
-  return htmlCache;
+
+  try {
+    const raw = readFileSync(filePath);
+    const ext = extname(filePath);
+    const contentType = MIME_TYPES[ext] ?? 'application/octet-stream';
+    const etag = '"' + createHash('sha256').update(raw).digest('hex').slice(0, 16) + '"';
+    const immutable = urlPath.startsWith('/assets/');
+    const br = brotliCompressSync(raw, {
+      params: { [constants.BROTLI_PARAM_QUALITY]: constants.BROTLI_MAX_QUALITY },
+    });
+    const gzip = gzipSync(raw, { level: 9 });
+    const asset: AssetCache = { raw, br, gzip, etag, contentType, immutable };
+    assetCacheMap.set(urlPath, asset);
+    return asset;
+  } catch {
+    assetCacheMap.set(urlPath, false);
+    return undefined;
+  }
+}
+
+function serveAsset(req: IncomingMessage, res: ServerResponse, asset: AssetCache): void {
+  if (req.headers['if-none-match'] === asset.etag) {
+    res.writeHead(304);
+    res.end();
+    return;
+  }
+  const accept = req.headers['accept-encoding'] ?? '';
+  const headers: Record<string, string> = {
+    'Content-Type': asset.contentType,
+    'ETag': asset.etag,
+    'Cache-Control': asset.immutable ? 'public, max-age=31536000, immutable' : 'no-cache',
+    'Vary': 'Accept-Encoding',
+  };
+  if (accept.includes('br')) {
+    headers['Content-Encoding'] = 'br';
+    res.writeHead(200, headers);
+    res.end(asset.br);
+  } else if (accept.includes('gzip')) {
+    headers['Content-Encoding'] = 'gzip';
+    res.writeHead(200, headers);
+    res.end(asset.gzip);
+  } else {
+    res.writeHead(200, headers);
+    res.end(asset.raw);
+  }
 }
 
 function readBody(req: IncomingMessage, maxBytes = MAX_BODY_BYTES): Promise<string> {
@@ -426,32 +476,16 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
     }
   }
 
-  if (url === '/' || url.startsWith('/?')) {
-    const cache = getHtmlCache();
-    if (req.headers['if-none-match'] === cache.etag) {
-      res.writeHead(304);
-      res.end();
-      return;
-    }
-    const accept = req.headers['accept-encoding'] ?? '';
-    const headers: Record<string, string> = {
-      'Content-Type': 'text/html; charset=utf-8',
-      'ETag': cache.etag,
-      'Cache-Control': 'no-cache',
-      'Vary': 'Accept-Encoding',
-    };
-    if (accept.includes('br')) {
-      headers['Content-Encoding'] = 'br';
-      res.writeHead(200, headers);
-      res.end(cache.br);
-    } else if (accept.includes('gzip')) {
-      headers['Content-Encoding'] = 'gzip';
-      res.writeHead(200, headers);
-      res.end(cache.gzip);
-    } else {
-      res.writeHead(200, headers);
-      res.end(cache.raw);
-    }
+  const assetPath = (url === '/' || url.startsWith('/?')) ? '/index.html' : pathname;
+  const asset = loadAsset(assetPath);
+  if (asset !== undefined) {
+    serveAsset(req, res, asset);
+    return;
+  }
+
+  if (assetPath === '/index.html') {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    res.end('<html><body><h1>Frontend not built. Run: pnpm run build</h1></body></html>');
     return;
   }
 
