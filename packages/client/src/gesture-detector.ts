@@ -14,7 +14,7 @@ import type { GestureId, GestureMapping, GestureDirection } from './gesture-type
 export interface GestureDetectorCallbacks {
   onGesture: (gestureId: GestureId) => void;
   onContinuousScroll?: (deltaY: number) => void;
-  onDoubleTapDefault: (clientX: number, clientY: number) => void;
+  onLongPressDefault: (clientX: number, clientY: number) => void;
   onTripleTapDefault: (clientX: number, clientY: number) => void;
 }
 
@@ -134,11 +134,11 @@ export class GestureDetector {
     this.manager.on('flick1', (e) => this.handleFlick(e));
 
     // Taps
-    this.manager.on('doubletap', (e) => this.handleDoubleTap(e));
+    this.manager.on('doubletap', () => this.handleDoubleTap());
     this.manager.on('tripletap', (e) => this.handleTripleTap(e));
 
     // Long-press
-    this.manager.on('longpress', () => this.handleLongPress());
+    this.manager.on('longpress', (e) => this.handleLongPress(e));
 
     // Pinch — fire once at end based on final scale
     this.manager.on('pinchend', (e) => this.handlePinchEnd(e));
@@ -283,11 +283,9 @@ export class GestureDetector {
     }
   }
 
-  private handleDoubleTap(e: HammerInput): void {
+  private handleDoubleTap(): void {
     if (this.mapping['double-tap']) {
       this.callbacks.onGesture('double-tap');
-    } else {
-      this.callbacks.onDoubleTapDefault(e.center.x, e.center.y);
     }
   }
 
@@ -299,9 +297,11 @@ export class GestureDetector {
     }
   }
 
-  private handleLongPress(): void {
+  private handleLongPress(e: HammerInput): void {
     if (this.mapping['long-press']) {
       this.callbacks.onGesture('long-press');
+    } else {
+      this.callbacks.onLongPressDefault(e.center.x, e.center.y);
     }
   }
 

@@ -530,7 +530,7 @@ export class TerminalCore {
       onContinuousScroll: (deltaY) => {
         this.sendWheelDelta(deltaY);
       },
-      onDoubleTapDefault: (clientX, clientY) => {
+      onLongPressDefault: (clientX, clientY) => {
         this.dispatchTouchMultiClick(2, clientX, clientY);
         requestAnimationFrame(() => this.selectionOverlay?.show());
       },
