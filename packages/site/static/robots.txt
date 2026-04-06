@@ -1,0 +1,29 @@
+User-agent: *
+Allow: /
+
+# AI crawlers
+User-agent: GPTBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Amazonbot
+Allow: /
+
+User-agent: GoogleOther
+Allow: /
+
+User-agent: cohere-ai
+Allow: /
+
+Sitemap: https://mobitty.dev/sitemap.xml

@@ -1,7 +1,7 @@
 ---
 sidebar_position: 1
 title: Soft Keys
-description: Overview of the soft key system.
+description: Mobitty soft keys — customizable on-screen buttons for modifier keys, navigation, macros, and tools on mobile and desktop.
 ---
 
 # Soft Keys

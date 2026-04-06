@@ -1,7 +1,7 @@
 ---
 sidebar_position: 4
 title: Themes
-description: Built-in themes and color properties.
+description: Mobitty ships with 10 built-in terminal themes including Dracula, Nord, Catppuccin, and Gruvbox. Supports light and dark mode.
 ---
 
 # Themes

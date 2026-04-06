@@ -1,7 +1,7 @@
 ---
 sidebar_position: 5
 title: Containers
-description: Group soft keys into expandable panels.
+description: Mobitty containers — group soft keys into expandable slide-up panels to keep the main bar focused.
 ---
 
 # Containers

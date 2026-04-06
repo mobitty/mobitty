@@ -1,7 +1,7 @@
 ---
 sidebar_position: 1
 title: Modifier and Special Keys
-description: Built-in modifier, navigation, and special keys.
+description: Mobitty built-in soft keys — sticky Ctrl/Alt/Shift modifiers, arrow keys with hold-to-repeat, Esc, Tab, and scroll keys.
 ---
 
 # Modifier and Special Keys

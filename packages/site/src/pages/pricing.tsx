@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import clsx from 'clsx';
+import Head from '@docusaurus/Head';
 import Layout from '@theme/Layout';
 import styles from './pricing.module.css';
 
@@ -40,7 +41,7 @@ const plans: Plan[] = [
       'Priority support',
     ],
     cta: 'Buy License',
-    href: '#',
+    href: 'https://buy.stripe.com/14A4gr3Ua0hCamwdlaejK00',
     highlighted: true,
   },
   {
@@ -53,7 +54,7 @@ const plans: Plan[] = [
       'Priority support',
     ],
     cta: 'Buy License',
-    href: '#',
+    href: 'https://buy.stripe.com/7sY5kv3UaggAamwbd2ejK01',
   },
   {
     name: 'Enterprise',
@@ -78,7 +79,7 @@ const faqItems: FaqItem[] = [
   {
     question: 'Which AI agents work with Mobitty?',
     answer:
-      'Any CLI-based AI agent that runs in a terminal works with Mobitty — Claude Code, OpenAI Codex, Cursor Agent CLI, and any other terminal-based agent. Mobitty is not affiliated with any AI vendor. Product names mentioned are trademarks of their respective owners.',
+      'Any CLI-based AI agent that runs in a terminal works with Mobitty — Claude Code, OpenAI Codex, Cursor Agent CLI, and any other terminal-based agent. If it runs in a shell, it runs in Mobitty.',
   },
   {
     question: 'What does "no feature gating" mean?',
@@ -190,12 +191,70 @@ function FAQ() {
   );
 }
 
+const faqJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'FAQPage',
+  mainEntity: [
+    {
+      '@type': 'Question',
+      name: 'Which AI agents work with Mobitty?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'Any CLI-based AI agent that runs in a terminal works with Mobitty — Claude Code, OpenAI Codex, Cursor Agent CLI, and any other terminal-based agent. If it runs in a shell, it runs in Mobitty.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'What does "no feature gating" mean?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'The software is identical across all tiers. Free, Pro, Team, and Enterprise all run the exact same binary with the exact same features. The license determines whether you may use it commercially — not which features you can access.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'Why one-time instead of a subscription?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: '$99 once — lifetime commercial-use license for one person, every future update included, no renewal. Most developer tools charge $10–20/month for less. Mobitty pays for itself in a few months and keeps working for years.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'What is BSL-1.1?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'Business Source License 1.1. You can read, build, and modify the source code. Commercial use requires a license during the BSL period. Four years after each release, that version automatically converts to GPLv2+ — fully open source, forever.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'Can I self-host for my team?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'Yes. Mobitty runs entirely on your infrastructure. A Team license covers your seats. There is no cloud dependency — your data never leaves your network.',
+      },
+    },
+    {
+      '@type': 'Question',
+      name: 'What happens if Mobitty shuts down?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'Every version converts to GPLv2+ four years after release. You can fork and maintain it yourself. Your data was always on your server — nothing is lost.',
+      },
+    },
+  ],
+};
+
 export default function Pricing(): JSX.Element {
   return (
     <Layout
       title="Pricing"
       description="Mobitty pricing — free for non-commercial use. $99 one-time Pro license for developers. Team and enterprise plans for commercial use."
     >
+      <Head>
+        <script type="application/ld+json">{JSON.stringify(faqJsonLd)}</script>
+      </Head>
       <main className={styles.main}>
         <section className={styles.hero}>
           <h1 className={styles.title}>Simple, honest pricing</h1>

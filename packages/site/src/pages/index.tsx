@@ -273,7 +273,10 @@ function FinalCta() {
 
 export default function Home(): JSX.Element {
   return (
-    <Layout description="Mobitty — a touch-first web terminal for AI coding agents like Claude Code and Codex. Self-hosted, source-available. Access your terminal from any phone or tablet.">
+    <Layout
+      title="Touch-first Web Terminal for AI Agents"
+      description="Mobitty — a touch-first web terminal for AI coding agents like Claude Code and Codex. Self-hosted, source-available. Access your terminal from any phone or tablet."
+    >
       <main className={styles.main}>
         <Hero />
         <ProductVisual />

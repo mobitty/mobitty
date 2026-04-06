@@ -1,7 +1,7 @@
 ---
 sidebar_position: 4
 title: Custom Keys
-description: Define your own soft key macros.
+description: Create custom Mobitty soft keys that send any key combination or multi-step macro sequence to the terminal.
 ---
 
 # Custom Keys

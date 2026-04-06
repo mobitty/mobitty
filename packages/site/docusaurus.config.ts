@@ -37,6 +37,56 @@ const config: Config = {
         content: 'mobitty, web terminal, mobile terminal, SSH, Claude Code, Codex, AI agent, AI coding agent, self-hosted terminal, touch terminal, mobile SSH, browser terminal, terminal emulator, xterm.js, PWA terminal',
       },
     },
+    {
+      tagName: 'script',
+      attributes: { type: 'application/ld+json' },
+      innerHTML: JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'WebSite',
+        name: 'Mobitty',
+        url: 'https://mobitty.dev',
+        description: 'A touch-first web terminal for AI agent workflows.',
+        publisher: {
+          '@type': 'Organization',
+          name: 'CCSW LLC',
+          url: 'https://mobitty.dev',
+          logo: {
+            '@type': 'ImageObject',
+            url: 'https://mobitty.dev/img/logo.svg',
+          },
+          email: 'hello@mobitty.dev',
+        },
+      }),
+    },
+    {
+      tagName: 'script',
+      attributes: { type: 'application/ld+json' },
+      innerHTML: JSON.stringify({
+        '@context': 'https://schema.org',
+        '@type': 'SoftwareApplication',
+        name: 'Mobitty',
+        url: 'https://mobitty.dev',
+        description:
+          'A touch-first web terminal for AI agent workflows. Self-hosted, source-available. Run AI coding agents like Claude Code and Codex from your phone.',
+        applicationCategory: 'DeveloperApplication',
+        operatingSystem: 'Any (runs in browser)',
+        offers: [
+          {
+            '@type': 'Offer',
+            price: '0',
+            priceCurrency: 'USD',
+            description: 'Free for non-commercial use',
+          },
+          {
+            '@type': 'Offer',
+            price: '99',
+            priceCurrency: 'USD',
+            description:
+              'Pro — one-time lifetime license for individual commercial use',
+          },
+        ],
+      }),
+    },
   ],
 
   url: 'https://mobitty.dev',
@@ -92,6 +142,13 @@ const config: Config = {
   ],
 
   themeConfig: {
+    metadata: [
+      { property: 'og:type', content: 'website' },
+      { property: 'og:site_name', content: 'Mobitty' },
+      { property: 'og:image', content: 'https://mobitty.dev/img/social-card.png' },
+      { name: 'twitter:card', content: 'summary_large_image' },
+      { name: 'twitter:image', content: 'https://mobitty.dev/img/social-card.png' },
+    ],
     colorMode: {
       defaultMode: 'dark',
       respectPrefersColorScheme: true,
