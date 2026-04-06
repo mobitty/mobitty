@@ -44,6 +44,7 @@ export class GestureDetector {
   private element: HTMLElement;
   private viewport: HTMLElement | null;
   private didIntercept = false;
+  private didLongPress = false;
   private onCaptureTouchMove: (e: TouchEvent) => void;
   private onCaptureTouchEnd: (e: TouchEvent) => void;
 
@@ -159,11 +160,12 @@ export class GestureDetector {
     };
 
     this.onCaptureTouchEnd = (e: TouchEvent) => {
-      if (this.didIntercept) {
+      if (this.didIntercept || this.didLongPress) {
         e.preventDefault(); // suppress synthetic mousedown → xterm focus → keyboard
       }
       if (e.touches.length === 0) {
         this.didIntercept = false;
+        this.didLongPress = false;
       }
     };
 
@@ -295,6 +297,7 @@ export class GestureDetector {
   }
 
   private handleLongPress(e: HammerInput): void {
+    this.didLongPress = true;
     this.callbacks.onLongPressDefault(e.center.x, e.center.y);
   }
 

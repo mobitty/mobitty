@@ -282,7 +282,7 @@ export class TerminalCore {
 
     this.selectionOverlay = new SelectionOverlayAddon({
       isTouchDevice: () => this.isTouchDevice(),
-      onPaste: (text) => this.handleBatchInput(text),
+      onPaste: () => void this.handlePaste(),
     });
     terminal.loadAddon(this.selectionOverlay);
     this.registerKeyInterceptor();
@@ -401,6 +401,79 @@ export class TerminalCore {
     this.modifierSource?.clearModifiers();
     this.terminal?.paste(text);
     this.overlayAddon?.showOverlay('Paste', 300);
+    this.keepTerminalFocus();
+  }
+
+  /** Read clipboard and paste into the terminal.  Supports both images
+   *  (via clipboard.read()) and text (via clipboard.readText()).  Falls back
+   *  to execCommand('paste') on non-secure contexts.
+   *  Must be called from a user-gesture event handler. */
+  async handlePaste(): Promise<void> {
+    let clipboardError = '';
+    // Try clipboard.read() first — it can return images and text.
+    if (navigator.clipboard?.read) {
+      try {
+        const items = await navigator.clipboard.read();
+        for (const item of items) {
+          const imageType = item.types.find(t => t.startsWith('image/'));
+          if (imageType) {
+            const blob = await item.getType(imageType);
+            if (blob.size > 0 && blob.size <= 10 * 1024 * 1024) {
+              void this.handleNativePasteImage(blob, imageType);
+              return;
+            }
+          }
+          if (item.types.includes('text/plain')) {
+            const blob = await item.getType('text/plain');
+            const text = await blob.text();
+            if (text !== '') {
+              this.handleBatchInput(text);
+              return;
+            }
+          }
+        }
+      } catch (err) {
+        clipboardError = err instanceof Error ? err.message : String(err);
+      }
+    } else if (!navigator.clipboard) {
+      clipboardError = 'Clipboard API unavailable (requires HTTPS)';
+    }
+    // Fallback: readText() — narrower but wider browser support for text.
+    if (navigator.clipboard?.readText) {
+      try {
+        const text = await navigator.clipboard.readText();
+        if (text !== '') {
+          this.handleBatchInput(text);
+          return;
+        }
+      } catch (err) {
+        if (!clipboardError) {
+          clipboardError = err instanceof Error ? err.message : String(err);
+        }
+      }
+    }
+    // Last resort: execCommand('paste') — deprecated but works in some browsers.
+    try {
+      const tmp = document.createElement('textarea');
+      tmp.style.cssText = 'position:fixed;opacity:0;pointer-events:none';
+      document.body.appendChild(tmp);
+      tmp.focus();
+      document.execCommand('paste');
+      const text = tmp.value;
+      tmp.remove();
+      if (text !== '') {
+        this.handleBatchInput(text);
+        return;
+      }
+    } catch { /* not supported */ }
+    // All methods failed — show error dialog if we have a clipboard error,
+    // otherwise a brief overlay for an empty clipboard.
+    if (clipboardError) {
+      this.logger?.warn('paste-clipboard-error', { clipboardError });
+      this.callbacks.onImagePasteError?.({ clipboardError });
+    } else {
+      this.overlayAddon?.showOverlay('Clipboard empty', 700);
+    }
     this.keepTerminalFocus();
   }
 

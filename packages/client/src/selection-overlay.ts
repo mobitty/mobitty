@@ -23,7 +23,7 @@ type DragTarget = 'start' | 'end';
 
 export interface SelectionOverlayOptions {
   isTouchDevice: () => boolean;
-  onPaste?: (text: string) => void;
+  onPaste?: () => void;
 }
 
 export class SelectionOverlayAddon implements ITerminalAddon {
@@ -64,7 +64,7 @@ export class SelectionOverlayAddon implements ITerminalAddon {
   private boundOnTerminalPointerDown: ((e: PointerEvent) => void) | null = null;
   private boundBlockTouch: ((e: TouchEvent) => void) | null = null;
 
-  private onPasteCallback?: (text: string) => void;
+  private onPasteCallback?: () => void;
 
   constructor(options: SelectionOverlayOptions) {
     this.isTouchDevice = options.isTouchDevice;
@@ -248,6 +248,7 @@ export class SelectionOverlayAddon implements ITerminalAddon {
       borderRadius: '8px',
       boxShadow: '0 2px 12px rgba(0,0,0,0.3)',
       pointerEvents: 'auto',
+      touchAction: 'manipulation',
       userSelect: 'none',
       WebkitUserSelect: 'none',
       overflow: 'hidden',
@@ -260,7 +261,7 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     Object.assign(divider.style, { width: '1px', background: '#545458' });
     menu.appendChild(divider);
 
-    const pasteBtn = this.createMenuButton('Paste', () => void this.onPaste());
+    const pasteBtn = this.createMenuButton('Paste', () => this.onPaste());
     menu.appendChild(pasteBtn);
 
     return menu;
@@ -277,8 +278,9 @@ export class SelectionOverlayAddon implements ITerminalAddon {
       cursor: 'pointer',
     });
 
-    // Use pointerup to avoid 300ms click delay
-    btn.addEventListener('pointerup', (e: PointerEvent) => {
+    // Use click for broadest user-gesture compatibility (e.g. Clipboard API).
+    // touch-action:manipulation on the menu avoids the 300ms click delay.
+    btn.addEventListener('click', (e: MouseEvent) => {
       e.preventDefault();
       e.stopPropagation();
       action();
@@ -621,17 +623,9 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     this.dismiss();
   }
 
-  private async onPaste(): Promise<void> {
-    let text = '';
-    if (navigator.clipboard?.readText) {
-      try {
-        text = await navigator.clipboard.readText();
-      } catch { /* clipboard access denied or unavailable */ }
-    }
+  private onPaste(): void {
     this.dismiss();
-    if (text !== '') {
-      this.onPasteCallback?.(text);
-    }
+    this.onPasteCallback?.();
   }
 
   // ── Event Handlers ────────────────────────────────────────────────────────

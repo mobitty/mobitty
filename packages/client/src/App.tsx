@@ -437,14 +437,8 @@ export function App() {
     terminalRef.current?.core?.handleBatchInput(text);
   }, []);
 
-  const handlePaste = useCallback(async () => {
-    let text = '';
-    if (navigator.clipboard?.readText) {
-      try { text = await navigator.clipboard.readText(); } catch { /* clipboard access denied */ }
-    }
-    if (text !== '') {
-      terminalRef.current?.core?.handleBatchInput(text);
-    }
+  const handlePaste = useCallback(() => {
+    void terminalRef.current?.core?.handlePaste();
   }, []);
 
   const handleSwitchSession = useCallback((sessionId: string) => {
