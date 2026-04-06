@@ -278,9 +278,9 @@ export class SelectionOverlayAddon implements ITerminalAddon {
       cursor: 'pointer',
     });
 
-    // Use click for broadest user-gesture compatibility (e.g. Clipboard API).
-    // touch-action:manipulation on the menu avoids the 300ms click delay.
-    btn.addEventListener('click', (e: MouseEvent) => {
+    // Use pointerup so the action fires before synthetic mousedown/mouseup/click.
+    // touch-action:manipulation on the menu avoids the 300ms pointerup delay.
+    btn.addEventListener('pointerup', (e: PointerEvent) => {
       e.preventDefault();
       e.stopPropagation();
       action();
