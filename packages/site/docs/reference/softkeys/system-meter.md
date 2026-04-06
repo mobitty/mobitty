@@ -1,7 +1,7 @@
 ---
 sidebar_position: 3
 title: System Meter
-description: Connection status and latency metrics display.
+description: Mobitty system meter — a floating overlay showing real-time RTT, FPS, and data transfer metrics.
 ---
 
 # System Meter

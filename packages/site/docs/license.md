@@ -1,7 +1,7 @@
 ---
 sidebar_position: 7
 title: License
-description: Mobitty licensing — BSL-1.1.
+description: Mobitty is licensed under BSL-1.1. Free for non-commercial use, converts to GPLv2+ after four years.
 ---
 
 # License

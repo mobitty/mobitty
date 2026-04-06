@@ -1,7 +1,7 @@
 ---
 sidebar_position: 3
 title: Profiles
-description: Desktop and mobile profile settings reference.
+description: Mobitty maintains separate desktop and mobile profiles for font, theme, scrollback, soft key layout, and other terminal settings.
 ---
 
 # Profiles

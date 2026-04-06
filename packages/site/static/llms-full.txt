@@ -1,0 +1,203 @@
+# Mobitty
+
+> A touch-first web terminal for AI agent workflows.
+
+Mobitty is a self-hosted, source-available web terminal designed for using AI coding agents (Claude Code, OpenAI Codex, etc.) from mobile devices. It runs on your server and you access it from any phone, tablet, or browser.
+
+## Key Features
+
+- Touch-first UX: soft keys, gestures, macros designed for fingers
+- AI agent integration: paste screenshots into terminal agents, watch output in real time
+- Persistent sessions: shell processes survive disconnects, pick up from any device
+- Adaptive protocol: adjusts refresh rate and compression to network conditions
+- Remote editor: edit files in-browser when programs request $EDITOR
+- Image paste: send screenshots directly to AI agents running in the terminal
+- PWA: installable as a standalone app on mobile and desktop
+
+## Pricing
+
+- Free: $0 forever for non-commercial use, all features included
+- Pro: $99 one-time lifetime license for individual commercial use
+- Team: $8/user/month for companies
+- Enterprise: custom terms
+
+All tiers run the same binary with the same features. The license determines commercial use rights, not feature access.
+
+## License
+
+Business Source License 1.1 (BSL-1.1). Converts to GPLv2+ four years after each release. You can read, build, and modify the source code. Commercial use requires a license during the BSL period.
+
+## FAQ
+
+### Which AI agents work with Mobitty?
+
+Any CLI-based AI agent that runs in a terminal works with Mobitty — Claude Code, OpenAI Codex, Cursor Agent CLI, and any other terminal-based agent. If it runs in a shell, it runs in Mobitty.
+
+### What does "no feature gating" mean?
+
+The software is identical across all tiers. Free, Pro, Team, and Enterprise all run the exact same binary with the exact same features. The license determines whether you may use it commercially — not which features you can access.
+
+### Why one-time instead of a subscription?
+
+$99 once — lifetime commercial-use license for one person, every future update included, no renewal. Most developer tools charge $10–20/month for less. Mobitty pays for itself in a few months and keeps working for years.
+
+### Can I self-host for my team?
+
+Yes. Mobitty runs entirely on your infrastructure. A Team license covers your seats. There is no cloud dependency — your data never leaves your network.
+
+### What happens if Mobitty shuts down?
+
+Every version converts to GPLv2+ four years after release. You can fork and maintain it yourself. Your data was always on your server — nothing is lost.
+
+---
+
+# Full Documentation
+
+## Getting Started
+
+Run Mobitty without installing:
+
+```sh
+npx mobitty
+```
+
+Then open http://127.0.0.1:8000 in your browser.
+
+### Access from other devices
+
+By default Mobitty binds to 127.0.0.1 (localhost only). To make it reachable from other devices on your network, bind to all interfaces:
+
+```sh
+npx mobitty --interface 0.0.0.0
+```
+
+Only bind to 0.0.0.0 on a private, trusted network. On a public network, use a secure tunnel instead.
+
+## Installation
+
+Use your favourite Node.js package manager to install globally:
+
+```sh
+npm install -g mobitty
+```
+
+Requirements: Node.js 18 or later, a modern browser (Chrome, Firefox, Safari, Edge).
+
+## Security and Remote Access
+
+Mobitty is a terminal with full shell access — anyone who can reach it can run commands on your machine. By default it binds to 127.0.0.1 (localhost only). Never expose Mobitty directly to the public internet without authentication. Always use a secure tunnel or VPN.
+
+Options for secure remote access:
+- SSH port forwarding (OpenSSH, iSH on iOS, Termius on iOS, Termux on Android)
+- HTTPS tunnels (Cloudflare Tunnel, Azure Dev Tunnels)
+- VPN (Tailscale, custom WireGuard/OpenVPN)
+
+## CLI Options
+
+```
+mobitty [options]
+```
+
+Flags:
+- `-p, --port <number>` — HTTP server port (default: 8000)
+- `-i, --interface <address>` — Bind address (default: 127.0.0.1)
+- `-l, --log-level <level>` — Log level: debug, info, warn, error (default: info)
+- `--tls-cert <path>` — Path to TLS certificate file
+- `--tls-key <path>` — Path to TLS private key file
+- `--tls-ca <path>` — Path to TLS CA certificate file
+- `-v, --version` — Print version and exit
+- `-h, --help` — Print help and exit
+
+Environment variables:
+- `MOBITTY_DATA_FOLDER` — Data directory for sessions, themes, and logs (default: ~/.mobitty)
+
+## Sessions
+
+A session is a named, persistent shell process running on the server. Sessions keep running whether or not a browser is connected, and any device can attach to them over the network.
+
+Sessions survive closing the browser tab, network interruptions, switching devices, and page reloads. A session only ends when you explicitly delete it or the shell process exits.
+
+You can run multiple sessions simultaneously. Sessions are given auto-generated names and can be renamed. Only one client can send input to a session at a time.
+
+## Profiles
+
+Mobitty maintains separate profiles for desktop and mobile. The active profile is chosen automatically based on your device.
+
+Settings include: font size, font family, theme (light/dark), scrollback lines, padding, soft key size, Option is Meta, notification mode, remote editor, copy on select, and image paste directory.
+
+Each profile includes a soft key layout that defines which keys appear in the bar at the bottom of the terminal.
+
+## Clipboard
+
+### Copying text
+- Mobile: tap and hold to start selection, drag handles to adjust, tap Copy
+- Desktop: click and drag to select, use system copy shortcut
+- Copy on Select: enable in Settings to auto-copy on selection
+
+### Pasting text
+- Mobile: floating edit menu, paste soft key, or native OS gesture
+- Desktop: system paste shortcut (Ctrl+V / Cmd+V)
+
+### Pasting images
+Paste images (screenshots, photos) directly into the terminal for AI agents. The image is either copied to the server's clipboard or saved as a file (if Image Paste Directory is configured). Supported formats: PNG, JPEG, GIF, WebP, BMP. Max size: 10 MB.
+
+## Soft Keys
+
+Soft keys are customizable buttons at the bottom of the terminal screen providing quick access to modifier keys, navigation, macros, and tools.
+
+Key types:
+- Modifier keys: Ctrl, Alt, Shift (sticky toggles)
+- Navigation and special keys: Esc, Tab, arrows, Home, End, Page Up/Down, Enter, Space
+- Input controls: batch input panel, inline input, paste
+- System meter: connection health overlay
+- Custom keys: user-defined macros (e.g. Ctrl+C, multi-step sequences)
+- Containers: expandable groups holding additional keys
+
+## Gestures
+
+Touch gestures map touch actions to soft key actions. Configured per mobile profile.
+
+Available gestures: 1-finger swipe (horizontal), 1-finger flick, 2-finger swipe, 3-finger swipe, double-tap, triple-tap, pinch (in/out), rotate (CW/CCW).
+
+Built-in behaviors (not configurable): long-press selects word, 1-finger vertical swipe scrolls.
+
+Selection actions: select_line, select_visible, select_all — can be mapped to any gesture.
+
+## Remote Editor
+
+When a program needs a text editor ($EDITOR), Mobitty opens a full-screen editor panel in the browser instead of a terminal editor like vim. Especially useful on mobile. Toggle in Settings. Sets $EDITOR and $VISUAL environment variables in new sessions.
+
+## Keyboard Shortcuts
+
+Global: Ctrl+Shift+S toggles session panel (configurable).
+
+Session panel: Up/Down to navigate, Enter to switch, Escape to close, N for new, R to rename, Delete to remove, Shift+Up/Down to reorder.
+
+Remote editor: Ctrl+S / Cmd+S to save.
+
+Mobitty intercepts Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+L, Ctrl+R so they reach the terminal instead of the browser.
+
+## Notifications
+
+Programs can send terminal notifications shown as in-app toasts. Background session notifications include a button to switch to that session. Bell alerts mark sessions in the session list.
+
+Notification modes: Ghostty (OSC 777, default), iTerm2 (OSC 9), Kitty (OSC 99), Off.
+
+## Themes
+
+Each profile references two themes — one for light mode and one for dark mode. Follows OS color scheme preference.
+
+Built-in themes: Default, Dracula, Nord, Gruvbox, Catppuccin Mocha/Latte, Tokyo Night, One Dark, Solarized, Tango.
+
+## Fonts
+
+13 monospace font options. All except System Default are Nerd Font variants with icons and powerline glyphs. Default: Cascadia Code Nerd Font. Custom CSS font-family strings are supported.
+
+## Adaptive Protocol
+
+Mobitty measures network conditions and adapts terminal updates:
+- Adaptive refresh rate: 60 fps on LAN, scales down to 4 fps on slow connections
+- Incremental updates: only sends what changed since last frame
+- Compression: reduces data to 10–30% of raw size
+
+The system meter soft key shows RTT, FPS, and data usage in real time.

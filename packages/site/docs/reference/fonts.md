@@ -1,7 +1,7 @@
 ---
 sidebar_position: 5
 title: Fonts
-description: Available fonts and how font loading works.
+description: Mobitty includes 13 monospace fonts with Nerd Font icons and powerline glyphs. Custom CSS font families are also supported.
 ---
 
 # Fonts

@@ -1,7 +1,7 @@
 ---
 sidebar_position: 9
 title: Notifications
-description: How terminal notifications work in Mobitty.
+description: Mobitty shows terminal notifications as in-app toasts. Supports Ghostty, iTerm2, and Kitty notification protocols.
 ---
 
 # Notifications

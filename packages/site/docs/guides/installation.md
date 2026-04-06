@@ -1,7 +1,7 @@
 ---
 sidebar_position: 1
 title: Installation
-description: Install Mobitty globally.
+description: Install Mobitty globally with npm, pnpm, or yarn. Requires Node.js 18+.
 ---
 
 # Installation

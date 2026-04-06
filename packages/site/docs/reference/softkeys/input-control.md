@@ -1,7 +1,7 @@
 ---
 sidebar_position: 2
 title: Input Control
-description: Batch input and inline input soft keys.
+description: Mobitty input control soft keys — batch input panel for pasting text, inline input for direct typing, and clipboard paste button.
 ---
 
 # Input Control

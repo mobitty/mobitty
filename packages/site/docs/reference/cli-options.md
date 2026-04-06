@@ -1,7 +1,7 @@
 ---
 sidebar_position: 1
 title: CLI Options
-description: Command-line flags and environment variables.
+description: Mobitty CLI flags for port, bind address, TLS, log level, and the MOBITTY_DATA_FOLDER environment variable.
 ---
 
 # CLI Options

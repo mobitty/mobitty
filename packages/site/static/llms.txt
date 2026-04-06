@@ -1,0 +1,62 @@
+# Mobitty
+
+> A touch-first web terminal for AI agent workflows.
+
+Mobitty is a self-hosted, source-available web terminal designed for using AI coding agents (Claude Code, OpenAI Codex, etc.) from mobile devices. It runs on your server and you access it from any phone, tablet, or browser.
+
+## Key Features
+
+- Touch-first UX: soft keys, gestures, macros designed for fingers
+- AI agent integration: paste screenshots into terminal agents, watch output in real time
+- Persistent sessions: shell processes survive disconnects, pick up from any device
+- Adaptive protocol: adjusts refresh rate and compression to network conditions
+- Remote editor: edit files in-browser when programs request $EDITOR
+- Image paste: send screenshots directly to AI agents running in the terminal
+- PWA: installable as a standalone app on mobile and desktop
+
+## Quick Start
+
+```sh
+npx mobitty --interface 0.0.0.0
+```
+
+Open the URL on your phone. No Docker, no config files, no accounts.
+
+## Pricing
+
+- Free: $0 forever for non-commercial use, all features included
+- Pro: $99 one-time lifetime license for individual commercial use
+- Team: $8/user/month for companies
+- Enterprise: custom terms
+
+All tiers run the same binary with the same features. The license determines commercial use rights, not feature access.
+
+## License
+
+Business Source License 1.1 (BSL-1.1). Converts to GPLv2+ four years after each release.
+
+## Links
+
+- Docs: https://mobitty.dev/docs/getting-started
+- Pricing: https://mobitty.dev/pricing
+- GitHub: https://github.com/mobitty/mobitty
+- Contact: hello@mobitty.dev
+
+## Docs
+
+- [Getting Started](https://mobitty.dev/docs/getting-started)
+- [Installation](https://mobitty.dev/docs/guides/installation)
+- [Security and Remote Access](https://mobitty.dev/docs/guides/remote-access)
+- [CLI Options](https://mobitty.dev/docs/reference/cli-options)
+- [Profiles](https://mobitty.dev/docs/reference/profiles)
+- [Sessions](https://mobitty.dev/docs/reference/sessions)
+- [Clipboard](https://mobitty.dev/docs/reference/clipboard)
+- [Soft Keys](https://mobitty.dev/docs/reference/softkeys)
+- [Gestures](https://mobitty.dev/docs/reference/gestures)
+- [Remote Editor](https://mobitty.dev/docs/reference/remote-editor)
+- [Keyboard Shortcuts](https://mobitty.dev/docs/reference/keyboard-shortcuts)
+- [Notifications](https://mobitty.dev/docs/reference/notifications)
+- [Themes](https://mobitty.dev/docs/reference/themes)
+- [Fonts](https://mobitty.dev/docs/reference/fonts)
+- [Adaptive Protocol](https://mobitty.dev/docs/reference/adaptive-protocol)
+- [License](https://mobitty.dev/docs/license)
