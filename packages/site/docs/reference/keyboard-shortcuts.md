@@ -1,5 +1,5 @@
 ---
-sidebar_position: 7
+sidebar_position: 8
 title: Desktop Keyboard Shortcuts
 description: Mobitty desktop keyboard shortcuts for session management, remote editor, and browser key interception.
 ---

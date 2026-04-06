@@ -1,5 +1,5 @@
 ---
-sidebar_position: 8
+sidebar_position: 13
 title: Adaptive Protocol
 description: How Mobitty adapts refresh rate and data transfer to network conditions.
 ---
