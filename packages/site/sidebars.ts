@@ -32,6 +32,7 @@ const sidebars: SidebarsConfig = {
           ],
         },
         'reference/keyboard-shortcuts',
+        'reference/gestures',
         'reference/remote-editor',
         'reference/notifications',
         'reference/themes',
