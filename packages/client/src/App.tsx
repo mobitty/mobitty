@@ -101,6 +101,7 @@ export function App() {
   const [editorOpen, setEditorOpen] = useState(false);
   const [editorFilePath, setEditorFilePath] = useState('');
   const [editorContent, setEditorContent] = useState('');
+  const [editorContentType, setEditorContentType] = useState<string | undefined>();
 
   const terminalRef = useRef<XtermTerminalHandle>(null);
   const currentSessionIdRef = useRef<string | undefined>(undefined);
@@ -382,9 +383,10 @@ export function App() {
     onImagePasteError: (error: ImagePasteErrorInfo) => {
       setImagePasteError(error);
     },
-    onEditorOpen: (filePath: string, content: string) => {
+    onEditorOpen: (filePath: string, content: string, contentType?: string) => {
       setEditorFilePath(filePath);
       setEditorContent(content);
+      setEditorContentType(contentType);
       setEditorOpen(true);
     },
   }), []);
@@ -543,6 +545,7 @@ export function App() {
         open={editorOpen}
         filePath={editorFilePath}
         content={editorContent}
+        contentType={editorContentType}
         onSave={handleEditorSave}
         onCancel={handleEditorCancel}
       />

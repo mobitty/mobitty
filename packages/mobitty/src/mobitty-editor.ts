@@ -8,7 +8,17 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import { resolve } from 'node:path';
+import { resolve, extname } from 'node:path';
+
+const IMAGE_EXTENSIONS: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+  '.svg': 'image/svg+xml',
+};
 
 function fail(msg: string): never {
   process.stderr.write(`mobitty-editor: ${msg}\n`);
@@ -26,12 +36,19 @@ if (!sessionId || !port || !rawPath) {
 }
 
 const filePath = resolve(rawPath);
-let content = '';
-if (existsSync(filePath)) {
-  content = readFileSync(filePath, 'utf-8');
+const imageContentType = IMAGE_EXTENSIONS[extname(filePath).toLowerCase()];
+
+let content: string;
+if (imageContentType) {
+  if (!existsSync(filePath)) fail('file not found');
+  content = readFileSync(filePath).toString('base64');
+} else {
+  content = existsSync(filePath) ? readFileSync(filePath, 'utf-8') : '';
 }
 
-const postData = JSON.stringify({ filePath, content });
+const postBody: Record<string, string> = { filePath, content };
+if (imageContentType) postBody['contentType'] = imageContentType;
+const postData = JSON.stringify(postBody);
 
 const request = useTls ? httpsRequest : httpRequest;
 const req = request(
@@ -69,7 +86,7 @@ const req = request(
       if (typeof resultContent !== 'string' || typeof resultCancelled !== 'boolean') {
         fail('missing content or cancelled in response');
       }
-      if (!resultCancelled) {
+      if (!resultCancelled && !imageContentType) {
         writeFileSync(filePath, resultContent);
       }
       process.exit(0);

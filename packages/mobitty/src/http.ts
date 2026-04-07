@@ -444,6 +444,7 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
       }
       const filePath = r['filePath'];
       const content = r['content'];
+      const contentType = typeof r['contentType'] === 'string' ? r['contentType'] : undefined;
 
       try {
         const result = await registry.requestEdit(
@@ -451,6 +452,7 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
           filePath,
           content,
           (cleanup) => { req.on('close', cleanup); },
+          contentType,
         );
         jsonResponse(res, 200, result);
       } catch (err) {

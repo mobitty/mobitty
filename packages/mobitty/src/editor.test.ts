@@ -37,7 +37,15 @@ describe('SessionRegistry editor methods', () => {
 
   it('setEditorSender / clearEditorSender are no-ops for unknown session', () => {
     // Should not throw
-    registry.setEditorSender('nonexistent', (_filePath: string, _content: string) => {});
+    registry.setEditorSender('nonexistent', (_filePath: string, _content: string, _contentType?: string) => {});
     registry.clearEditorSender('nonexistent');
+  });
+
+  it('requestEdit rejects for unknown session with contentType', async () => {
+    const noopAbort = (_cleanup: () => void) => {};
+    await assert.rejects(
+      () => registry.requestEdit('nonexistent', '/tmp/img.png', 'base64data', noopAbort, 'image/png'),
+      { message: 'Session not found' },
+    );
   });
 });
