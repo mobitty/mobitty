@@ -1,6 +1,6 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import { readFileSync } from 'node:fs';
-import { resolve, dirname, extname } from 'node:path';
+import { resolve, relative, isAbsolute, dirname, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { brotliCompressSync, gzipSync, constants } from 'node:zlib';
@@ -36,13 +36,31 @@ interface AssetCache {
 
 const assetCacheMap = new Map<string, AssetCache | false>();
 
+export interface PathFns {
+  resolve: typeof resolve;
+  relative: typeof relative;
+  isAbsolute: typeof isAbsolute;
+}
+
+/** Resolve a URL path to a file path inside clientDir, or undefined if it escapes. */
+export function resolveAssetPath(
+  clientDir: string,
+  urlPath: string,
+  pathFns: PathFns = { resolve, relative, isAbsolute },
+): string | undefined {
+  const filePath = pathFns.resolve(clientDir, '.' + urlPath);
+  const rel = pathFns.relative(clientDir, filePath);
+  if (rel.startsWith('..') || pathFns.isAbsolute(rel)) return undefined;
+  return filePath;
+}
+
 function loadAsset(urlPath: string): AssetCache | undefined {
   const cached = assetCacheMap.get(urlPath);
   if (cached === false) return undefined;
   if (cached !== undefined) return cached;
 
-  const filePath = resolve(CLIENT_DIR, '.' + urlPath);
-  if (!filePath.startsWith(CLIENT_DIR + '/')) {
+  const filePath = resolveAssetPath(CLIENT_DIR, urlPath);
+  if (filePath === undefined) {
     assetCacheMap.set(urlPath, false);
     return undefined;
   }
