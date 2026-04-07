@@ -34,6 +34,11 @@ const CMD_UPDATE_SETTINGS = 0x32;
 const CMD_EDITOR_OPEN = 0x3b;
 const CMD_EDITOR_DONE = 0x3a;
 
+/** Delay before tearing down GPU renderer when the tab is hidden.
+ *  Avoids thrashing on quick tab switches while still freeing the GPU
+ *  context for tabs that stay backgrounded. */
+const RENDERER_TEARDOWN_DELAY_MS = 5000;
+
 const Command = {
   SET_WINDOW_TITLE: '1',
   SET_PREFERENCES: '2',
@@ -151,6 +156,9 @@ export class TerminalCore {
   private scrollbarHealthTimer?: ReturnType<typeof setInterval>;
   private scrollbarStuckCount = 0;
   private resizeObserver?: ResizeObserver;
+  private preferredRendererType: RendererType = 'dom';
+  private rendererTeardownTimer?: ReturnType<typeof setTimeout>;
+  private rendererVisibilityDisposable?: IDisposable;
   private pendingConnectRaf?: number;
 
   constructor(private options: TerminalCoreOptions) {
@@ -180,6 +188,10 @@ export class TerminalCore {
     this.pasteImageListenerDisposable = undefined;
     this.resizeObserver?.disconnect();
     this.resizeObserver = undefined;
+    this.rendererVisibilityDisposable?.dispose();
+    this.rendererVisibilityDisposable = undefined;
+    clearTimeout(this.rendererTeardownTimer);
+    this.rendererTeardownTimer = undefined;
     this.terminal?.dispose();
   }
 
@@ -294,6 +306,7 @@ export class TerminalCore {
     // terminal tracks layout changes even while disconnected.
     this.resizeObserver = new ResizeObserver(() => this.fitAddon.fit());
     this.resizeObserver.observe(parent);
+    this.registerRendererVisibility();
   }
 
   applyProfile(profile: Profile, themeColors?: ProfileTheme): void {
@@ -953,6 +966,26 @@ export class TerminalCore {
     this.register(addEventListener(window, 'online', check));
   }
 
+  /** Tear down GPU renderer after a debounce when the tab is hidden,
+   *  restore the preferred renderer when visible. Registered in open()
+   *  so it survives WebSocket reconnections. */
+  private registerRendererVisibility() {
+    this.rendererVisibilityDisposable = addEventListener(document, 'visibilitychange', () => {
+      if (document.hidden) {
+        if (this.preferredRendererType === 'dom') return;
+        clearTimeout(this.rendererTeardownTimer);
+        this.rendererTeardownTimer = setTimeout(() => {
+          this.rendererTeardownTimer = undefined;
+          this.applyRendererType('dom');
+        }, RENDERER_TEARDOWN_DELAY_MS);
+      } else {
+        clearTimeout(this.rendererTeardownTimer);
+        this.rendererTeardownTimer = undefined;
+        this.applyRendererType(this.preferredRendererType);
+      }
+    });
+  }
+
   private onSocketClose(event: CloseEvent) {
     this.logger?.info('websocket closed', { code: event.code });
     const { overlayAddon } = this;
@@ -1186,6 +1219,14 @@ export class TerminalCore {
   }
 
   private setRendererType(value: RendererType) {
+    this.preferredRendererType = value;
+    // Don't load a GPU renderer while backgrounded — it will be restored
+    // when the tab becomes visible (see registerRendererVisibility).
+    if (document.hidden && value !== 'dom') return;
+    this.applyRendererType(value);
+  }
+
+  private applyRendererType(value: RendererType) {
     const { terminal } = this;
     const disposeCanvas = () => { try { this.canvasAddon?.dispose(); } catch { /* */ } this.canvasAddon = undefined; };
     const disposeWebgl = () => { try { this.webglAddon?.dispose(); } catch { /* */ } this.webglAddon = undefined; };
