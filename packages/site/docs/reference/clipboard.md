@@ -52,7 +52,7 @@ What happens next depends on your server environment:
 - **If the server has a system clipboard** (macOS, Windows, or Linux with X11/Wayland): the image is copied to the server's clipboard so the running program can access it.
 - Sometimes the server doesn't have clipboard support (for example, a Linux server without X11). In that case, if you have an **Image Paste Directory** configured in Settings, Mobitty saves the image as a file in that directory and types the file path into your terminal automatically.
 
-Supported formats: PNG, JPEG, GIF, WebP, and BMP. Maximum size: 10 MB.
+Supported formats: PNG, JPEG, GIF, WebP, and BMP. Maximum size: 25 MB.
 
 ### iOS note
 

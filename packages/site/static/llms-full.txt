@@ -195,7 +195,7 @@ Selection actions: select_line, select_visible, select_all — can be mapped to 
 - Desktop: system paste shortcut (Ctrl+V / Cmd+V)
 
 ### Pasting images
-Paste images (screenshots, photos) directly into the terminal for AI agents. The image is either copied to the server's clipboard or saved as a file (if Image Paste Directory is configured). Supported formats: PNG, JPEG, GIF, WebP, BMP. Max size: 10 MB.
+Paste images (screenshots, photos) directly into the terminal for AI agents. The image is either copied to the server's clipboard or saved as a file (if Image Paste Directory is configured). Supported formats: PNG, JPEG, GIF, WebP, BMP. Max size: 25 MB.
 
 ## Remote Editor
 
