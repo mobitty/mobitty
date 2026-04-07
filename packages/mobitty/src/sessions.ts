@@ -35,9 +35,10 @@ interface SessionEntry {
   editorPending: {
     filePath: string;
     content: string;
+    contentType?: string;
     resolve: (result: EditorResult) => void;
   } | null;
-  editorSender: ((filePath: string, content: string) => void) | null;
+  editorSender: ((filePath: string, content: string, contentType?: string) => void) | null;
 }
 
 interface SessionsDiskData {
@@ -414,7 +415,7 @@ export class SessionRegistry {
 
   // ── Remote Editor ──────────────────────────────────────────────────────────
 
-  setEditorSender(sessionId: string, fn: (filePath: string, content: string) => void): void {
+  setEditorSender(sessionId: string, fn: (filePath: string, content: string, contentType?: string) => void): void {
     const entry = this.sessions.get(sessionId);
     if (entry) entry.editorSender = fn;
   }
@@ -424,21 +425,22 @@ export class SessionRegistry {
     if (entry) entry.editorSender = null;
   }
 
-  getEditorPending(sessionId: string): { filePath: string; content: string } | undefined {
+  getEditorPending(sessionId: string): { filePath: string; content: string; contentType?: string } | undefined {
     const entry = this.sessions.get(sessionId);
     if (!entry?.editorPending) return undefined;
-    return { filePath: entry.editorPending.filePath, content: entry.editorPending.content };
+    const { filePath, content, contentType } = entry.editorPending;
+    return contentType ? { filePath, content, contentType } : { filePath, content };
   }
 
-  requestEdit(sessionId: string, filePath: string, content: string, onAbort: (cleanup: () => void) => void): Promise<EditorResult> {
+  requestEdit(sessionId: string, filePath: string, content: string, onAbort: (cleanup: () => void) => void, contentType?: string): Promise<EditorResult> {
     const entry = this.sessions.get(sessionId);
     if (!entry) return Promise.reject(new Error('Session not found'));
     if (entry.editorPending) return Promise.reject(new Error('Edit already in progress'));
     if (!entry.editorSender) return Promise.reject(new Error('No client connected'));
 
     return new Promise<EditorResult>((resolve) => {
-      entry.editorPending = { filePath, content, resolve };
-      entry.editorSender!(filePath, content);
+      entry.editorPending = { filePath, content, contentType, resolve };
+      entry.editorSender!(filePath, content, contentType);
 
       // If the HTTP request from mobitty-editor drops, clean up
       const cleanup = () => {

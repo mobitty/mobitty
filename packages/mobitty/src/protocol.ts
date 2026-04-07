@@ -414,8 +414,10 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
             startSync(sessionId);
 
             // Register editor sender and re-send pending edit if any
-            registry.setEditorSender(sessionId, (filePath, content) => {
-              sendBinary(ws, EDITOR_OPEN, JSON.stringify({ filePath, content }));
+            registry.setEditorSender(sessionId, (filePath, content, contentType) => {
+              const payload: Record<string, string> = { filePath, content };
+              if (contentType) payload['contentType'] = contentType;
+              sendBinary(ws, EDITOR_OPEN, JSON.stringify(payload));
             });
             const pending = registry.getEditorPending(sessionId);
             if (pending) {
@@ -477,8 +479,10 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         startSync(sessionId);
 
         // Register editor sender for newly created session
-        registry.setEditorSender(sessionId, (filePath, content) => {
-          sendBinary(ws, EDITOR_OPEN, JSON.stringify({ filePath, content }));
+        registry.setEditorSender(sessionId, (filePath, content, contentType) => {
+          const payload: Record<string, string> = { filePath, content };
+          if (contentType) payload['contentType'] = contentType;
+          sendBinary(ws, EDITOR_OPEN, JSON.stringify(payload));
         });
 
         lastPingSentAt = Date.now(); ws.ping();

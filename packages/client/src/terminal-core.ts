@@ -88,7 +88,7 @@ export interface TerminalCoreCallbacks {
   onSessionAlert?: (sessionId: string) => void;
   onSessionNotification?: (sessionId: string, title: string, body: string, sessionName: string, sessionTitle: string) => void;
   onImagePasteError?: (error: ImagePasteErrorInfo) => void;
-  onEditorOpen?: (filePath: string, content: string) => void;
+  onEditorOpen?: (filePath: string, content: string, contentType?: string) => void;
 }
 
 export interface TerminalCoreOptions {
@@ -1110,7 +1110,8 @@ export class TerminalCore {
         if (typeof parsed === 'object' && parsed !== null) {
           const r = parsed as Record<string, unknown>;
           if (typeof r['filePath'] === 'string' && typeof r['content'] === 'string') {
-            this.callbacks.onEditorOpen?.(r['filePath'], r['content']);
+            const contentType = typeof r['contentType'] === 'string' ? r['contentType'] : undefined;
+            this.callbacks.onEditorOpen?.(r['filePath'], r['content'], contentType);
           }
         }
       } catch { /* ignore malformed */ }
