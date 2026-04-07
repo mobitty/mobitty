@@ -1,9 +1,7 @@
 name: Deploy Site
 
 on:
-  push:
-    branches: [main]
-    paths: ['packages/site/**']
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -24,7 +22,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '22'
+          node-version: '25'
           cache: 'pnpm'
 
       - run: pnpm install --frozen-lockfile
@@ -39,7 +37,7 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     environment:
-      name: github-pages
+      name: release
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
