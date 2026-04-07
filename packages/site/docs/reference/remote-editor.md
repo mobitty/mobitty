@@ -22,3 +22,7 @@ When enabled, Mobitty sets the `$EDITOR` and `$VISUAL` environment variables in 
 4. The file is sent back to the server and the program continues
 
 To discard your changes, press **Cancel** — the program sees an empty edit, as if you closed the editor without saving.
+
+## Image viewing
+
+When you open an image file (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.bmp`, `.svg`), Mobitty displays it in a full-screen viewer instead of a text editor. Images are view-only — press **Close** to dismiss. You can pinch to zoom on mobile.
