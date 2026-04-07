@@ -199,7 +199,7 @@ Paste images (screenshots, photos) directly into the terminal for AI agents. The
 
 ## Remote Editor
 
-When a program needs a text editor ($EDITOR), Mobitty opens a full-screen editor panel in the browser instead of a terminal editor like vim. Especially useful on mobile. Toggle in Settings. Sets $EDITOR and $VISUAL environment variables in new sessions.
+When a program needs a text editor ($EDITOR), Mobitty opens a full-screen editor panel in the browser instead of a terminal editor like vim. Especially useful on mobile. Toggle in Settings. Sets $EDITOR and $VISUAL environment variables in new sessions. Image files (.png, .jpg, .jpeg, .gif, .webp, .bmp, .svg) are displayed in a full-screen viewer with pinch-to-zoom support.
 
 ## Notifications
 
