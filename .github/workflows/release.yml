@@ -6,10 +6,12 @@ on:
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
   publish:
     runs-on: ubuntu-latest
+    environment: release
     steps:
       - uses: actions/checkout@v4
 
@@ -27,6 +29,4 @@ jobs:
 
       - run: pnpm run release
 
-      - run: npm publish ./dist
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+      - run: npm publish ./dist --provenance
