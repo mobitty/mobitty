@@ -24,7 +24,7 @@ const ALLOWED_MIME_TYPES = new Set([
   'image/bmp',
 ]);
 
-const MAX_IMAGE_SIZE = 10 * 1024 * 1024; // 10 MB
+const MAX_IMAGE_SIZE = 25 * 1024 * 1024; // 25 MB
 
 function mimeToExtension(mime: string): string {
   switch (mime) {

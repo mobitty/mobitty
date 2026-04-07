@@ -37,6 +37,8 @@ const CMD_EDITOR_DONE = 0x3a;
 /** Delay before tearing down GPU renderer when the tab is hidden.
  *  Avoids thrashing on quick tab switches while still freeing the GPU
  *  context for tabs that stay backgrounded. */
+const MAX_PASTE_IMAGE_BYTES = 25 * 1024 * 1024; // 25 MB
+
 const RENDERER_TEARDOWN_DELAY_MS = 5000;
 
 const Command = {
@@ -431,7 +433,7 @@ export class TerminalCore {
           const imageType = item.types.find(t => t.startsWith('image/'));
           if (imageType) {
             const blob = await item.getType(imageType);
-            if (blob.size > 0 && blob.size <= 10 * 1024 * 1024) {
+            if (blob.size > 0 && blob.size <= MAX_PASTE_IMAGE_BYTES) {
               void this.handleNativePasteImage(blob, imageType);
               return;
             }
@@ -765,7 +767,7 @@ export class TerminalCore {
         const item = items[i];
         if (!item || !item.type.startsWith('image/')) continue;
         const blob = item.getAsFile();
-        if (!blob || blob.size === 0 || blob.size > 10 * 1024 * 1024) {
+        if (!blob || blob.size === 0 || blob.size > MAX_PASTE_IMAGE_BYTES) {
           this.logger?.warn('paste-image-skip', { type: item.type, blobNull: blob === null, blobSize: blob?.size ?? 0 });
           continue;
         }

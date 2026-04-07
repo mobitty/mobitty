@@ -65,8 +65,8 @@ describe('writeImageToSystemClipboard', () => {
   });
 
   describe('MAX_IMAGE_SIZE', () => {
-    it('is 10 MB', () => {
-      assert.equal(MAX_IMAGE_SIZE, 10 * 1024 * 1024);
+    it('is 25 MB', () => {
+      assert.equal(MAX_IMAGE_SIZE, 25 * 1024 * 1024);
     });
   });
 });

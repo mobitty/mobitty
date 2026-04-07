@@ -13,7 +13,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const JSON_HEADERS = { 'Content-Type': 'application/json; charset=utf-8' };
 const MAX_BODY_BYTES = 65536;
-const MAX_EDITOR_BODY_BYTES = 5 * 1024 * 1024; // 5 MB for editor content
+const MAX_EDITOR_BODY_BYTES = 10 * 1024 * 1024; // 10 MB for editor content
 
 const CLIENT_DIR = resolve(__dirname, '..', 'client');
 
