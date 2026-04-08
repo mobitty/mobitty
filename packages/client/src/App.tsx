@@ -489,10 +489,12 @@ export function App() {
   }, []);
 
   const handleEditorCancel = useCallback(() => {
-    terminalRef.current?.core?.sendEditorDone(editorContent, true);
+    // For images (view-only), send empty content to avoid a multi-MB round-trip
+    const isImage = editorContentType?.startsWith('image/') ?? false;
+    terminalRef.current?.core?.sendEditorDone(isImage ? '' : editorContent, true);
     setEditorOpen(false);
     terminalRef.current?.core?.focus();
-  }, [editorContent]);
+  }, [editorContent, editorContentType]);
 
   return (
     <>
