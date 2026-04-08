@@ -12,8 +12,7 @@ import {
 } from './types.ts';
 import type { ServerState } from './types.ts';
 const DEFAULT_SCROLLBACK = 5000;
-import { resolve, dirname, join } from 'node:path';
-import { mkdirSync, writeFileSync, chmodSync, existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { writePty } from './pty.ts';
 import { writeImageToSystemClipboard, writeImageToFile, getProcessCwd } from './clipboard.ts';
 import type { SessionRegistry } from './sessions.ts';
@@ -22,34 +21,12 @@ import type { Logger, SessionLogger } from './logger.ts';
 import { captureSnapshot, generateDiff, serializeFullState, compareSnapshots } from './diff.ts';
 import type { FrameSnapshot } from './diff.ts';
 import { resolveCliBin } from './cli-bin.ts';
-import { resolveDownloadBin } from './download-bin.ts';
+
 import headlessPkg from '@xterm/headless';
 const { Terminal: HeadlessTerminal } = headlessPkg;
 
 const VERIFY_DIFF = process.env['MOBITTY_VERIFY_DIFF'] === '1';
 const CLI_BIN_PATH = resolveCliBin();
-const DOWNLOAD_BIN_PATH = resolveDownloadBin();
-
-/**
- * Ensure the `download` command is available in PATH.
- * In production, the bin shim exists in node_modules/.bin/.
- * In dev mode (no shim), create a wrapper script in the data folder.
- */
-function resolveDownloadBinDir(dataFolder: string): string | null {
-  if (DOWNLOAD_BIN_PATH) return dirname(DOWNLOAD_BIN_PATH);
-  if (!CLI_BIN_PATH) return null;
-  // Dev mode: create a wrapper script
-  const binDir = join(dataFolder, 'bin');
-  const wrapperPath = join(binDir, 'download');
-  if (!existsSync(wrapperPath)) {
-    mkdirSync(binDir, { recursive: true });
-    // CLI_BIN_PATH may be "node /path/to/mobitty-cli.ts" or just "/path/to/mobitty-cli"
-    const script = `#!/bin/sh\nexec ${CLI_BIN_PATH} download "$@"\n`;
-    writeFileSync(wrapperPath, script);
-    chmodSync(wrapperPath, 0o755);
-  }
-  return binDir;
-}
 
 /** Update EMA-smoothed RTT and decide sync interval.
  *  < 20ms → 60fps (16ms), 20–50ms → dead zone, 50–100ms → 30fps (33ms),
@@ -407,14 +384,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
           cliEnv['VISUAL'] = `${CLI_BIN_PATH} edit`;
         }
       }
-      // Add download bin directory to PATH so `download` command is available
-      const downloadBinDir = resolveDownloadBinDir(state.config.dataFolder);
-      if (downloadBinDir) {
-        const currentPath = process.env['PATH'] ?? '';
-        if (!currentPath.split(':').includes(downloadBinDir)) {
-          cliEnv['PATH'] = `${downloadBinDir}:${currentPath}`;
-        }
-      }
+
 
       // Try to attach to existing session
       if (requestedSessionId) {

@@ -27,8 +27,7 @@
   "type": "module",
   "bin": {
     "mobitty": "src/main.ts",
-    "mobitty-cli": "src/mobitty-cli.ts",
-    "download": "src/mobitty-cli.ts"
+    "mobitty-cli": "src/mobitty-cli.ts"
   },
   "files": [
     "src/**/*.ts",

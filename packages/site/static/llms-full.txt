@@ -205,12 +205,11 @@ When a program needs a text editor ($EDITOR), Mobitty opens a full-screen editor
 
 Mobitty provides shell commands inside terminal sessions:
 
-- `download <path>` — download a file from the server to your browser
 - `mobitty-cli edit <path>` — open a file in the browser editor (same as $EDITOR)
 - `mobitty-cli view <path>` — view an image in the browser
-- `mobitty-cli download <path>` — same as the `download` shortcut
+- `mobitty-cli download <path>` — download a file from the server to your browser
 
-The `download` command streams files directly to the browser's download manager. Both absolute and relative paths are supported.
+`mobitty-cli download` streams files directly to the browser's download manager. Both absolute and relative paths are supported.
 
 ## Notifications
 

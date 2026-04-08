@@ -56,7 +56,7 @@ type RendererType = 'dom' | 'canvas' | 'webgl';
 
 interface ClientOptions {
   rendererType: RendererType;
-  disableLeaveAlert: boolean;
+
   disableResizeOverlay: boolean;
   enableSixel: boolean;
   titleFixed?: string;
@@ -879,16 +879,10 @@ export class TerminalCore {
       if (this.resizeOverlay) overlayAddon.showOverlay(`${cols}x${rows}`, 300);
     }));
 
-    this.register(addEventListener(window, 'beforeunload', (e) => this.onWindowUnload(e as BeforeUnloadEvent)));
+
     this.registerGestureDetection();
   }
 
-  private onWindowUnload(event: BeforeUnloadEvent) {
-    event.preventDefault();
-    if (this.socket?.readyState === WebSocket.OPEN) {
-      event.returnValue = 'Close terminal?';
-    }
-  }
 
   private onSocketOpen() {
     this.logger = new ClientLogger({
@@ -1200,9 +1194,7 @@ export class TerminalCore {
     for (const [key, value] of Object.entries(prefs)) {
       switch (key) {
         case 'rendererType': this.setRendererType(value as RendererType); break;
-        case 'disableLeaveAlert':
-          if (value) window.removeEventListener('beforeunload', (e) => this.onWindowUnload(e as BeforeUnloadEvent));
-          break;
+
         case 'disableResizeOverlay':
           if (value) this.resizeOverlay = false;
           break;

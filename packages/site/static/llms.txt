@@ -10,7 +10,7 @@ Mobitty is a self-hosted, source-available web terminal designed for using AI co
 - AI agent integration: paste screenshots into terminal agents, watch output in real time
 - Persistent sessions: shell processes survive disconnects, pick up from any device
 - Adaptive protocol: adjusts refresh rate and compression to network conditions
-- Shell tools: edit files in-browser, download files to browser, view images
+- Shell tools (mobitty-cli): edit files in-browser, download files to browser, view images
 - Remote editor: edit files in-browser when programs request $EDITOR
 - Image paste: send screenshots directly to AI agents running in the terminal
 - PWA: installable as a standalone app on mobile and desktop

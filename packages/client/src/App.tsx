@@ -273,7 +273,7 @@ export function App() {
       tokenUrl: buildTokenUrl(),
       clientOptions: {
         rendererType: 'webgl',
-        disableLeaveAlert: false,
+  
         disableResizeOverlay: false,
         enableSixel: false,
         closeOnDisconnect: false,

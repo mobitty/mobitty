@@ -6,8 +6,6 @@
 //   edit <path>      Open file in browser editor (used as $EDITOR/$VISUAL)
 //   view <path>      View image in browser (read-only)
 //   download <path>  Download file to browser
-//
-// When invoked as "download" (symlink/alias), defaults to the download subcommand.
 
 import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
@@ -72,24 +70,12 @@ function httpPost(path: string, jsonBody: string): Promise<HttpResult> {
 
 // ── Subcommand dispatch ──────────────────────────────────────────────────────
 
-// Detect if invoked as "download" symlink
-const invokedAs = basename(process.argv[1] ?? '').replace(/\.(ts|js|cmd)$/, '');
-let subcommand: string;
-let filePath: string;
-
-if (invokedAs === 'download') {
-  subcommand = 'download';
-  const rawPath = process.argv[2];
-  if (!rawPath) fail('usage: download <path>');
-  filePath = resolve(rawPath);
-} else {
-  subcommand = process.argv[2] ?? '';
-  const rawPath = process.argv[3];
-  if (!subcommand || !rawPath) {
-    fail('usage: mobitty-cli <edit|view|download> <path>');
-  }
-  filePath = resolve(rawPath);
+const subcommand = process.argv[2] ?? '';
+const rawPath = process.argv[3];
+if (!subcommand || !rawPath) {
+  fail('usage: mobitty-cli <edit|view|download> <path>');
 }
+const filePath = resolve(rawPath);
 
 if (!sessionId || !port) {
   fail('missing MOBITTY_SESSION_ID or MOBITTY_CLI_PORT');

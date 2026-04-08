@@ -29,4 +29,4 @@ When you open an image file (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.bmp`, `
 
 ## Related
 
-The remote editor is one of several [shell tools](/docs/reference/mobitty-cli) available inside Mobitty sessions. You can also [download files](/docs/reference/mobitty-cli#download) to your browser and [view images](/docs/reference/mobitty-cli#view) directly from the command line.
+The remote editor is one of several [shell tools](/docs/reference/mobitty-cli) available inside Mobitty sessions. You can also [download files](/docs/reference/mobitty-cli#download) to your browser with `mobitty-cli download` and [view images](/docs/reference/mobitty-cli#view) directly from the command line.
