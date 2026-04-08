@@ -33,6 +33,7 @@ const CMD_SESSION_NOTIFICATION = 0x3a;
 const CMD_UPDATE_SETTINGS = 0x32;
 const CMD_EDITOR_OPEN = 0x3b;
 const CMD_EDITOR_DONE = 0x3a;
+const CMD_DOWNLOAD_START = 0x3c;
 
 /** Delay before tearing down GPU renderer when the tab is hidden.
  *  Avoids thrashing on quick tab switches while still freeing the GPU
@@ -89,6 +90,7 @@ export interface TerminalCoreCallbacks {
   onSessionNotification?: (sessionId: string, title: string, body: string, sessionName: string, sessionTitle: string) => void;
   onImagePasteError?: (error: ImagePasteErrorInfo) => void;
   onEditorOpen?: (filePath: string, content: string, contentType?: string) => void;
+  onDownloadStart?: (fileName: string, fileSize: number, token: string) => void;
 }
 
 export interface TerminalCoreOptions {
@@ -1112,6 +1114,20 @@ export class TerminalCore {
           if (typeof r['filePath'] === 'string' && typeof r['content'] === 'string') {
             const contentType = typeof r['contentType'] === 'string' ? r['contentType'] : undefined;
             this.callbacks.onEditorOpen?.(r['filePath'], r['content'], contentType);
+          }
+        }
+      } catch { /* ignore malformed */ }
+      return;
+    }
+
+    if (cmd === CMD_DOWNLOAD_START && rawData.byteLength > 1) {
+      const jsonStr = this.textDecoder.decode(new Uint8Array(rawData, 1));
+      try {
+        const parsed: unknown = JSON.parse(jsonStr);
+        if (typeof parsed === 'object' && parsed !== null) {
+          const r = parsed as Record<string, unknown>;
+          if (typeof r['fileName'] === 'string' && typeof r['fileSize'] === 'number' && typeof r['token'] === 'string') {
+            this.callbacks.onDownloadStart?.(r['fileName'], r['fileSize'], r['token']);
           }
         }
       } catch { /* ignore malformed */ }

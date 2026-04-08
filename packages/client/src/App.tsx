@@ -389,6 +389,14 @@ export function App() {
       setEditorContentType(contentType);
       setEditorOpen(true);
     },
+    onDownloadStart: (_fileName: string, _fileSize: number, token: string) => {
+      const a = document.createElement('a');
+      a.href = `/api/download/${token}`;
+      a.style.display = 'none';
+      document.body.appendChild(a);
+      a.click();
+      setTimeout(() => a.remove(), 100);
+    },
   }), []);
 
   // Modifier source for the terminal

@@ -5,14 +5,15 @@ import {
   STATE_UPDATE, STATE_FULL,
   INPUT, RESIZE_TERMINAL, UPDATE_SETTINGS, JSON_DATA, CLIENT_LOG,
   CLIPBOARD_IMAGE, CLIPBOARD_IMAGE_ACK, RTT_REPORT, SESSION_ALERT, SESSION_NOTIFICATION,
-  EDITOR_OPEN, EDITOR_DONE,
+  EDITOR_OPEN, EDITOR_DONE, DOWNLOAD_START,
   HEARTBEAT_INTERVAL_MS, HEARTBEAT_TIMEOUT_MS,
   isResizeMessage, isAuthMessage, isUpdateSettingsMessage,
   isClientLogMessage,
 } from './types.ts';
 import type { ServerState } from './types.ts';
 const DEFAULT_SCROLLBACK = 5000;
-import { resolve } from 'node:path';
+import { resolve, dirname, join } from 'node:path';
+import { mkdirSync, writeFileSync, chmodSync, existsSync } from 'node:fs';
 import { writePty } from './pty.ts';
 import { writeImageToSystemClipboard, writeImageToFile, getProcessCwd } from './clipboard.ts';
 import type { SessionRegistry } from './sessions.ts';
@@ -20,12 +21,35 @@ import type { ShellStore } from './shells.ts';
 import type { Logger, SessionLogger } from './logger.ts';
 import { captureSnapshot, generateDiff, serializeFullState, compareSnapshots } from './diff.ts';
 import type { FrameSnapshot } from './diff.ts';
-import { resolveEditorBin } from './editor-bin.ts';
+import { resolveCliBin } from './cli-bin.ts';
+import { resolveDownloadBin } from './download-bin.ts';
 import headlessPkg from '@xterm/headless';
 const { Terminal: HeadlessTerminal } = headlessPkg;
 
 const VERIFY_DIFF = process.env['MOBITTY_VERIFY_DIFF'] === '1';
-const EDITOR_BIN_PATH = resolveEditorBin();
+const CLI_BIN_PATH = resolveCliBin();
+const DOWNLOAD_BIN_PATH = resolveDownloadBin();
+
+/**
+ * Ensure the `download` command is available in PATH.
+ * In production, the bin shim exists in node_modules/.bin/.
+ * In dev mode (no shim), create a wrapper script in the data folder.
+ */
+function resolveDownloadBinDir(dataFolder: string): string | null {
+  if (DOWNLOAD_BIN_PATH) return dirname(DOWNLOAD_BIN_PATH);
+  if (!CLI_BIN_PATH) return null;
+  // Dev mode: create a wrapper script
+  const binDir = join(dataFolder, 'bin');
+  const wrapperPath = join(binDir, 'download');
+  if (!existsSync(wrapperPath)) {
+    mkdirSync(binDir, { recursive: true });
+    // CLI_BIN_PATH may be "node /path/to/mobitty-cli.ts" or just "/path/to/mobitty-cli"
+    const script = `#!/bin/sh\nexec ${CLI_BIN_PATH} download "$@"\n`;
+    writeFileSync(wrapperPath, script);
+    chmodSync(wrapperPath, 0o755);
+  }
+  return binDir;
+}
 
 /** Update EMA-smoothed RTT and decide sync interval.
  *  < 20ms → 60fps (16ms), 20–50ms → dead zone, 50–100ms → 30fps (33ms),
@@ -370,15 +394,25 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         themeBackground = parsed.themeBackground;
       }
 
-      // Remote editor env vars
-      const editorEnv: Record<string, string> = {};
-      if (remoteEditor && EDITOR_BIN_PATH) {
-        editorEnv['EDITOR'] = EDITOR_BIN_PATH;
-        editorEnv['VISUAL'] = EDITOR_BIN_PATH;
-        editorEnv['MOBITTY_EDITOR_PORT'] = String(state.config.port);
-        editorEnv['MOBITTY_EDITOR_HOST'] = state.config.host;
+      // CLI env vars (shared by editor, download, view subcommands)
+      const cliEnv: Record<string, string> = {};
+      if (CLI_BIN_PATH) {
+        cliEnv['MOBITTY_CLI_PORT'] = String(state.config.port);
+        cliEnv['MOBITTY_CLI_HOST'] = state.config.host;
         if (state.config.tls) {
-          editorEnv['MOBITTY_EDITOR_TLS'] = '1';
+          cliEnv['MOBITTY_CLI_TLS'] = '1';
+        }
+        if (remoteEditor) {
+          cliEnv['EDITOR'] = `${CLI_BIN_PATH} edit`;
+          cliEnv['VISUAL'] = `${CLI_BIN_PATH} edit`;
+        }
+      }
+      // Add download bin directory to PATH so `download` command is available
+      const downloadBinDir = resolveDownloadBinDir(state.config.dataFolder);
+      if (downloadBinDir) {
+        const currentPath = process.env['PATH'] ?? '';
+        if (!currentPath.split(':').includes(downloadBinDir)) {
+          cliEnv['PATH'] = `${downloadBinDir}:${currentPath}`;
         }
       }
 
@@ -424,6 +458,11 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
               sendBinary(ws, EDITOR_OPEN, JSON.stringify(pending));
             }
 
+            // Register download sender
+            registry.setDownloadSender(sessionId, (fileName, fileSize, token) => {
+              sendBinary(ws, DOWNLOAD_START, JSON.stringify({ fileName, fileSize, token }));
+            });
+
             lastPingSentAt = Date.now(); ws.ping();
 
             logger.debug('session attached', { address, sessionId, name: info.name });
@@ -456,7 +495,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
           rows,
           scrollback,
           shell.name,
-          { ...shell.env, ...notificationModeEnv, ...editorEnv },
+          { ...shell.env, ...notificationModeEnv, ...cliEnv },
         );
         sessionId = info.sessionId;
         sessionLogger = logger.createSessionLogger(sessionId);
@@ -483,6 +522,11 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
           const payload: Record<string, string> = { filePath, content };
           if (contentType) payload['contentType'] = contentType;
           sendBinary(ws, EDITOR_OPEN, JSON.stringify(payload));
+        });
+
+        // Register download sender for newly created session
+        registry.setDownloadSender(sessionId, (fileName, fileSize, token) => {
+          sendBinary(ws, DOWNLOAD_START, JSON.stringify({ fileName, fileSize, token }));
         });
 
         lastPingSentAt = Date.now(); ws.ping();
@@ -652,6 +696,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
     unsubNotification();
     if (sessionId !== null) {
       registry.clearEditorSender(sessionId);
+      registry.clearDownloadSender(sessionId);
     }
     state.clientCount--;
     logger.debug('WS closed', { address, clientCount: state.clientCount });

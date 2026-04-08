@@ -26,3 +26,7 @@ To discard your changes, press **Cancel** — the program sees an empty edit, as
 ## Image viewing
 
 When you open an image file (`.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.bmp`, `.svg`), Mobitty displays it in a full-screen viewer instead of a text editor. Images are view-only — press **Close** to dismiss. You can pinch to zoom on mobile.
+
+## Related
+
+The remote editor is one of several [shell tools](/docs/reference/mobitty-cli) available inside Mobitty sessions. You can also [download files](/docs/reference/mobitty-cli#download) to your browser and [view images](/docs/reference/mobitty-cli#view) directly from the command line.

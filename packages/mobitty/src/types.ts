@@ -12,6 +12,7 @@ export const RTT_REPORT = 0x37;          // '7' — RTT in ms (uint16 BE)
 export const SESSION_ALERT = 0x38;       // '8' — session alert: sessionId string
 export const SESSION_NOTIFICATION = 0x3a; // ':' — rich notification: {sessionId, title, body}
 export const EDITOR_OPEN = 0x3b;         // ';' — remote editor: open file for editing
+export const DOWNLOAD_START = 0x3c;      // '<' — file download: {fileName, fileSize, token}
 
 // Client -> Server
 export const INPUT = 0x30;             // '0'

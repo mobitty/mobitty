@@ -1,8 +1,8 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
-import { readFileSync } from 'node:fs';
-import { resolve, relative, isAbsolute, dirname, extname } from 'node:path';
+import { readFileSync, createReadStream, statSync } from 'node:fs';
+import { resolve, relative, isAbsolute, dirname, extname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { brotliCompressSync, gzipSync, constants } from 'node:zlib';
 import { type ProfileStore, DEFAULT_PROFILE_NAMES } from './profiles.ts';
 import { type ThemeStore, BUILTIN_THEME_NAMES } from './themes.ts';
@@ -16,6 +16,33 @@ const MAX_BODY_BYTES = 65536;
 const MAX_EDITOR_BODY_BYTES = 10 * 1024 * 1024; // 10 MB for editor content
 
 const CLIENT_DIR = resolve(__dirname, '..', 'client');
+
+// ── Download token store ─────────────────────────────────────────────────────
+
+interface DownloadToken {
+  filePath: string;
+  fileName: string;
+  fileSize: number;
+  createdAt: number;
+}
+
+const downloadTokens = new Map<string, DownloadToken>();
+const DOWNLOAD_TOKEN_TTL_MS = 60_000;
+
+setInterval(() => {
+  const now = Date.now();
+  for (const [token, entry] of downloadTokens) {
+    if (now - entry.createdAt > DOWNLOAD_TOKEN_TTL_MS) {
+      downloadTokens.delete(token);
+    }
+  }
+}, 30_000).unref();
+
+export function createDownloadToken(filePath: string, fileName: string, fileSize: number): string {
+  const token = randomBytes(24).toString('hex');
+  downloadTokens.set(token, { filePath, fileName, fileSize, createdAt: Date.now() });
+  return token;
+}
 
 const MIME_TYPES: Record<string, string> = {
   '.html': 'text/html; charset=utf-8',
@@ -172,6 +199,18 @@ function parseSessionOrderPath(pathname: string): string | undefined {
 
 function parseSessionEditorPath(pathname: string): string | undefined {
   const match = /^\/api\/sessions\/([a-f0-9-]{36})\/editor$/.exec(pathname);
+  if (match) return match[1];
+  return undefined;
+}
+
+function parseSessionDownloadPath(pathname: string): string | undefined {
+  const match = /^\/api\/sessions\/([a-f0-9-]{36})\/download$/.exec(pathname);
+  if (match) return match[1];
+  return undefined;
+}
+
+function parseDownloadTokenPath(pathname: string): string | undefined {
+  const match = /^\/api\/download\/([a-f0-9]{48})$/.exec(pathname);
   if (match) return match[1];
   return undefined;
 }
@@ -470,6 +509,107 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
     }).catch(() => {
       jsonResponse(res, 400, { error: 'Failed to read request body' });
     });
+    return;
+  }
+
+  const sessionDownloadPath = parseSessionDownloadPath(pathname);
+  if (sessionDownloadPath !== undefined && method === 'POST') {
+    readBody(req).then(body => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        jsonResponse(res, 400, { error: 'Invalid JSON' });
+        return;
+      }
+      if (typeof parsed !== 'object' || parsed === null) {
+        jsonResponse(res, 400, { error: 'Invalid body' });
+        return;
+      }
+      const r = parsed as Record<string, unknown>;
+      if (typeof r['filePath'] !== 'string') {
+        jsonResponse(res, 400, { error: 'Missing filePath' });
+        return;
+      }
+      const filePath = r['filePath'];
+
+      if (!isAbsolute(filePath)) {
+        jsonResponse(res, 400, { error: 'filePath must be absolute' });
+        return;
+      }
+
+      let fileSize: number;
+      try {
+        const st = statSync(filePath);
+        if (!st.isFile()) {
+          jsonResponse(res, 400, { error: 'Not a regular file' });
+          return;
+        }
+        fileSize = st.size;
+      } catch {
+        jsonResponse(res, 404, { error: 'File not found or not accessible' });
+        return;
+      }
+
+      const fileName = basename(filePath);
+      const sender = registry.getDownloadSender(sessionDownloadPath);
+      if (!sender) {
+        jsonResponse(res, 503, { error: 'No client connected' });
+        return;
+      }
+
+      const token = createDownloadToken(filePath, fileName, fileSize);
+      sender(fileName, fileSize, token);
+      jsonResponse(res, 200, { ok: true, fileName });
+    }).catch(() => {
+      jsonResponse(res, 400, { error: 'Failed to read request body' });
+    });
+    return;
+  }
+
+  const downloadTokenParam = parseDownloadTokenPath(pathname);
+  if (downloadTokenParam !== undefined && method === 'GET') {
+    const entry = downloadTokens.get(downloadTokenParam);
+    if (!entry) {
+      res.writeHead(404);
+      res.end('Download token not found or expired');
+      return;
+    }
+    downloadTokens.delete(downloadTokenParam);
+
+    if (Date.now() - entry.createdAt > DOWNLOAD_TOKEN_TTL_MS) {
+      res.writeHead(410);
+      res.end('Download token expired');
+      return;
+    }
+
+    try {
+      const st = statSync(entry.filePath);
+      if (!st.isFile()) {
+        res.writeHead(404);
+        res.end('File no longer available');
+        return;
+      }
+
+      const asciiName = entry.fileName.replace(/[^\x20-\x7E]/g, '_');
+      const encodedName = encodeURIComponent(entry.fileName);
+      res.writeHead(200, {
+        'Content-Type': 'application/octet-stream',
+        'Content-Disposition': `attachment; filename="${asciiName}"; filename*=UTF-8''${encodedName}`,
+        'Content-Length': String(st.size),
+        'Cache-Control': 'no-store',
+      });
+
+      const stream = createReadStream(entry.filePath);
+      stream.pipe(res);
+      stream.on('error', () => {
+        if (!res.headersSent) res.writeHead(500);
+        res.end();
+      });
+    } catch {
+      res.writeHead(500);
+      res.end('Failed to read file');
+    }
     return;
   }
 

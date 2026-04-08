@@ -37,6 +37,7 @@ const sidebars: SidebarsConfig = {
         'reference/gestures',
         'reference/clipboard',
         'reference/remote-editor',
+        'reference/mobitty-cli',
         'reference/notifications',
         'reference/adaptive-protocol',
       ],

@@ -13,7 +13,7 @@ const logger = { debug: noop, info: noop, warn: noop, error: noop };
 
 describe('SessionRegistry editor methods', () => {
   let registry: SessionRegistry;
-  const tmpDir = '/tmp/mobitty-editor-test-' + process.pid;
+  const tmpDir = '/tmp/mobitty-cli-test-' + process.pid;
 
   beforeEach(() => {
     registry = new SessionRegistry(tmpDir, logger);
@@ -47,5 +47,15 @@ describe('SessionRegistry editor methods', () => {
       () => registry.requestEdit('nonexistent', '/tmp/img.png', 'base64data', noopAbort, 'image/png'),
       { message: 'Session not found' },
     );
+  });
+
+  it('getDownloadSender returns null for unknown session', () => {
+    assert.equal(registry.getDownloadSender('nonexistent'), null);
+  });
+
+  it('setDownloadSender / clearDownloadSender are no-ops for unknown session', () => {
+    // Should not throw
+    registry.setDownloadSender('nonexistent', (_fileName: string, _fileSize: number, _token: string) => {});
+    registry.clearDownloadSender('nonexistent');
   });
 });

@@ -1,22 +1,22 @@
-// Resolves the command string for invoking `mobitty-editor`.
+// Resolves the command string for invoking `mobitty-cli`.
 //
 // Strategy:
-// 1. Look for an installed bin shim (node_modules/.bin/mobitty-editor[.cmd]).
+// 1. Look for an installed bin shim (node_modules/.bin/mobitty-cli[.cmd]).
 //    This exists when the package is installed as a dependency (e.g. production).
 // 2. Fall back to "<node> <source-path>" for dev mode, where the .ts source
 //    file is invoked directly via Node's native TypeScript support.
 //
-// The returned string is set as $EDITOR / $VISUAL.  Both shells and tools
-// like Claude Code word-split this before exec, so "node /path/to/file.ts"
-// works correctly.
+// The returned string is set as $EDITOR / $VISUAL (with " edit" appended).
+// Both shells and tools like Claude Code word-split this before exec, so
+// "node /path/to/file.ts edit" works correctly.
 
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const BIN_NAME = process.platform === 'win32' ? 'mobitty-editor.cmd' : 'mobitty-editor';
+const BIN_NAME = process.platform === 'win32' ? 'mobitty-cli.cmd' : 'mobitty-cli';
 
-export function resolveEditorBin(): string | null {
+export function resolveCliBin(): string | null {
   const thisDir = dirname(fileURLToPath(import.meta.url));
 
   // 1. Look for installed shim (production / global install)
@@ -30,13 +30,13 @@ export function resolveEditorBin(): string | null {
   }
 
   // 2. Fall back to source file invocation (dev mode)
-  const sourceFile = join(thisDir, 'mobitty-editor.ts');
+  const sourceFile = join(thisDir, 'mobitty-cli.ts');
   if (existsSync(sourceFile)) {
     return `${process.execPath} ${sourceFile}`;
   }
 
   // 3. Try compiled .js (esbuild release output)
-  const compiledFile = join(thisDir, 'mobitty-editor.js');
+  const compiledFile = join(thisDir, 'mobitty-cli.js');
   if (existsSync(compiledFile)) {
     return `${process.execPath} ${compiledFile}`;
   }

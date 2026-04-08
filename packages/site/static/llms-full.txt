@@ -201,6 +201,17 @@ Paste images (screenshots, photos) directly into the terminal for AI agents. The
 
 When a program needs a text editor ($EDITOR), Mobitty opens a full-screen editor panel in the browser instead of a terminal editor like vim. Especially useful on mobile. Toggle in Settings. Sets $EDITOR and $VISUAL environment variables in new sessions. Image files (.png, .jpg, .jpeg, .gif, .webp, .bmp, .svg) are displayed in a full-screen viewer with pinch-to-zoom support.
 
+## Shell Tools (mobitty-cli)
+
+Mobitty provides shell commands inside terminal sessions:
+
+- `download <path>` — download a file from the server to your browser
+- `mobitty-cli edit <path>` — open a file in the browser editor (same as $EDITOR)
+- `mobitty-cli view <path>` — view an image in the browser
+- `mobitty-cli download <path>` — same as the `download` shortcut
+
+The `download` command streams files directly to the browser's download manager. Both absolute and relative paths are supported.
+
 ## Notifications
 
 Programs can send terminal notifications shown as in-app toasts. Background session notifications include a button to switch to that session. Bell alerts mark sessions in the session list.

@@ -39,6 +39,7 @@ interface SessionEntry {
     resolve: (result: EditorResult) => void;
   } | null;
   editorSender: ((filePath: string, content: string, contentType?: string) => void) | null;
+  downloadSender: ((fileName: string, fileSize: number, token: string) => void) | null;
 }
 
 interface SessionsDiskData {
@@ -112,6 +113,7 @@ export class SessionRegistry {
         onChangeCallbacks: [],
         editorPending: null,
         editorSender: null,
+        downloadSender: null,
       });
     }
 
@@ -240,6 +242,7 @@ export class SessionRegistry {
       onChangeCallbacks,
       editorPending: null,
       editorSender: null,
+      downloadSender: null,
     };
 
     this.sessions.set(sessionId, entry);
@@ -442,7 +445,7 @@ export class SessionRegistry {
       entry.editorPending = { filePath, content, contentType, resolve };
       entry.editorSender!(filePath, content, contentType);
 
-      // If the HTTP request from mobitty-editor drops, clean up
+      // If the HTTP request from the CLI drops, clean up
       const cleanup = () => {
         if (entry.editorPending?.resolve === resolve) {
           entry.editorPending = null;
@@ -458,6 +461,22 @@ export class SessionRegistry {
     entry.editorPending.resolve({ content, cancelled });
     entry.editorPending = null;
     return true;
+  }
+
+  // ── File Download ────────────────────────────────────────────────────────
+
+  setDownloadSender(sessionId: string, fn: (fileName: string, fileSize: number, token: string) => void): void {
+    const entry = this.sessions.get(sessionId);
+    if (entry) entry.downloadSender = fn;
+  }
+
+  clearDownloadSender(sessionId: string): void {
+    const entry = this.sessions.get(sessionId);
+    if (entry) entry.downloadSender = null;
+  }
+
+  getDownloadSender(sessionId: string): ((fileName: string, fileSize: number, token: string) => void) | null {
+    return this.sessions.get(sessionId)?.downloadSender ?? null;
   }
 
   private cancelPendingEdit(entry: SessionEntry): void {
