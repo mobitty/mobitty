@@ -164,6 +164,7 @@ export class TerminalCore {
   private rendererTeardownTimer?: ReturnType<typeof setTimeout>;
   private rendererVisibilityDisposable?: IDisposable;
   private pendingConnectRaf?: number;
+  private wheelDiagDisposable?: IDisposable;
 
   constructor(private options: TerminalCoreOptions) {
     this.scrollback = this.options.termOptions.scrollback ?? 5000;
@@ -194,6 +195,8 @@ export class TerminalCore {
     this.resizeObserver = undefined;
     this.rendererVisibilityDisposable?.dispose();
     this.rendererVisibilityDisposable = undefined;
+    this.wheelDiagDisposable?.dispose();
+    this.wheelDiagDisposable = undefined;
     clearTimeout(this.rendererTeardownTimer);
     this.rendererTeardownTimer = undefined;
     this.terminal?.dispose();
@@ -311,6 +314,7 @@ export class TerminalCore {
     this.resizeObserver = new ResizeObserver(() => this.fitAddon.fit());
     this.resizeObserver.observe(parent);
     this.registerRendererVisibility();
+    this.registerWheelDiagnostics();
   }
 
   applyProfile(profile: Profile, themeColors?: ProfileTheme): void {
@@ -600,6 +604,79 @@ export class TerminalCore {
         this.overlayAddon.showOverlay('Scroll repair', 500);
       });
     });
+  }
+
+  /** Capture-phase wheel listener that logs diagnostics for scroll issues.
+   *  See: workspace/docs/bug-windows-wheel-scroll.md */
+  private registerWheelDiagnostics(): void {
+    const element = this.terminal?.element;
+    if (!element) return;
+
+    let lastLogTime = 0;
+    let stuckCount = 0;
+    const RATE_LIMIT_MS = 2_000;
+    const STUCK_THRESHOLD = 3;
+
+    const viewport = element.querySelector('.xterm-viewport');
+    const handler = (ev: WheelEvent) => {
+      if (!(viewport instanceof HTMLElement)) return;
+
+      const scrollTopBefore = viewport.scrollTop;
+      const mouseTracking = element.classList.contains('enable-mouse-events');
+
+      // Check after the event has been processed by xterm.js
+      requestAnimationFrame(() => {
+        const scrollTopAfter = viewport.scrollTop;
+        const moved = scrollTopAfter !== scrollTopBefore;
+
+        if (moved) {
+          if (stuckCount >= STUCK_THRESHOLD) {
+            this.logger?.info('wheel-scroll-diag', { event: 'unstuck', previousStuckCount: stuckCount });
+          }
+          stuckCount = 0;
+          return;
+        }
+
+        // Viewport didn't move — possible stuck condition
+        const atBottom = viewport.scrollTop >= viewport.scrollHeight - viewport.clientHeight - 1;
+        const atTop = viewport.scrollTop <= 0;
+        const scrollingDown = ev.deltaY > 0;
+        const atEdge = (scrollingDown && atBottom) || (!scrollingDown && atTop);
+
+        // Being at the scroll edge is normal — not stuck
+        if (atEdge) {
+          stuckCount = 0;
+          return;
+        }
+
+        stuckCount++;
+        const now = Date.now();
+        if (now - lastLogTime < RATE_LIMIT_MS) return;
+        lastLogTime = now;
+
+        const data = {
+          mouseTracking,
+          stuckCount,
+          deltaY: ev.deltaY,
+          deltaMode: ev.deltaMode,
+          scrollTop: viewport.scrollTop,
+          scrollHeight: viewport.scrollHeight,
+          clientHeight: viewport.clientHeight,
+          baseY: this.terminal?.buffer?.active?.baseY ?? -1,
+          defaultPrevented: ev.defaultPrevented,
+        };
+
+        if (stuckCount >= STUCK_THRESHOLD) {
+          this.logger?.warn('wheel-scroll-diag', { event: 'stuck', ...data });
+        } else {
+          this.logger?.debug('wheel-scroll-diag', { event: 'no-move', ...data });
+        }
+      });
+    };
+
+    // Capture phase so we see the event before xterm.js's handlers
+    element.addEventListener('wheel', handler, { capture: true, passive: true });
+    this.wheelDiagDisposable = { dispose: () => element.removeEventListener('wheel', handler, { capture: true }) };
   }
 
   isTouchDevice(): boolean {
