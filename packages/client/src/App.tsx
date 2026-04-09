@@ -6,10 +6,11 @@ import { ContainerPanel } from '@/components/ContainerPanel';
 import { BatchInputPanel } from '@/components/BatchInputPanel';
 import { SettingsDialog } from '@/components/SettingsDialog';
 import { ImagePasteErrorDialog } from '@/components/ImagePasteErrorDialog';
+import { ConnectionClosedDialog } from '@/components/ConnectionClosedDialog';
 import { SessionPanel } from '@/components/SessionPanel';
 import { SystemMeterPanel } from '@/components/SystemMeterPanel';
 import { SystemMetrics } from '@/system-metrics';
-import type { TerminalCoreOptions, TerminalCoreCallbacks, ImagePasteErrorInfo } from '@/terminal-core';
+import type { TerminalCoreOptions, TerminalCoreCallbacks, ImagePasteErrorInfo, ConnectionClosedReason } from '@/terminal-core';
 import type { Profile, ProfileTheme } from '@/profiles';
 import { fetchProfile, getCachedProfile, getSelectedProfileName, setSelectedProfileName, DEFAULT_SCROLLBACK, DEFAULT_DESKTOP_PROFILE, DEFAULT_MOBILE_PROFILE } from '@/profiles';
 import { fetchTheme } from '@/themes';
@@ -84,6 +85,7 @@ export function App() {
   const [themeColors, setThemeColors] = useState<ProfileTheme | undefined>();
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [imagePasteError, setImagePasteError] = useState<ImagePasteErrorInfo | null>(null);
+  const [connectionClosedReason, setConnectionClosedReason] = useState<ConnectionClosedReason | null>(null);
   const [batchInputOpen, setBatchInputOpen] = useState(false);
   const [sessionPanelOpen, setSessionPanelOpen] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | undefined>();
@@ -383,6 +385,9 @@ export function App() {
     onImagePasteError: (error: ImagePasteErrorInfo) => {
       setImagePasteError(error);
     },
+    onConnectionClosed: (reason: ConnectionClosedReason) => {
+      setConnectionClosedReason(reason);
+    },
     onEditorOpen: (filePath: string, content: string, contentType?: string) => {
       setEditorFilePath(filePath);
       setEditorContent(content);
@@ -496,6 +501,12 @@ export function App() {
     terminalRef.current?.core?.focus();
   }, [editorContent, editorContentType]);
 
+  const handleReconnect = useCallback(() => {
+    setConnectionClosedReason(null);
+    terminalRef.current?.core?.reconnect();
+    terminalRef.current?.core?.focus();
+  }, []);
+
   return (
     <>
       {/* Terminal area — flex-1, always present for layout stability */}
@@ -592,6 +603,11 @@ export function App() {
       <ImagePasteErrorDialog
         error={imagePasteError}
         onClose={() => setImagePasteError(null)}
+      />
+
+      <ConnectionClosedDialog
+        reason={connectionClosedReason}
+        onReconnect={handleReconnect}
       />
 
       {/* Notification toasts */}

@@ -77,11 +77,14 @@ export interface ImagePasteErrorInfo {
   imagePasteDir?: string;
 }
 
+export type ConnectionClosedReason = 'replaced' | 'closed';
+
 export interface TerminalCoreCallbacks {
   onTitleChange?: (title: string) => void;
   onSessionInfo?: (info: SessionInfo) => void;
   onSessionDied?: (sessionId: string) => void;
   onSessionNotFound?: () => void;
+  onConnectionClosed?: (reason: ConnectionClosedReason) => void;
   onRttReport?: (rttMs: number) => void;
   onBytesSent?: (bytes: number) => void;
   onBytesReceived?: (bytes: number) => void;
@@ -131,11 +134,10 @@ export class TerminalCore {
   private title?: string;
   private titleFixed?: string;
   private resizeOverlay = true;
-  private reconnect = true;
+  private autoReconnect = true;
   private doReconnect = true;
   private closeOnDisconnect = false;
   private reconnectDelay = 0;
-  private reconnectKeyDisposable?: IDisposable;
   private gestureDetector?: GestureDetector;
   private lastGestureCenter: { x: number; y: number } = { x: 0, y: 0 };
   private gestureMapping: GestureMapping = DEFAULT_GESTURE_MAPPING;
@@ -176,8 +178,6 @@ export class TerminalCore {
       this.pendingConnectRaf = undefined;
     }
     this.stopScrollbarHealthCheck();
-    this.reconnectKeyDisposable?.dispose();
-    this.reconnectKeyDisposable = undefined;
     this.gestureDetector?.dispose();
     this.gestureDetector = undefined;
     this.selectionOverlay?.dispose();
@@ -348,6 +348,13 @@ export class TerminalCore {
     this.register(addEventListener(socket, 'open', () => this.onSocketOpen()));
     this.register(addEventListener(socket, 'message', (e) => this.onSocketData(e as MessageEvent)));
     this.register(addEventListener(socket, 'close', (e) => this.onSocketClose(e as CloseEvent)));
+  }
+
+  /** Manual reconnect — called by the React UI when user clicks Reconnect. */
+  reconnect() {
+    this.doReconnect = true;
+    this.reconnectDelay = 0;
+    this.refreshToken().then(() => this.connect());
   }
 
   focus() {
@@ -978,10 +985,8 @@ export class TerminalCore {
       this.opened = true;
     }
 
-    this.doReconnect = this.reconnect;
+    this.doReconnect = this.autoReconnect;
     this.reconnectDelay = 0;
-    this.reconnectKeyDisposable?.dispose();
-    this.reconnectKeyDisposable = undefined;
 
     // Defer fit + handshake to the next animation frame so the browser has
     // settled the flex layout (SoftkeyBar / ContainerPanel heights finalised).
@@ -1064,8 +1069,6 @@ export class TerminalCore {
   private onSocketClose(event: CloseEvent) {
     this.logger?.info('websocket closed', { code: event.code });
     const { overlayAddon } = this;
-    this.reconnectKeyDisposable?.dispose();
-    this.reconnectKeyDisposable = undefined;
     this.dispose();
 
     if (event.code === 4004) {
@@ -1084,7 +1087,7 @@ export class TerminalCore {
 
     if (event.code === 4003) {
       // Connection replaced by another client — do not reconnect
-      overlayAddon.showOverlay('Connection Closed');
+      this.callbacks.onConnectionClosed?.('replaced');
       return;
     }
 
@@ -1098,8 +1101,9 @@ export class TerminalCore {
     }
 
     if (this.closeOnDisconnect) {
-      overlayAddon.showOverlay('Connection Closed');
       window.close();
+      // window.close() may be a no-op — show dialog as fallback
+      setTimeout(() => this.callbacks.onConnectionClosed?.('closed'), 200);
       return;
     }
 
@@ -1107,7 +1111,7 @@ export class TerminalCore {
       overlayAddon.showOverlay('Reconnecting...');
       this.scheduleReconnect();
     } else {
-      overlayAddon.showOverlay('Connection Closed');
+      this.callbacks.onConnectionClosed?.('closed');
     }
   }
 
@@ -1276,10 +1280,10 @@ export class TerminalCore {
           if (value) this.resizeOverlay = false;
           break;
         case 'disableReconnect':
-          if (value) { this.reconnect = false; this.doReconnect = false; }
+          if (value) { this.autoReconnect = false; this.doReconnect = false; }
           break;
         case 'closeOnDisconnect':
-          if (value) { this.closeOnDisconnect = true; this.reconnect = false; this.doReconnect = false; }
+          if (value) { this.closeOnDisconnect = true; this.autoReconnect = false; this.doReconnect = false; }
           break;
         case 'titleFixed':
           if (value && value !== '') { this.titleFixed = value as string; document.title = this.titleFixed; }
