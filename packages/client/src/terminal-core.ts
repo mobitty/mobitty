@@ -990,14 +990,32 @@ export class TerminalCore {
 
     // Defer fit + handshake to the next animation frame so the browser has
     // settled the flex layout (SoftkeyBar / ContainerPanel heights finalised).
-    // Without this, fitAddon.fit() can read stale container dimensions and
-    // send wrong rows/cols in the handshake.
+    // The visual viewport height is synced directly before fitting because
+    // the async visualViewport.resize event may not have fired yet after a
+    // visibility change.
     this.pendingConnectRaf = requestAnimationFrame(() => {
       this.pendingConnectRaf = undefined;
       if (this.socket?.readyState !== WebSocket.OPEN) return;
 
       const { textEncoder, terminal, fitAddon } = this;
+
+      // Sync visual viewport height before fitting. On mobile wake-from-
+      // sleep the visualViewport.resize event (handled by App.tsx) may not
+      // have fired yet, leaving document.documentElement.style.height stale.
+      // Reading window.visualViewport.height is always synchronous.
+      const vv = window.visualViewport;
+      if (vv) {
+        const h = `${Math.round(vv.height)}px`;
+        document.documentElement.style.height = h;
+        document.body.style.height = h;
+      }
       fitAddon.fit();
+
+      // Register listeners before the handshake so the onResize handler is
+      // active if the post-RAF ResizeObserver fires a layout correction.
+      this.initListeners();
+      this.registerWakeDetection();
+      this.startScrollbarHealthCheck();
 
       const handshake: Record<string, unknown> = {
         AuthToken: this.token,
@@ -1020,9 +1038,6 @@ export class TerminalCore {
       if (this.themeBackground) handshake['themeBackground'] = this.themeBackground;
       this.socket?.send(textEncoder.encode(JSON.stringify(handshake)));
 
-      this.registerWakeDetection();
-      this.initListeners();
-      this.startScrollbarHealthCheck();
       terminal.focus();
     });
   }
@@ -1062,6 +1077,10 @@ export class TerminalCore {
         clearTimeout(this.rendererTeardownTimer);
         this.rendererTeardownTimer = undefined;
         this.applyRendererType(this.preferredRendererType);
+        // Re-fit in case the renderer change altered cell dimensions
+        // (DOM vs WebGL subpixel rounding). The ResizeObserver won't fire
+        // because the container size didn't change — only cells did.
+        this.fitAddon.fit();
       }
     });
   }
