@@ -17,13 +17,6 @@ import { DEFAULT_GESTURE_MAPPING } from './gesture-types';
 import { GestureDetector } from './gesture-detector';
 import { ClientLogger } from './client-logger';
 import type { SessionInfo } from './sessions';
-import {
-  isStandaloneMode,
-  hasDeferredInstallPrompt,
-  triggerInstallPrompt,
-  wasInstallHintShown,
-  markInstallHintShown,
-} from './pwa-install';
 
 const CMD_CLIPBOARD_IMAGE = 0x36;
 const CMD_CLIPBOARD_IMAGE_ACK = 0x36;
@@ -740,72 +733,42 @@ export class TerminalCore {
     requestAnimationFrame(() => this.selectionOverlay?.show());
   }
 
-  // --- Browser hotkey capture ---
-
-  private static readonly INTERCEPTED_KEYS = new Set(['w', 't', 'n', 'l', 'r']);
+  // --- Keyboard shortcuts ---
 
   private registerKeyInterceptor() {
     this.terminal.attachCustomKeyEventHandler((event) => {
-      // Manual scrollbar recovery: Ctrl+Shift+Home
-      if (event.type === 'keydown' && event.ctrlKey && event.shiftKey
-          && !event.altKey && !event.metaKey && event.key === 'Home') {
+      if (event.type !== 'keydown' || !event.ctrlKey || !event.shiftKey
+          || event.altKey || event.metaKey) {
+        return true;
+      }
+
+      // Ctrl+Shift+Home: manual scrollbar recovery
+      if (event.key === 'Home') {
         event.preventDefault();
         this.logger?.info('scrollbar-recovery-manual');
         this.attemptScrollbarRecovery();
         return false;
       }
 
-      if (
-        event.type !== 'keydown' ||
-        !event.ctrlKey ||
-        event.altKey ||
-        event.metaKey ||
-        event.shiftKey
-      ) {
+      // Ctrl+Shift+C: copy selection to clipboard
+      if (event.key === 'C') {
+        const selection = this.terminal.getSelection();
+        if (selection !== '') {
+          void this.autoCopySelection(selection);
+          this.terminal.clearSelection();
+          return false;
+        }
         return true;
       }
-      if (!TerminalCore.INTERCEPTED_KEYS.has(event.key)) return true;
 
-      event.preventDefault();
-
-      if (!isStandaloneMode() && event.key !== 'w') {
-        this.promptPwaInstall();
+      // Ctrl+Shift+V: paste from clipboard
+      if (event.key === 'V') {
+        void this.handlePaste();
+        return false;
       }
 
       return true;
     });
-  }
-
-  private promptPwaInstall() {
-    if (isStandaloneMode()) return;
-    if (wasInstallHintShown()) return;
-    markInstallHintShown();
-
-    if (hasDeferredInstallPrompt()) {
-      void triggerInstallPrompt();
-      return;
-    }
-    this.showInstallHintOverlay();
-  }
-
-  private showInstallHintOverlay() {
-    const overlay = document.createElement('div');
-    overlay.textContent = 'Browser hotkey interferes? Install as app for better keyboard support';
-    Object.assign(overlay.style, {
-      position: 'fixed',
-      top: '0',
-      left: '0',
-      right: '0',
-      padding: '12px',
-      background: 'var(--popover)',
-      color: 'var(--popover-foreground)',
-      textAlign: 'center',
-      fontSize: '14px',
-      zIndex: '10000',
-      pointerEvents: 'none',
-    });
-    document.body.appendChild(overlay);
-    setTimeout(() => overlay.remove(), 4000);
   }
 
   private onSelectionChange() {

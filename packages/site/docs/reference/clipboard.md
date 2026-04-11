@@ -16,7 +16,7 @@ A brief scissors icon confirms the copy succeeded.
 
 ### Desktop
 
-Click and drag to select text, then use your system's copy shortcut (**Ctrl+C** on Linux/Windows, **Cmd+C** on macOS). The browser's native selection and clipboard work as expected.
+Click and drag to select text, then press **Ctrl+Shift+C** (Linux/Windows) or **Cmd+C** (macOS) to copy. If no text is selected, Ctrl+Shift+C is a no-op.
 
 ### Copy on select
 
@@ -37,7 +37,7 @@ The platform's native paste gesture still works too:
 
 ### Desktop
 
-Use your system's paste shortcut: **Ctrl+V** (Linux/Windows) or **Cmd+V** (macOS).
+Press **Ctrl+Shift+V** (Linux/Windows) or **Cmd+V** (macOS) to paste from the clipboard.
 
 ## Pasting images
 

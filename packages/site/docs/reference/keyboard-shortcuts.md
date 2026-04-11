@@ -1,7 +1,7 @@
 ---
 sidebar_position: 8
 title: Desktop Keyboard Shortcuts
-description: Mobitty desktop keyboard shortcuts for session management, remote editor, and browser key interception.
+description: Mobitty desktop keyboard shortcuts for session management, clipboard, and remote editor.
 ---
 
 # Desktop Keyboard Shortcuts
@@ -42,14 +42,17 @@ The session switcher hotkey is configurable under the **Hotkey** setting in the 
 |----------|--------|
 | **Ctrl+S / Cmd+S** | Save file |
 
-## Browser key interception
+## Clipboard
 
-Mobitty intercepts certain browser shortcuts so they reach the terminal instead:
+| Shortcut | Action |
+|----------|--------|
+| **Ctrl+Shift+C** | Copy selection (if text is selected) |
+| **Ctrl+Shift+V** | Paste from clipboard |
 
-| Key | Normal browser action | Mobitty behaviour |
-|-----|----------------------|-------------------|
-| **Ctrl+W** | Close tab | Sent to terminal (e.g. delete word in bash) |
-| **Ctrl+T** | New tab | Sent to terminal |
-| **Ctrl+N** | New window | Sent to terminal |
-| **Ctrl+L** | Focus address bar | Sent to terminal (clear screen in some shells) |
-| **Ctrl+R** | Reload page | Sent to terminal (reverse search in bash) |
+When no text is selected, Ctrl+Shift+C is a no-op — use Ctrl+C to send an interrupt.
+
+On macOS, **Cmd+C** and **Cmd+V** work natively.
+
+:::tip
+Some browser shortcuts like Ctrl+W and Ctrl+T cannot be intercepted in a browser tab. See [Known Limitations](/docs/guides/known-limitations) for details and workarounds.
+:::
