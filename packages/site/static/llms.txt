@@ -48,6 +48,7 @@ Business Source License 1.1 (BSL-1.1). Converts to GPLv2+ four years after each 
 - [Getting Started](https://mobitty.dev/docs/getting-started)
 - [Installation](https://mobitty.dev/docs/guides/installation)
 - [Security and Remote Access](https://mobitty.dev/docs/guides/remote-access)
+- [Known Limitations](https://mobitty.dev/docs/guides/known-limitations)
 - [CLI Options](https://mobitty.dev/docs/reference/cli-options)
 - [Sessions](https://mobitty.dev/docs/reference/sessions)
 - [Shells](https://mobitty.dev/docs/reference/shells)

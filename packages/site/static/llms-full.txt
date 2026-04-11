@@ -92,6 +92,10 @@ Options for secure remote access:
 - HTTPS tunnels (Cloudflare Tunnel, Azure Dev Tunnels)
 - VPN (Tailscale, custom WireGuard/OpenVPN)
 
+## Known Limitations
+
+Browser-reserved shortcuts (Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Tab, F11) cannot be intercepted by web applications. These shortcuts work in the terminal only when Mobitty is installed as a standalone app (PWA). Install via the browser's "Install" or "Add to Home Screen" option.
+
 ## CLI Options
 
 ```
@@ -171,7 +175,7 @@ Session panel: Up/Down to navigate, Enter to switch, Escape to close, N for new,
 
 Remote editor: Ctrl+S / Cmd+S to save.
 
-Mobitty intercepts Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+L, Ctrl+R so they reach the terminal instead of the browser.
+Clipboard: Ctrl+Shift+C copies selection (no-op if no selection), Ctrl+Shift+V pastes. On macOS, Cmd+C and Cmd+V work natively.
 
 ## Gestures
 
@@ -187,12 +191,12 @@ Selection actions: select_line, select_visible, select_all — can be mapped to 
 
 ### Copying text
 - Mobile: tap and hold to start selection, drag handles to adjust, tap Copy
-- Desktop: click and drag to select, use system copy shortcut
+- Desktop: click and drag to select, then Ctrl+Shift+C (Linux/Windows) or Cmd+C (macOS)
 - Copy on Select: enable in Settings to auto-copy on selection
 
 ### Pasting text
 - Mobile: floating edit menu, paste soft key, or native OS gesture
-- Desktop: system paste shortcut (Ctrl+V / Cmd+V)
+- Desktop: Ctrl+Shift+V (Linux/Windows) or Cmd+V (macOS)
 
 ### Pasting images
 Paste images (screenshots, photos) directly into the terminal for AI agents. The image is either copied to the server's clipboard or saved as a file (if Image Paste Directory is configured). Supported formats: PNG, JPEG, GIF, WebP, BMP. Max size: 25 MB.
