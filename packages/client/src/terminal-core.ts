@@ -105,10 +105,12 @@ function addEventListener(target: EventTarget, type: string, listener: EventList
 
 export class TerminalCore {
   // Cleared on every reconnect (dispose()) — only socket-scoped listeners belong here.
-  // DOM listeners on terminal.element that must survive reconnections should be
-  // managed as standalone fields cleaned up in destroy() instead.
-  // See: workspace/docs/bug-image-paste-lost-on-reconnect.md
-  private disposables: IDisposable[] = [];
+  // See: workspace/docs/design-listeners.md
+  private socketDisposables: IDisposable[] = [];
+
+  // Cleared only on full unmount (destroy()) — terminal-element-scoped resources belong here.
+  // See: workspace/docs/design-listeners.md
+  private terminalDisposables: IDisposable[] = [];
   private textEncoder = new TextEncoder();
   private textDecoder = new TextDecoder();
   private singleCharBuf = new Uint8Array(2);
@@ -137,7 +139,6 @@ export class TerminalCore {
   private customKeyMap?: Map<string, KeySpec>;
   private clipboardImageRequestId = 0;
   private pendingClipboardImageResolve?: (result: { status: number; errorInfo?: ImagePasteErrorInfo }) => void;
-  private pasteImageListenerDisposable?: IDisposable;
 
   private modifierSource?: ModifierSource;
   private logger?: ClientLogger;
@@ -154,12 +155,9 @@ export class TerminalCore {
   private themeBackground?: string;
   private scrollbarHealthTimer?: ReturnType<typeof setInterval>;
   private scrollbarStuckCount = 0;
-  private resizeObserver?: ResizeObserver;
   private preferredRendererType: RendererType = 'dom';
   private rendererTeardownTimer?: ReturnType<typeof setTimeout>;
-  private rendererVisibilityDisposable?: IDisposable;
   private pendingConnectRaf?: number;
-  private wheelDiagDisposable?: IDisposable;
 
   constructor(private options: TerminalCoreOptions) {
     this.scrollback = this.options.termOptions.scrollback ?? 5000;
@@ -170,33 +168,26 @@ export class TerminalCore {
       cancelAnimationFrame(this.pendingConnectRaf);
       this.pendingConnectRaf = undefined;
     }
-    this.stopScrollbarHealthCheck();
-    this.gestureDetector?.dispose();
-    this.gestureDetector = undefined;
-    this.selectionOverlay?.dispose();
-    this.selectionOverlay = undefined;
-    for (const d of this.disposables) d.dispose();
-    this.disposables.length = 0;
+    this.selectionOverlay?.dismiss();
+    for (const d of this.socketDisposables) d.dispose();
+    this.socketDisposables.length = 0;
   }
 
   /** Full teardown — call on unmount (not on reconnect). */
   destroy() {
     this.dispose();
-    this.pasteImageListenerDisposable?.dispose();
-    this.pasteImageListenerDisposable = undefined;
-    this.resizeObserver?.disconnect();
-    this.resizeObserver = undefined;
-    this.rendererVisibilityDisposable?.dispose();
-    this.rendererVisibilityDisposable = undefined;
-    this.wheelDiagDisposable?.dispose();
-    this.wheelDiagDisposable = undefined;
-    clearTimeout(this.rendererTeardownTimer);
-    this.rendererTeardownTimer = undefined;
+    for (const d of this.terminalDisposables) d.dispose();
+    this.terminalDisposables.length = 0;
     this.terminal?.dispose();
   }
 
-  private register<T extends IDisposable>(d: T): T {
-    this.disposables.push(d);
+  private registerSocket<T extends IDisposable>(d: T): T {
+    this.socketDisposables.push(d);
+    return d;
+  }
+
+  private registerTerminal<T extends IDisposable>(d: T): T {
+    this.terminalDisposables.push(d);
     return d;
   }
 
@@ -297,17 +288,29 @@ export class TerminalCore {
       onPaste: () => void this.handlePaste(),
     });
     terminal.loadAddon(this.selectionOverlay);
+    this.registerTerminal({ dispose: () => { this.selectionOverlay?.dispose(); this.selectionOverlay = undefined; } });
     this.registerKeyInterceptor();
     this.registerNativePasteImageHandler();
     this.syncPageBackground();
     fitAddon.fit();
 
-    // Observe container size immediately — survives reconnections so the
-    // terminal tracks layout changes even while disconnected.
-    this.resizeObserver = new ResizeObserver(() => this.fitAddon.fit());
-    this.resizeObserver.observe(parent);
+    const observer = new ResizeObserver(() => this.fitAddon.fit());
+    observer.observe(parent);
+    this.registerTerminal({ dispose: () => observer.disconnect() });
     this.registerRendererVisibility();
     this.registerWheelDiagnostics();
+    this.registerGestureDetection();
+    this.startScrollbarHealthCheck();
+    this.registerTerminal({ dispose: () => this.stopScrollbarHealthCheck() });
+    this.registerTerminal(terminal.onTitleChange(data => {
+      if (data && data !== '' && !this.titleFixed) {
+        this.title = data;
+        document.title = data;
+        this.callbacks.onTitleChange?.(data);
+      }
+    }));
+    this.registerTerminal(terminal.onSelectionChange(() => this.onSelectionChange()));
+    this.registerWakeDetection();
   }
 
   applyProfile(profile: Profile, themeColors?: ProfileTheme): void {
@@ -338,9 +341,9 @@ export class TerminalCore {
     const { socket } = this;
 
     socket.binaryType = 'arraybuffer';
-    this.register(addEventListener(socket, 'open', () => this.onSocketOpen()));
-    this.register(addEventListener(socket, 'message', (e) => this.onSocketData(e as MessageEvent)));
-    this.register(addEventListener(socket, 'close', (e) => this.onSocketClose(e as CloseEvent)));
+    this.registerSocket(addEventListener(socket, 'open', () => this.onSocketOpen()));
+    this.registerSocket(addEventListener(socket, 'message', (e) => this.onSocketData(e as MessageEvent)));
+    this.registerSocket(addEventListener(socket, 'close', (e) => this.onSocketClose(e as CloseEvent)));
   }
 
   /** Manual reconnect — called by the React UI when user clicks Reconnect. */
@@ -676,7 +679,7 @@ export class TerminalCore {
 
     // Capture phase so we see the event before xterm.js's handlers
     element.addEventListener('wheel', handler, { capture: true, passive: true });
-    this.wheelDiagDisposable = { dispose: () => element.removeEventListener('wheel', handler, { capture: true }) };
+    this.registerTerminal({ dispose: () => element.removeEventListener('wheel', handler, { capture: true }) });
   }
 
   isTouchDevice(): boolean {
@@ -710,6 +713,7 @@ export class TerminalCore {
         requestAnimationFrame(() => this.selectionOverlay?.show());
       },
     }, this.computeContinuousScrollGestures());
+    this.registerTerminal({ dispose: () => { this.gestureDetector?.dispose(); this.gestureDetector = undefined; } });
   }
 
   private dispatchTouchMultiClick(detail: number, clientX: number, clientY: number) {
@@ -834,10 +838,7 @@ export class TerminalCore {
       }
     };
     el.addEventListener('paste', onPaste, { capture: true });
-    // Stored separately from this.disposables so it survives reconnections
-    // (dispose() clears disposables on every socket close, but the paste
-    // listener is on the terminal element which persists across reconnects).
-    this.pasteImageListenerDisposable = { dispose: () => el.removeEventListener('paste', onPaste, { capture: true }) };
+    this.registerTerminal({ dispose: () => el.removeEventListener('paste', onPaste, { capture: true }) });
   }
 
   /** Handle an image blob from a native paste event. */
@@ -910,24 +911,13 @@ export class TerminalCore {
 
   private initListeners() {
     const { terminal, overlayAddon } = this;
-    this.register(terminal.onTitleChange(data => {
-      if (data && data !== '' && !this.titleFixed) {
-        this.title = data;
-        document.title = data;
-        this.callbacks.onTitleChange?.(data);
-      }
-    }));
-    this.register(terminal.onData(data => this.sendData(data)));
-    this.register(terminal.onBinary(data => this.sendData(Uint8Array.from(data, v => v.charCodeAt(0)))));
-    this.register(terminal.onSelectionChange(() => this.onSelectionChange()));
-    this.register(terminal.onResize(({ cols, rows }) => {
+    this.registerSocket(terminal.onData(data => this.sendData(data)));
+    this.registerSocket(terminal.onBinary(data => this.sendData(Uint8Array.from(data, v => v.charCodeAt(0)))));
+    this.registerSocket(terminal.onResize(({ cols, rows }) => {
       const msg = JSON.stringify({ columns: cols, rows });
       this.socket?.send(this.textEncoder.encode(Command.RESIZE_TERMINAL + msg));
       if (this.resizeOverlay) overlayAddon.showOverlay(`${cols}x${rows}`, 300);
     }));
-
-
-    this.registerGestureDetection();
   }
 
 
@@ -977,8 +967,6 @@ export class TerminalCore {
       // Register listeners before the handshake so the onResize handler is
       // active if the post-RAF ResizeObserver fires a layout correction.
       this.initListeners();
-      this.registerWakeDetection();
-      this.startScrollbarHealthCheck();
 
       const handshake: Record<string, unknown> = {
         AuthToken: this.token,
@@ -1018,17 +1006,17 @@ export class TerminalCore {
         this.socket?.close();
       }
     };
-    this.register(addEventListener(document, 'visibilitychange', () => {
+    this.registerTerminal(addEventListener(document, 'visibilitychange', () => {
       if (document.visibilityState === 'visible') check();
     }));
-    this.register(addEventListener(window, 'online', check));
+    this.registerTerminal(addEventListener(window, 'online', check));
   }
 
   /** Tear down GPU renderer after a debounce when the tab is hidden,
    *  restore the preferred renderer when visible. Registered in open()
    *  so it survives WebSocket reconnections. */
   private registerRendererVisibility() {
-    this.rendererVisibilityDisposable = addEventListener(document, 'visibilitychange', () => {
+    this.registerTerminal(addEventListener(document, 'visibilitychange', () => {
       if (document.hidden) {
         if (this.preferredRendererType === 'dom') return;
         clearTimeout(this.rendererTeardownTimer);
@@ -1045,7 +1033,8 @@ export class TerminalCore {
         // because the container size didn't change — only cells did.
         this.fitAddon.fit();
       }
-    });
+    }));
+    this.registerTerminal({ dispose: () => { clearTimeout(this.rendererTeardownTimer); this.rendererTeardownTimer = undefined; } });
   }
 
   private onSocketClose(event: CloseEvent) {
