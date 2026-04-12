@@ -20,7 +20,7 @@ import type { ShellStore } from './shells.ts';
 import type { Logger, SessionLogger } from './logger.ts';
 import { captureSnapshot, generateDiff, serializeFullState, compareSnapshots } from './diff.ts';
 import type { FrameSnapshot } from './diff.ts';
-import { resolveCliBin } from './cli-bin.ts';
+import { resolveCliBin, ensureCliBinShim } from './cli-bin.ts';
 
 import headlessPkg from '@xterm/headless';
 const { Terminal: HeadlessTerminal } = headlessPkg;
@@ -373,15 +373,18 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
 
       // CLI env vars (shared by editor, download, view subcommands)
       const cliEnv: Record<string, string> = {};
-      if (CLI_BIN_PATH) {
+      const cliBinPath = CLI_BIN_PATH
+        ? ensureCliBinShim(CLI_BIN_PATH, state.config.dataFolder)
+        : null;
+      if (cliBinPath) {
         cliEnv['MOBITTY_CLI_PORT'] = String(state.config.port);
         cliEnv['MOBITTY_CLI_HOST'] = state.config.host;
         if (state.config.tls) {
           cliEnv['MOBITTY_CLI_TLS'] = '1';
         }
         if (remoteEditor) {
-          cliEnv['EDITOR'] = `${CLI_BIN_PATH} edit`;
-          cliEnv['VISUAL'] = `${CLI_BIN_PATH} edit`;
+          cliEnv['EDITOR'] = `${cliBinPath} edit`;
+          cliEnv['VISUAL'] = `${cliBinPath} edit`;
         }
       }
 
