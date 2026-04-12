@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { release } from 'node:os';
 import type { PtyHandle, SessionInfo, EditorResult } from './types.ts';
 import { spawnPty, writePty, resizePty, killPty } from './pty.ts';
 import { generateUniqueSessionName } from './session-names.ts';
@@ -153,7 +154,10 @@ export class SessionRegistry {
     const existingNames = new Set([...this.sessions.values()].map(s => s.name));
     const name = generateUniqueSessionName(existingNames);
 
-    const headless = new Terminal({ cols: columns, rows, scrollback, allowProposedApi: true });
+    const windowsPty = process.platform === 'win32'
+      ? { backend: 'conpty' as const, buildNumber: parseInt(release().split('.')[2] ?? '0', 10) }
+      : undefined;
+    const headless = new Terminal({ cols: columns, rows, scrollback, allowProposedApi: true, windowsPty });
     let title = '';
 
     const onExitCallbacks: Array<() => void> = [];
@@ -208,7 +212,9 @@ export class SessionRegistry {
         env: { ...env, MOBITTY_SESSION_ID: sessionId },
       },
       {
-        onData: (data: string) => { headless.write(normalizeSgrColors(data)); notifyChange(); },
+        onData: (data: string) => {
+          headless.write(normalizeSgrColors(data)); notifyChange();
+        },
         onExit: () => {
           const entry = this.sessions.get(sessionId);
           if (entry) {
