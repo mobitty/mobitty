@@ -8,7 +8,7 @@ import {
   EDITOR_OPEN, EDITOR_DONE, DOWNLOAD_START,
   HEARTBEAT_INTERVAL_MS, HEARTBEAT_TIMEOUT_MS,
   isResizeMessage, isAuthMessage, isUpdateSettingsMessage,
-  isClientLogMessage,
+  isClientLogBatch,
 } from './types.ts';
 import type { ServerState } from './types.ts';
 const DEFAULT_SCROLLBACK = 5000;
@@ -17,7 +17,7 @@ import { writePty } from './pty.ts';
 import { writeImageToSystemClipboard, writeImageToFile, getProcessCwd } from './clipboard.ts';
 import type { SessionRegistry } from './sessions.ts';
 import type { ShellStore } from './shells.ts';
-import type { Logger, SessionLogger } from './logger.ts';
+import type { Logger } from './logger.ts';
 import { captureSnapshot, generateDiff, serializeFullState, compareSnapshots } from './diff.ts';
 import type { FrameSnapshot } from './diff.ts';
 import { resolveCliBin, ensureCliBinShim } from './cli-bin.ts';
@@ -63,9 +63,10 @@ function sendClipboardImageAck(ws: WebSocket, requestId: number, status: number,
 
 export function handleConnection(ws: WebSocket, req: IncomingMessage, state: ServerState, registry: SessionRegistry, shellStore: ShellStore, logger: Logger): void {
   const address = req.socket.remoteAddress ?? 'unknown';
+  const socketLogger = logger.child({ address });
 
   state.clientCount++;
-  logger.debug('WS connected', { address, clientCount: state.clientCount });
+  socketLogger.info('WS connected', { clientCount: state.clientCount });
 
   let syncIntervalMs = 33; // adaptive; adjusted continuously by RTT
   let smoothRtt = 33;      // EMA of RTT for adaptive sync interval
@@ -75,26 +76,9 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
   let themeBackground: string | undefined;
 
   let sessionId: string | null = null;
-  let sessionLogger: SessionLogger | null = null;
-  let pendingClientLogs: Buffer[] = [];
   let lastSnapshot: FrameSnapshot | null = null;
   let syncCleanup: (() => void) | null = null;
   let onSyncResize: ((cols: number, rows: number) => void) | null = null;
-
-  function drainPendingClientLogs(): void {
-    for (const logBuf of pendingClientLogs) {
-      let parsed: unknown;
-      try {
-        parsed = JSON.parse(logBuf.subarray(1).toString('utf-8'));
-      } catch {
-        continue;
-      }
-      if (isClientLogMessage(parsed) && sessionLogger) {
-        sessionLogger.clientLog(parsed.level, parsed.msg, parsed.seq, parsed.data);
-      }
-    }
-    pendingClientLogs = [];
-  }
 
   // Broadcast alerts from any session to this client
   const unsubAlert = registry.addAlertListener((alertSessionId: string) => {
@@ -134,7 +118,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
     let verifyFrameCount = 0;
     const VERIFY_INTERVAL = 30; // Compare every ~30 frames (~1s at 30fps)
 
-    if (VERIFY_DIFF && sessionLogger) {
+    if (VERIFY_DIFF && socketLogger) {
       verifyTerm = new HeadlessTerminal({
         cols: headless.cols,
         rows: headless.rows,
@@ -142,7 +126,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         allowProposedApi: true,
       });
       verifyTerm.write('\x1b[3J' + vtFull);
-      sessionLogger.debug('verify-diff: verification terminal created');
+      socketLogger.debug('verify-diff: verification terminal created');
     }
 
     onSyncResize = (cols: number, rows: number) => {
@@ -150,13 +134,13 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
     };
 
     function runVerifyComparison(expectedSnapshot: FrameSnapshot): void {
-      if (!verifyTerm || !sessionLogger) return;
+      if (!verifyTerm || !socketLogger) return;
 
       const verifySnapshot = captureSnapshot(verifyTerm, expectedSnapshot.title, expectedSnapshot.cursorHidden);
       const mismatches = compareSnapshots(expectedSnapshot, verifySnapshot, 20);
 
       if (mismatches.length > 0) {
-        sessionLogger.warn('verify-diff: MISMATCH detected', {
+        socketLogger.warn('verify-diff: MISMATCH detected', {
           frameCount: verifyFrameCount,
           mismatchCount: mismatches.length,
           mismatches: mismatches.slice(0, 10).map(m => ({
@@ -219,14 +203,14 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       lastSnapshot = curr;
 
       // Frame statistics
-      if (sessionLogger && vtPayload !== '') {
+      if (socketLogger && vtPayload !== '') {
         const deltaScroll = prevSnapshot ? curr.baseY - prevSnapshot.baseY : 0;
-        sessionLogger.debug('frame', { wasFull, deltaScroll, baseY: curr.baseY, diffBytes: vtPayload.length });
+        socketLogger.debug('frame', { wasFull, deltaScroll, baseY: curr.baseY, diffBytes: vtPayload.length });
       }
 
 
       // Verification terminal
-      if (verifyTerm && sessionLogger) {
+      if (verifyTerm && socketLogger) {
         verifyFrameCount++;
         const shouldCompare = verifyFrameCount % VERIFY_INTERVAL === 0;
 
@@ -279,7 +263,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       smoothRtt = result.smoothRtt;
       if (result.syncIntervalMs !== syncIntervalMs) {
         syncIntervalMs = result.syncIntervalMs;
-        logger.debug('adaptive refresh rate adjusted', { rtt, smoothRtt: Math.round(smoothRtt), fps: Math.round(1000 / syncIntervalMs) });
+        socketLogger.debug('adaptive refresh rate adjusted', { rtt, smoothRtt: Math.round(smoothRtt), fps: Math.round(1000 / syncIntervalMs) });
       }
       // Relay RTT + target FPS to client
       if (ws.readyState === 1) {
@@ -295,7 +279,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
   const heartbeatInterval = setInterval(() => {
     const elapsed = Date.now() - lastPongAt;
     if (elapsed > HEARTBEAT_TIMEOUT_MS) {
-      logger.debug('heartbeat timeout, terminating connection', { address, elapsed });
+      socketLogger.warn('heartbeat timeout, terminating connection', { elapsed });
       clearInterval(heartbeatInterval);
       ws.terminate();
       return;
@@ -320,12 +304,13 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       try {
         parsed = JSON.parse(buf.toString('utf-8'));
       } catch {
-        logger.error('invalid JSON_DATA', { address });
+        socketLogger.error('invalid JSON_DATA');
         ws.close(1008, 'Invalid JSON');
         return;
       }
 
       if (!isAuthMessage(parsed)) {
+        socketLogger.warn('invalid auth message');
         ws.close(1008, 'Invalid auth message');
         return;
       }
@@ -403,8 +388,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
           });
           if (info) {
             sessionId = requestedSessionId;
-            sessionLogger = logger.createSessionLogger(sessionId);
-            drainPendingClientLogs();
+            socketLogger.set('session', sessionId);
             registry.clearAlert(sessionId);
             registry.resizeSession(sessionId, columns, rows);
             registry.updateSessionScrollback(sessionId, scrollback);
@@ -438,16 +422,18 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
 
             lastPingSentAt = Date.now(); ws.ping();
 
-            logger.debug('session attached', { address, sessionId, name: info.name });
+            socketLogger.info('session attached', { name: info.name });
             return;
           }
         } else if (existing && !existing.info.alive) {
           // Session exists but is dead
+          socketLogger.info('session dead, closing connection', { sessionId: requestedSessionId });
           sendBinary(ws, SET_SESSION_INFO, JSON.stringify(existing.info));
           ws.close(4002, 'Process exited');
           return;
         }
         // Session not found — tell the client
+        socketLogger.info('session not found, closing connection', { sessionId: requestedSessionId });
         ws.close(4004, 'Session not found');
         return;
       }
@@ -457,7 +443,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         const shellName = typeof parsed.shell === 'string' ? parsed.shell : undefined;
         const shell = shellStore.resolve(shellName);
         if (!shell) {
-          logger.error('no shells configured');
+          socketLogger.error('no shells configured');
           ws.close(1011, 'No shells configured');
           return;
         }
@@ -471,8 +457,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
           { ...shell.env, ...notificationModeEnv, ...cliEnv },
         );
         sessionId = info.sessionId;
-        sessionLogger = logger.createSessionLogger(sessionId);
-        drainPendingClientLogs();
+        socketLogger.set('session', sessionId);
         registry.clearAlert(sessionId);
         if (themeForeground && themeBackground) {
           registry.updateSessionThemeColors(sessionId, themeForeground, themeBackground);
@@ -504,10 +489,10 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
 
         lastPingSentAt = Date.now(); ws.ping();
 
-        logger.debug('session created and attached', { address, sessionId, name: info.name });
+        socketLogger.info('session created and attached', { name: info.name });
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        logger.error('session creation failed', { error: errMsg });
+        socketLogger.error('session creation failed', { error: errMsg });
         ws.close(1011, 'Failed to spawn process');
       }
       return;
@@ -518,7 +503,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       if (buf.length < 2) return;
       const handle = registry.getHandle(sessionId);
       if (!handle) {
-        sessionLogger?.warn('INPUT dropped: no pty handle', { sessionId });
+        socketLogger.warn('INPUT dropped: no pty handle', { sessionId });
         return;
       }
       const data = buf.subarray(1).toString('utf-8');
@@ -532,6 +517,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       try {
         parsed = JSON.parse(buf.subarray(1).toString('utf-8'));
       } catch {
+        socketLogger.debug('RESIZE_TERMINAL parse failed');
         return;
       }
       if (isResizeMessage(parsed)) {
@@ -564,11 +550,11 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
           return;
         }
         // System clipboard failed — fall back to file
-        sessionLogger?.warn('system clipboard failed, trying file fallback', { error: clipResult.error });
+        socketLogger.warn('system clipboard failed, trying file fallback', { error: clipResult.error });
 
         if (!imagePasteDir) {
           const errorJson = JSON.stringify({ clipboardError: clipResult.error });
-          sessionLogger?.error('file fallback unavailable: imagePasteDir not configured');
+          socketLogger.error('file fallback unavailable: imagePasteDir not configured');
           sendClipboardImageAck(ws, requestId, 1, errorJson);
           return;
         }
@@ -578,7 +564,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
 
         return writeImageToFile(imageData, mimeType, dirPath).then(fileResult => {
           if (fileResult.success && fileResult.filePath) {
-            sessionLogger?.info('clipboard image saved to file', { path: fileResult.filePath });
+            socketLogger.info('clipboard image saved to file', { path: fileResult.filePath });
             writePty(handle, fileResult.filePath);
             sendClipboardImageAck(ws, requestId, 2); // 2 = file fallback
           } else {
@@ -587,13 +573,13 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
               fileError: fileResult.error,
               imagePasteDir: dirPath,
             });
-            sessionLogger?.error('clipboard image file write also failed', { error: fileResult.error });
+            socketLogger.error('clipboard image file write also failed', { error: fileResult.error });
             sendClipboardImageAck(ws, requestId, 1, errorJson);
           }
         });
       }).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
-        sessionLogger?.error('clipboard image handler failed', { error: msg });
+        socketLogger.error('clipboard image handler failed', { error: msg });
         sendClipboardImageAck(ws, requestId, 1, JSON.stringify({ clipboardError: msg }));
       });
       return;
@@ -605,6 +591,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       try {
         parsed = JSON.parse(buf.subarray(1).toString('utf-8'));
       } catch {
+        socketLogger.debug('UPDATE_SETTINGS parse failed');
         return;
       }
       if (!isUpdateSettingsMessage(parsed)) return;
@@ -630,18 +617,17 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
     }
 
     if (command === CLIENT_LOG) {
-      if (sessionId === null || !sessionLogger) {
-        if (pendingClientLogs.length < 100) pendingClientLogs.push(Buffer.from(buf));
-        return;
-      }
       let parsed: unknown;
       try {
         parsed = JSON.parse(buf.subarray(1).toString('utf-8'));
       } catch {
+        socketLogger.debug('CLIENT_LOG parse failed');
         return;
       }
-      if (isClientLogMessage(parsed)) {
-        sessionLogger.clientLog(parsed.level, parsed.msg, parsed.seq, parsed.data);
+      if (isClientLogBatch(parsed)) {
+        for (const entry of parsed) {
+          socketLogger.clientLog(entry.level, entry.msg, entry.seq, entry.data, entry.ts);
+        }
       }
       return;
     }
@@ -652,6 +638,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       try {
         parsed = JSON.parse(buf.subarray(1).toString('utf-8'));
       } catch {
+        socketLogger.debug('EDITOR_DONE parse failed');
         return;
       }
       if (typeof parsed !== 'object' || parsed === null) return;
@@ -672,22 +659,18 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       registry.clearDownloadSender(sessionId);
     }
     state.clientCount--;
-    logger.debug('WS closed', { address, clientCount: state.clientCount });
+    socketLogger.info('WS closed', { clientCount: state.clientCount });
 
-    // Clean up logger but do NOT call registry.detachSession() here.
+    // Do NOT call registry.detachSession() here.
     // stopSync() already removed this connection's change listener.
     // Calling detachSession() would race with a new connection that already
     // attached to the same session, wiping its freshly-registered callbacks.
     // The next connection's handshake calls detachSession() to clear stale
     // onExitCallbacks before attaching.
-    if (sessionId !== null) {
-      sessionLogger?.close();
-      sessionLogger = null;
-      sessionId = null;
-    }
+    sessionId = null;
   });
 
   ws.on('error', (err) => {
-    logger.error('WS error', { address, error: err.message });
+    socketLogger.error('WS error', { error: err.message });
   });
 }

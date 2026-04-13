@@ -221,7 +221,7 @@ export class SessionRegistry {
             entry.alive = false;
             entry.handle = null;
             this.persist();
-            this.logger.debug('session process exited', { sessionId, name });
+            this.logger.info('session process exited', { sessionId, name });
             for (const cb of entry.onExitCallbacks) cb();
             entry.onExitCallbacks.length = 0;
           }
@@ -271,6 +271,7 @@ export class SessionRegistry {
     const entry = this.sessions.get(sessionId);
     if (!entry) return;
     for (const cb of entry.onDetachCallbacks) cb();
+    this.logger.info('session detached', { sessionId });
     entry.onDetachCallbacks.length = 0;
     entry.onExitCallbacks.length = 0;
     entry.onChangeCallbacks.length = 0;
@@ -384,6 +385,7 @@ export class SessionRegistry {
   }
 
   destroyAll(): void {
+    this.logger.info('destroying all sessions', { count: this.sessions.size });
     for (const entry of this.sessions.values()) {
       this.cancelPendingEdit(entry);
       if (entry.alive && entry.handle) {

@@ -43,6 +43,7 @@ export interface ClientLogMessage {
   level: LogLevel;
   msg: string;
   data?: Record<string, unknown>;
+  ts?: string;
 }
 
 export interface LoggerInterface {
@@ -65,6 +66,14 @@ export function isClientLogMessage(obj: unknown): obj is ClientLogMessage {
     && typeof record['level'] === 'string'
     && VALID_LOG_LEVELS.has(record['level'] as string)
     && typeof record['msg'] === 'string';
+}
+
+export function isClientLogBatch(obj: unknown): obj is ClientLogMessage[] {
+  if (!Array.isArray(obj)) return false;
+  for (const item of obj) {
+    if (!isClientLogMessage(item)) return false;
+  }
+  return true;
 }
 
 export interface TlsConfig {

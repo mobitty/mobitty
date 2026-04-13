@@ -141,7 +141,7 @@ export class TerminalCore {
   private pendingClipboardImageResolve?: (result: { status: number; errorInfo?: ImagePasteErrorInfo }) => void;
 
   private modifierSource?: ModifierSource;
-  private logger?: ClientLogger;
+  private logger: ClientLogger;
   callbacks: TerminalCoreCallbacks = {};
 
   private currentSessionId?: string;
@@ -161,6 +161,9 @@ export class TerminalCore {
 
   constructor(private options: TerminalCoreOptions) {
     this.scrollback = this.options.termOptions.scrollback ?? 5000;
+    this.logger = new ClientLogger({
+      sendToServer: (payload) => { try { this.socket?.send(payload); } catch { /* socket may be closing */ } },
+    });
   }
 
   dispose() {
@@ -269,7 +272,7 @@ export class TerminalCore {
         this.token = json.token;
       }
     } catch {
-      console.warn('[mobitty] fetch token failed');
+      this.logger.warn('fetch token failed');
     }
   }
 
@@ -348,6 +351,7 @@ export class TerminalCore {
 
   /** Manual reconnect — called by the React UI when user clicks Reconnect. */
   reconnect() {
+    this.logger.info('manual reconnect');
     this.doReconnect = true;
     this.reconnectDelay = 0;
     this.refreshToken().then(() => this.connect());
@@ -358,6 +362,8 @@ export class TerminalCore {
   }
 
   switchSession(sessionId: string, shellName?: string) {
+    this.logger.info('switching session', { sessionId: sessionId || null, shell: shellName ?? null });
+    this.logger.setSession(sessionId || null);
     this.options.sessionId = sessionId;
     this.options.shellName = shellName;
     this.doReconnect = true;
@@ -493,7 +499,7 @@ export class TerminalCore {
     // All methods failed — show error dialog if we have a clipboard error,
     // otherwise a brief overlay for an empty clipboard.
     if (clipboardError) {
-      this.logger?.warn('paste-clipboard-error', { clipboardError });
+      this.logger.warn('paste-clipboard-error', { clipboardError });
       this.callbacks.onImagePasteError?.({ clipboardError });
     } else {
       this.overlayAddon?.showOverlay('Clipboard empty', 700);
@@ -562,7 +568,7 @@ export class TerminalCore {
     if (!this.terminal?.element) return;
     if (this.isScrollbarStuck()) {
       this.scrollbarStuckCount++;
-      this.logger?.warn('scrollbar-stuck-detected', {
+      this.logger.warn('scrollbar-stuck-detected', {
         ...this.getScrollbarDiagnostics(),
         consecutiveCount: this.scrollbarStuckCount,
       });
@@ -571,7 +577,7 @@ export class TerminalCore {
       }
     } else {
       if (this.scrollbarStuckCount > 0) {
-        this.logger?.info('scrollbar-unstuck', {
+        this.logger.info('scrollbar-unstuck', {
           previousStuckCount: this.scrollbarStuckCount,
         });
       }
@@ -580,7 +586,7 @@ export class TerminalCore {
   }
 
   private attemptScrollbarRecovery(): void {
-    this.logger?.info('scrollbar-recovery-start', this.getScrollbarDiagnostics());
+    this.logger.info('scrollbar-recovery-start', this.getScrollbarDiagnostics());
     const savedViewportY = this.terminal.buffer.active.viewportY;
 
     // Phase 1: Force render refresh + scroll poke
@@ -590,14 +596,14 @@ export class TerminalCore {
       this.terminal.scrollToLine(savedViewportY);
 
       if (!this.isScrollbarStuck()) {
-        this.logger?.info('scrollbar-recovery-success', { method: 'refresh-poke' });
+        this.logger.info('scrollbar-recovery-success', { method: 'refresh-poke' });
         this.scrollbarStuckCount = 0;
         this.overlayAddon.showOverlay('Scroll fixed', 500);
         return;
       }
 
       // Phase 2: Clear scrollback separately, then request STATE_FULL
-      this.logger?.info('scrollbar-recovery-escalating', { method: 'clear-then-state-full' });
+      this.logger.info('scrollbar-recovery-escalating', { method: 'clear-then-state-full' });
       const clearScrollback = new Uint8Array([0x1b, 0x5b, 0x33, 0x4a]); // \x1b[3J
       this.terminal.write(clearScrollback, () => {
         // Request STATE_FULL from server by sending current dimensions as resize
@@ -634,7 +640,7 @@ export class TerminalCore {
 
         if (moved) {
           if (stuckCount >= STUCK_THRESHOLD) {
-            this.logger?.info('wheel-scroll-diag', { event: 'unstuck', previousStuckCount: stuckCount });
+            this.logger.info('wheel-scroll-diag', { event: 'unstuck', previousStuckCount: stuckCount });
           }
           stuckCount = 0;
           return;
@@ -670,9 +676,9 @@ export class TerminalCore {
         };
 
         if (stuckCount >= STUCK_THRESHOLD) {
-          this.logger?.warn('wheel-scroll-diag', { event: 'stuck', ...data });
+          this.logger.warn('wheel-scroll-diag', { event: 'stuck', ...data });
         } else {
-          this.logger?.debug('wheel-scroll-diag', { event: 'no-move', ...data });
+          this.logger.debug('wheel-scroll-diag', { event: 'no-move', ...data });
         }
       });
     };
@@ -756,7 +762,7 @@ export class TerminalCore {
       // Ctrl+Shift+Home: manual scrollbar recovery
       if (event.key === 'Home') {
         event.preventDefault();
-        this.logger?.info('scrollbar-recovery-manual');
+        this.logger.info('scrollbar-recovery-manual');
         this.attemptScrollbarRecovery();
         return false;
       }
@@ -814,25 +820,25 @@ export class TerminalCore {
     const onPaste = (e: ClipboardEvent): void => {
       const items = e.clipboardData?.items;
       const itemTypes = items ? Array.from(items).map(it => it?.type ?? '(null)') : null;
-      this.logger?.debug('paste-event', { itemCount: items?.length ?? 0, itemTypes });
+      this.logger.debug('paste-event', { itemCount: items?.length ?? 0, itemTypes });
       if (!items) return;
       for (let i = 0; i < items.length; i++) {
         const item = items[i];
         if (!item || !item.type.startsWith('image/')) continue;
         const blob = item.getAsFile();
         if (!blob || blob.size === 0 || blob.size > MAX_PASTE_IMAGE_BYTES) {
-          this.logger?.warn('paste-image-skip', { type: item.type, blobNull: blob === null, blobSize: blob?.size ?? 0 });
+          this.logger.warn('paste-image-skip', { type: item.type, blobNull: blob === null, blobSize: blob?.size ?? 0 });
           continue;
         }
         e.stopImmediatePropagation();
         e.preventDefault();
-        this.logger?.debug('paste-image-intercepted', { type: item.type, size: blob.size });
+        this.logger.debug('paste-image-intercepted', { type: item.type, size: blob.size });
         void this.handleNativePasteImage(blob, item.type);
         return;
       }
       // No image found — check if clipboard was completely empty (likely paste permission denied on iOS)
       const hasText = e.clipboardData?.getData('text/plain') !== '';
-      this.logger?.debug('paste-no-image', { itemCount: items.length, itemTypes, hasText });
+      this.logger.debug('paste-no-image', { itemCount: items.length, itemTypes, hasText });
       if (items.length === 0 && !hasText) {
         this.overlayAddon?.showOverlay('Clipboard empty \u2014 allow access when prompted', 2000);
       }
@@ -846,7 +852,7 @@ export class TerminalCore {
     const arrayBuffer = await blob.arrayBuffer();
     const requestId = this.sendClipboardImage(arrayBuffer, mimeType);
     if (requestId <= 0) {
-      this.logger?.warn('paste-image-send-failed', { mimeType, dataSize: arrayBuffer.byteLength });
+      this.logger.warn('paste-image-send-failed', { mimeType, dataSize: arrayBuffer.byteLength });
       return;
     }
     this.overlayAddon?.showOverlay('Sending image\u2026', 1500);
@@ -864,7 +870,7 @@ export class TerminalCore {
   private sendClipboardImage(imageData: ArrayBuffer, mimeType: string): number {
     const { socket, textEncoder } = this;
     if (!socket || socket.readyState !== WebSocket.OPEN) {
-      this.logger?.warn('paste-image-socket-not-open', { readyState: socket?.readyState ?? -1 });
+      this.logger.warn('paste-image-socket-not-open', { readyState: socket?.readyState ?? -1 });
       return 0;
     }
 
@@ -873,7 +879,7 @@ export class TerminalCore {
 
     const mimeBytes = textEncoder.encode(mimeType);
     if (mimeBytes.length > 255) {
-      this.logger?.warn('paste-image-mime-too-long', { mimeType, mimeLen: mimeBytes.length });
+      this.logger.warn('paste-image-mime-too-long', { mimeType, mimeLen: mimeBytes.length });
       return 0;
     }
 
@@ -895,7 +901,7 @@ export class TerminalCore {
         if (this.pendingClipboardImageResolve === resolveOnce) {
           this.pendingClipboardImageResolve = undefined;
         }
-        this.logger?.warn('paste-image-ack-timeout', { requestId: _requestId, timeoutMs });
+        this.logger.warn('paste-image-ack-timeout', { requestId: _requestId, timeoutMs });
         resolve({ status: 1 });
       }, timeoutMs);
 
@@ -922,9 +928,6 @@ export class TerminalCore {
 
 
   private onSocketOpen() {
-    this.logger = new ClientLogger({
-      sendToServer: (payload) => { if (this.socket?.readyState === WebSocket.OPEN) this.socket.send(payload); },
-    });
     this.logger.info('websocket opened');
     const { overlayAddon } = this;
 
@@ -987,6 +990,7 @@ export class TerminalCore {
       handshake['remoteEditor'] = this.remoteEditor;
       if (this.themeForeground) handshake['themeForeground'] = this.themeForeground;
       if (this.themeBackground) handshake['themeBackground'] = this.themeBackground;
+      this.logger.info('handshake', { sessionId: this.options.sessionId ?? null, shell: this.options.shellName ?? null, columns: terminal.cols, rows: terminal.rows });
       this.socket?.send(textEncoder.encode(JSON.stringify(handshake)));
 
       terminal.focus();
@@ -995,14 +999,14 @@ export class TerminalCore {
 
   private scheduleReconnect() {
     this.reconnectDelay = Math.min(Math.max(this.reconnectDelay, 500) * 2, 10000);
-    this.logger?.info('reconnecting', { delay: this.reconnectDelay });
+    this.logger.info('reconnecting', { delay: this.reconnectDelay });
     setTimeout(() => this.refreshToken().then(() => this.connect()), this.reconnectDelay);
   }
 
   private registerWakeDetection() {
     const check = () => {
       if (this.socket?.readyState !== WebSocket.OPEN && this.doReconnect) {
-        this.logger?.info('stale connection, reconnecting');
+        this.logger.info('stale connection, reconnecting');
         this.socket?.close();
       }
     };
@@ -1038,12 +1042,14 @@ export class TerminalCore {
   }
 
   private onSocketClose(event: CloseEvent) {
-    this.logger?.info('websocket closed', { code: event.code });
+    this.logger.setConnected(false);
+    this.logger.info('websocket closed', { code: event.code });
     const { overlayAddon } = this;
     this.dispose();
 
     if (event.code === 4004) {
       // Requested session not found on server — delegate to UI for shell selection
+      this.logger.info('session not found on server, showing session picker');
       this.options.sessionId = undefined;
       this.callbacks.onSessionNotFound?.();
       return;
@@ -1051,6 +1057,7 @@ export class TerminalCore {
 
     if (event.code === 4001) {
       // Replaced by another connection or switching sessions — auto-reconnect
+      this.logger.info('session switch, reconnecting');
       overlayAddon.showOverlay('Reconnecting...');
       this.refreshToken().then(() => this.connect());
       return;
@@ -1058,12 +1065,14 @@ export class TerminalCore {
 
     if (event.code === 4003) {
       // Connection replaced by another client — do not reconnect
+      this.logger.info('replaced by another client, showing closed dialog');
       this.callbacks.onConnectionClosed?.('replaced');
       return;
     }
 
     if (event.code === 4002) {
       // Process exited
+      this.logger.info('session process exited', { sessionId: this.currentSessionId });
       overlayAddon.showOverlay('Process exited');
       if (this.currentSessionId) {
         this.callbacks.onSessionDied?.(this.currentSessionId);
@@ -1072,6 +1081,7 @@ export class TerminalCore {
     }
 
     if (this.closeOnDisconnect) {
+      this.logger.info('connection closed, closing window');
       window.close();
       // window.close() may be a no-op — show dialog as fallback
       setTimeout(() => this.callbacks.onConnectionClosed?.('closed'), 200);
@@ -1079,9 +1089,11 @@ export class TerminalCore {
     }
 
     if (this.doReconnect) {
+      this.logger.info('connection lost, reconnecting');
       overlayAddon.showOverlay('Reconnecting...');
       this.scheduleReconnect();
     } else {
+      this.logger.info('connection closed, showing closed dialog');
       this.callbacks.onConnectionClosed?.('closed');
     }
   }
@@ -1126,7 +1138,7 @@ export class TerminalCore {
             );
           }
         }
-      } catch { /* ignore malformed */ }
+      } catch { this.logger.debug('SESSION_NOTIFICATION parse failed'); }
       return;
     }
 
@@ -1145,7 +1157,7 @@ export class TerminalCore {
               imagePasteDir: typeof r['imagePasteDir'] === 'string' ? r['imagePasteDir'] : undefined,
             };
           }
-        } catch { /* ignore parse errors */ }
+        } catch { this.logger.debug('CLIPBOARD_IMAGE_ACK parse failed'); }
       }
       this.pendingClipboardImageResolve?.({ status, errorInfo });
       return;
@@ -1162,7 +1174,7 @@ export class TerminalCore {
             this.callbacks.onEditorOpen?.(r['filePath'], r['content'], contentType);
           }
         }
-      } catch { /* ignore malformed */ }
+      } catch { this.logger.debug('EDITOR_OPEN parse failed'); }
       return;
     }
 
@@ -1176,7 +1188,7 @@ export class TerminalCore {
             this.callbacks.onDownloadStart?.(r['fileName'], r['fileSize'], r['token']);
           }
         }
-      } catch { /* ignore malformed */ }
+      } catch { this.logger.debug('DOWNLOAD_START parse failed'); }
       return;
     }
 
@@ -1199,7 +1211,7 @@ export class TerminalCore {
         this.terminal.write(combined, () => {
           const target = this.terminal.buffer.active.baseY - distFromBottom;
           this.terminal.scrollToLine(Math.max(0, target));
-          this.logger?.debug('state-full-applied', {
+          this.logger.debug('state-full-applied', {
             baseY: this.terminal.buffer.active.baseY,
             viewportY: this.terminal.buffer.active.viewportY,
             bufferLength: this.terminal.buffer.active.length,
@@ -1230,11 +1242,13 @@ export class TerminalCore {
         const info = JSON.parse(this.textDecoder.decode(payload)) as SessionInfo;
         this.currentSessionId = info.sessionId;
         this.options.sessionId = info.sessionId;
+        this.logger.setSession(info.sessionId);
+        this.logger.setConnected(true);
         this.callbacks.onSessionInfo?.(info);
         break;
       }
       default:
-        this.logger?.warn('unknown command', { cmd: cmd.toString(16) });
+        this.logger.warn('unknown command', { cmd: cmd.toString(16) });
         break;
     }
   }
@@ -1297,7 +1311,7 @@ export class TerminalCore {
       if (this.canvasAddon) return;
       this.canvasAddon = new CanvasAddon();
       disposeWebgl();
-      try { terminal.loadAddon(this.canvasAddon); } catch { disposeCanvas(); }
+      try { terminal.loadAddon(this.canvasAddon); } catch { this.logger.warn('canvas renderer failed, falling back to DOM'); disposeCanvas(); }
     };
     const enableWebgl = () => {
       if (this.webglAddon) return;
@@ -1306,7 +1320,7 @@ export class TerminalCore {
       try {
         this.webglAddon.onContextLoss(() => { this.webglAddon?.dispose(); });
         terminal.loadAddon(this.webglAddon);
-      } catch { disposeWebgl(); enableCanvas(); }
+      } catch { this.logger.warn('webgl renderer failed, falling back to canvas'); disposeWebgl(); enableCanvas(); }
     };
 
     switch (value) {

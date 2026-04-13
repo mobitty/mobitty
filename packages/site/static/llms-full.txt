@@ -96,7 +96,19 @@ Options for secure remote access:
 
 Browser-reserved shortcuts (Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Tab, F11) cannot be intercepted by web applications. These shortcuts work in the terminal only when Mobitty is installed as a standalone app (PWA). Install via the browser's "Install" or "Add to Home Screen" option.
 
-## CLI Options
+## Server Configuration
+
+### Data folder
+
+Mobitty stores all server-side data in a single folder. Set its location with the MOBITTY_DATA_FOLDER environment variable (default: ~/.mobitty).
+
+### settings.ini
+
+Mobitty auto-generates a settings.ini file in the data folder on first run. Edit it to set persistent defaults without passing CLI flags every time. CLI flags take precedence over settings.ini values. The file is never overwritten by the server — user edits are preserved across upgrades.
+
+Sections: [server] (port, interface), [logging] (console-level, file-level, rotation-interval, retention), [tls] (cert, key, ca — paths resolved relative to the settings file directory).
+
+### CLI flags
 
 ```
 mobitty [options]
@@ -105,15 +117,19 @@ mobitty [options]
 Flags:
 - `-p, --port <number>` — HTTP server port (default: 8000)
 - `-i, --interface <address>` — Bind address (default: 127.0.0.1)
-- `-l, --log-level <level>` — Log level: debug, info, warn, error (default: info)
+- `-l, --log-level <level>` — Console log level: debug, info, warn, error (default: warn)
+- `--file-log-level <level>` — File log level: debug, info, warn, error (default: info)
+- `--log-rotation-interval <duration>` — Log file rotation interval, e.g. 1h, 24h, 7d (default: 24h)
+- `--log-retention <duration>` — Log file retention period, e.g. 7d, 30d (default: 7d)
 - `--tls-cert <path>` — Path to TLS certificate file
 - `--tls-key <path>` — Path to TLS private key file
 - `--tls-ca <path>` — Path to TLS CA certificate file
 - `-v, --version` — Print version and exit
 - `-h, --help` — Print help and exit
 
-Environment variables:
-- `MOBITTY_DATA_FOLDER` — Data directory for sessions, themes, and logs (default: ~/.mobitty)
+### Logging
+
+All logging is fully local. Mobitty does not send telemetry, analytics, or log data to the internet. Server logs are written as rotating JSONL files in the logs/ subfolder of the data folder. The console log level controls what prints to the terminal; the file log level controls what is written to disk. Log files are automatically rotated and cleaned up based on the configured interval and retention period.
 
 ## Sessions
 

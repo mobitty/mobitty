@@ -52,9 +52,9 @@ export function startServer(config: ServerConfig, logger: Logger): void {
 
   httpServer.listen(config.port, config.host, () => {
     const scheme = config.tls !== undefined ? 'https' : 'http';
-    logger.info(`Listening on ${scheme}://${config.host}:${config.port}`);
+    logger.warn(`Listening on ${scheme}://${config.host}:${config.port}`);
     const shells = shellStore.list();
-    logger.info(`shells: ${shells.map(s => s.name).join(', ') || '(none discovered)'}`);
+    logger.warn(`shells: ${shells.map(s => s.name).join(', ') || '(none discovered)'}`);
 
   });
 
@@ -67,7 +67,10 @@ export function startServer(config: ServerConfig, logger: Logger): void {
       logger.close();
       process.exit(0);
     });
-    setTimeout(() => process.exit(1), 3000);
+    setTimeout(() => {
+      logger.warn('graceful shutdown timed out, forcing exit');
+      process.exit(1);
+    }, 3000);
   };
 
   process.on('SIGINT', shutdown);

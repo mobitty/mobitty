@@ -14,6 +14,8 @@ Mobitty is a self-hosted, source-available web terminal designed for using AI co
 - Remote editor: edit files in-browser when programs request $EDITOR
 - Image paste: send screenshots directly to AI agents running in the terminal
 - PWA: installable as a standalone app on mobile and desktop
+- Fully local: all data and logs stay on your server, no telemetry or analytics sent to the internet
+- Configurable: persistent settings via `~/.mobitty/settings.ini`, CLI flags override
 
 ## Quick Start
 
@@ -49,7 +51,7 @@ Business Source License 1.1 (BSL-1.1). Converts to GPLv2+ four years after each 
 - [Installation](https://mobitty.dev/docs/guides/installation)
 - [Security and Remote Access](https://mobitty.dev/docs/guides/remote-access)
 - [Known Limitations](https://mobitty.dev/docs/guides/known-limitations)
-- [CLI Options](https://mobitty.dev/docs/reference/cli-options)
+- [Server Configuration](https://mobitty.dev/docs/reference/cli-options)
 - [Sessions](https://mobitty.dev/docs/reference/sessions)
 - [Shells](https://mobitty.dev/docs/reference/shells)
 - [Profiles](https://mobitty.dev/docs/reference/profiles)
