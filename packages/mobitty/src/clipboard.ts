@@ -75,19 +75,25 @@ $img.Dispose()
 
 async function writeClipboardDarwin(tempPath: string, mime: string): Promise<void> {
   if (mime === 'image/png') {
-    const script = `set the clipboard to (read (POSIX file "${tempPath}") as «class PNGf»)`;
-    await execFilePromise('osascript', ['-e', script]);
+    await execFilePromise('osascript', [
+      '-e', 'on run argv',
+      '-e', 'set the clipboard to (read (POSIX file (item 1 of argv)) as «class PNGf»)',
+      '-e', 'end run',
+      '--', tempPath,
+    ]);
   } else {
     // For non-PNG, use a general approach via NSPasteboard
-    const script = `
-use framework "AppKit"
-set imageData to (current application's NSData's dataWithContentsOfFile:"${tempPath}")
-set img to (current application's NSImage's alloc()'s initWithData:imageData)
-set pb to current application's NSPasteboard's generalPasteboard()
-pb's clearContents()
-pb's writeObjects:{img}
-`;
-    await execFilePromise('osascript', ['-e', script]);
+    await execFilePromise('osascript', [
+      '-e', 'on run argv',
+      '-e', 'use framework "AppKit"',
+      '-e', 'set imageData to (current application\'s NSData\'s dataWithContentsOfFile:(item 1 of argv))',
+      '-e', 'set img to (current application\'s NSImage\'s alloc()\'s initWithData:imageData)',
+      '-e', 'set pb to current application\'s NSPasteboard\'s generalPasteboard()',
+      '-e', 'pb\'s clearContents()',
+      '-e', 'pb\'s writeObjects:{img}',
+      '-e', 'end run',
+      '--', tempPath,
+    ]);
   }
 }
 
