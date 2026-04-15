@@ -44,6 +44,23 @@ export function startServer(config: ServerConfig, logger: Logger): void {
     perMessageDeflate: {
       threshold: 256,
     },
+    verifyClient({ origin, req }: { origin: string; secure: boolean; req: IncomingMessage }) {
+      // Non-browser clients (curl, CLI) don't send Origin — not vulnerable to CSWSH
+      if (!origin) return true;
+
+      const host = req.headers.host;
+      if (!host) return false;
+
+      try {
+        const allowed = new URL(origin).host === host;
+        if (!allowed) {
+          logger.warn(`WebSocket origin rejected: ${origin} (host: ${host})`);
+        }
+        return allowed;
+      } catch {
+        return false;
+      }
+    },
   });
 
   wss.on('connection', (ws, req) => {
