@@ -157,7 +157,10 @@ export interface EditorResult {
 export function isResizeMessage(obj: unknown): obj is ResizeMessage {
   if (typeof obj !== 'object' || obj === null) return false;
   const record = obj as Record<string, unknown>;
-  return typeof record['columns'] === 'number' && typeof record['rows'] === 'number';
+  return typeof record['columns'] === 'number' && Number.isInteger(record['columns'])
+    && record['columns'] >= 1 && record['columns'] <= 800
+    && typeof record['rows'] === 'number' && Number.isInteger(record['rows'])
+    && record['rows'] >= 1 && record['rows'] <= 400;
 }
 
 // Heartbeat configuration

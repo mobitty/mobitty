@@ -315,8 +315,14 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         return;
       }
 
-      const columns = typeof parsed.columns === 'number' ? parsed.columns : 80;
-      const rows = typeof parsed.rows === 'number' ? parsed.rows : 24;
+      const columns = typeof parsed.columns === 'number'
+        && Number.isInteger(parsed.columns)
+        && parsed.columns >= 1 && parsed.columns <= 800
+        ? parsed.columns : 80;
+      const rows = typeof parsed.rows === 'number'
+        && Number.isInteger(parsed.rows)
+        && parsed.rows >= 1 && parsed.rows <= 400
+        ? parsed.rows : 24;
       const requestedSessionId = typeof parsed.sessionId === 'string' ? parsed.sessionId : undefined;
 
       // Parse scrollback preference
