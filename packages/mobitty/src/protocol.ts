@@ -65,6 +65,12 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
   const address = req.socket.remoteAddress ?? 'unknown';
   const socketLogger = logger.child({ address });
 
+  if (state.config.maxConnections > 0 && state.clientCount >= state.config.maxConnections) {
+    socketLogger.warn('connection limit reached', { clientCount: state.clientCount, maxConnections: state.config.maxConnections });
+    ws.close(1013, 'Connection limit reached');
+    return;
+  }
+
   state.clientCount++;
   socketLogger.info('WS connected', { clientCount: state.clientCount });
 
@@ -499,8 +505,13 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         socketLogger.info('session created and attached', { name: info.name });
       } catch (err) {
         const errMsg = err instanceof Error ? err.message : String(err);
-        socketLogger.error('session creation failed', { error: errMsg });
-        ws.close(1011, 'Failed to spawn process');
+        if (errMsg === 'Session limit reached') {
+          socketLogger.warn('session limit reached', { maxSessions: state.config.maxSessions });
+          ws.close(1013, 'Session limit reached');
+        } else {
+          socketLogger.error('session creation failed', { error: errMsg });
+          ws.close(1011, 'Failed to spawn process');
+        }
       }
       return;
     }

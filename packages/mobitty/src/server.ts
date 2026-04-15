@@ -22,7 +22,7 @@ export function startServer(config: ServerConfig, logger: Logger): void {
   shellStore.ensureDefaults();
   shellStore.rediscover();
 
-  const registry = new SessionRegistry(config.dataFolder, logger);
+  const registry = new SessionRegistry(config.dataFolder, logger, config.maxSessions);
   registry.init();
 
   const state: ServerState = {

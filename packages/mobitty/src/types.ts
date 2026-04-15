@@ -90,6 +90,8 @@ export interface ServerConfig {
   prefsJson: string;
   dataFolder: string;
   maxPayloadBytes: number;
+  maxConnections: number;
+  maxSessions: number;
   tls?: TlsConfig;
 }
 

@@ -56,6 +56,8 @@ describe('generateDefaultIni', () => {
     assert.equal(ini['logging']!['rotation-interval'], '24h');
     assert.equal(ini['logging']!['retention'], '7d');
     assert.equal(ini['server']!['max-payload'], '50');
+    assert.equal(ini['server']!['max-connections'], '100');
+    assert.equal(ini['server']!['max-sessions'], '50');
     // TLS keys are commented out — should not appear
     assert.equal(ini['tls']?.['cert'], undefined);
     assert.equal(ini['tls']?.['key'], undefined);
@@ -85,6 +87,8 @@ describe('loadConfig', () => {
     assert.equal(config.logRetentionMs, 604800000);
     assert.equal(config.dataFolder, tmpDir);
     assert.equal(config.maxPayloadBytes, 50 * 1024 * 1024);
+    assert.equal(config.maxConnections, 100);
+    assert.equal(config.maxSessions, 50);
     assert.equal(config.tls, undefined);
   });
 
@@ -160,6 +164,68 @@ describe('loadConfig', () => {
     assert.throws(
       () => loadConfig(tmpDir, { 'max-payload': '-5' }),
       (err: unknown) => err instanceof ConfigError && /invalid max-payload/.test(err.message),
+    );
+  });
+
+  it('reads max-connections from INI', () => {
+    writeFileSync(join(tmpDir, 'settings.ini'), '[server]\nmax-connections = 200\n');
+    const config = loadConfig(tmpDir, noCli);
+    assert.equal(config.maxConnections, 200);
+  });
+
+  it('CLI overrides max-connections from INI', () => {
+    writeFileSync(join(tmpDir, 'settings.ini'), '[server]\nmax-connections = 200\n');
+    const config = loadConfig(tmpDir, { 'max-connections': '10' });
+    assert.equal(config.maxConnections, 10);
+  });
+
+  it('accepts zero max-connections (unlimited)', () => {
+    const config = loadConfig(tmpDir, { 'max-connections': '0' });
+    assert.equal(config.maxConnections, 0);
+  });
+
+  it('throws on negative max-connections', () => {
+    assert.throws(
+      () => loadConfig(tmpDir, { 'max-connections': '-1' }),
+      (err: unknown) => err instanceof ConfigError && /invalid max-connections/.test(err.message),
+    );
+  });
+
+  it('throws on non-numeric max-connections', () => {
+    assert.throws(
+      () => loadConfig(tmpDir, { 'max-connections': 'abc' }),
+      (err: unknown) => err instanceof ConfigError && /invalid max-connections/.test(err.message),
+    );
+  });
+
+  it('reads max-sessions from INI', () => {
+    writeFileSync(join(tmpDir, 'settings.ini'), '[server]\nmax-sessions = 25\n');
+    const config = loadConfig(tmpDir, noCli);
+    assert.equal(config.maxSessions, 25);
+  });
+
+  it('CLI overrides max-sessions from INI', () => {
+    writeFileSync(join(tmpDir, 'settings.ini'), '[server]\nmax-sessions = 25\n');
+    const config = loadConfig(tmpDir, { 'max-sessions': '10' });
+    assert.equal(config.maxSessions, 10);
+  });
+
+  it('accepts zero max-sessions (unlimited)', () => {
+    const config = loadConfig(tmpDir, { 'max-sessions': '0' });
+    assert.equal(config.maxSessions, 0);
+  });
+
+  it('throws on negative max-sessions', () => {
+    assert.throws(
+      () => loadConfig(tmpDir, { 'max-sessions': '-1' }),
+      (err: unknown) => err instanceof ConfigError && /invalid max-sessions/.test(err.message),
+    );
+  });
+
+  it('throws on non-numeric max-sessions', () => {
+    assert.throws(
+      () => loadConfig(tmpDir, { 'max-sessions': 'abc' }),
+      (err: unknown) => err instanceof ConfigError && /invalid max-sessions/.test(err.message),
     );
   });
 

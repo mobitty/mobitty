@@ -244,4 +244,29 @@ describe('SessionRegistry', () => {
     assert.ok(newCount > 0, 'new callback should still fire');
     assert.equal(oldCount, 0, 'old callback should not fire');
   });
+
+  it('createSession throws when session limit reached', () => {
+    const limited = new SessionRegistry(tmpDir, noopLogger, 2);
+    limited.init();
+    limited.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
+    limited.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
+    assert.throws(
+      () => limited.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh'),
+      /Session limit reached/,
+    );
+    limited.destroyAll();
+  });
+
+  it('createSession unlimited when maxSessions is 0', () => {
+    for (let i = 0; i < 5; i++) {
+      registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
+    }
+    assert.equal(registry.listSessions().length, 5);
+  });
+
+  it('aliveSessionCount returns correct count', () => {
+    registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
+    registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
+    assert.equal(registry.aliveSessionCount(), 2);
+  });
 });

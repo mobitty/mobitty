@@ -61,16 +61,26 @@ export class SessionRegistry {
   private logger: LoggerInterface;
   private alertListeners = new Set<(sessionId: string) => void>();
   private notificationListeners = new Set<(sessionId: string, title: string, body: string) => void>();
+  private maxSessions: number;
 
-  constructor(dataFolder: string, logger: LoggerInterface) {
+  constructor(dataFolder: string, logger: LoggerInterface, maxSessions = 0) {
     this.dataFolder = dataFolder;
     this.logger = logger;
     this.filePath = join(dataFolder, 'sessions.json');
+    this.maxSessions = maxSessions;
   }
 
   init(): void {
     mkdirSync(this.dataFolder, { recursive: true });
     this.loadFromDisk();
+  }
+
+  aliveSessionCount(): number {
+    let count = 0;
+    for (const entry of this.sessions.values()) {
+      if (entry.alive) count++;
+    }
+    return count;
   }
 
   private loadFromDisk(): void {
@@ -150,6 +160,9 @@ export class SessionRegistry {
     shellName: string,
     env?: Record<string, string>,
   ): { info: SessionInfo; handle: PtyHandle } {
+    if (this.maxSessions > 0 && this.aliveSessionCount() >= this.maxSessions) {
+      throw new Error('Session limit reached');
+    }
     const sessionId = randomUUID();
     const existingNames = new Set([...this.sessions.values()].map(s => s.name));
     const name = generateUniqueSessionName(existingNames);

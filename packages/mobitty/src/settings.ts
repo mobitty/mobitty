@@ -51,6 +51,12 @@ interface = 127.0.0.1
 # Maximum WebSocket message size in MB (minimum 1)
 max-payload = 50
 
+# Maximum concurrent WebSocket connections (0 = unlimited)
+max-connections = 100
+
+# Maximum concurrent terminal sessions (0 = unlimited)
+max-sessions = 50
+
 [logging]
 # Console log level: debug | info | warn | error
 console-level = warn
@@ -91,6 +97,8 @@ export interface CliArgs {
   'tls-key'?: string;
   'tls-ca'?: string;
   'max-payload'?: string;
+  'max-connections'?: string;
+  'max-sessions'?: string;
 }
 
 /** Fully validated, ready-to-use configuration. */
@@ -102,6 +110,8 @@ export interface ResolvedConfig {
   logRotationMs: number;
   logRetentionMs: number;
   maxPayloadBytes: number;
+  maxConnections: number;
+  maxSessions: number;
   dataFolder: string;
   tls?: TlsConfig;
 }
@@ -170,6 +180,22 @@ export function loadConfig(dataFolder: string, cli: CliArgs): ResolvedConfig {
   }
   const maxPayloadBytes = maxPayloadMb * 1024 * 1024;
 
+  // ── Max connections ──
+
+  const maxConnectionsStr = cli['max-connections'] ?? nonEmpty(server['max-connections']) ?? '100';
+  const maxConnections = parseInt(maxConnectionsStr, 10);
+  if (!Number.isFinite(maxConnections) || maxConnections < 0) {
+    throw new ConfigError(`invalid max-connections: ${maxConnectionsStr} (must be a non-negative integer, 0 = unlimited)`);
+  }
+
+  // ── Max sessions ──
+
+  const maxSessionsStr = cli['max-sessions'] ?? nonEmpty(server['max-sessions']) ?? '50';
+  const maxSessions = parseInt(maxSessionsStr, 10);
+  if (!Number.isFinite(maxSessions) || maxSessions < 0) {
+    throw new ConfigError(`invalid max-sessions: ${maxSessionsStr} (must be a non-negative integer, 0 = unlimited)`);
+  }
+
   // ── TLS ──
   // INI paths resolve relative to dataFolder; CLI paths resolve relative to cwd.
 
@@ -213,7 +239,7 @@ export function loadConfig(dataFolder: string, cli: CliArgs): ResolvedConfig {
     tlsConfig = { cert, key, ca };
   }
 
-  return { port, host, consoleLogLevel, fileLogLevel, logRotationMs, logRetentionMs, maxPayloadBytes, dataFolder, tls: tlsConfig };
+  return { port, host, consoleLogLevel, fileLogLevel, logRotationMs, logRetentionMs, maxPayloadBytes, maxConnections, maxSessions, dataFolder, tls: tlsConfig };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

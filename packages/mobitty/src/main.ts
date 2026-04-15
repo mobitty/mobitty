@@ -24,6 +24,8 @@ const { values } = parseArgs({
     'tls-key': { type: 'string' },
     'tls-ca': { type: 'string' },
     'max-payload': { type: 'string' },
+    'max-connections': { type: 'string' },
+    'max-sessions': { type: 'string' },
     help: { type: 'boolean', short: 'h', default: false },
     version: { type: 'boolean', short: 'v', default: false },
   },
@@ -50,6 +52,8 @@ OPTIONS:
         --tls-key           Path to TLS private key file (PEM)
         --tls-ca            Path to TLS CA chain file (PEM, optional)
         --max-payload       Maximum WebSocket payload in MB (default: 50)
+        --max-connections   Maximum concurrent WebSocket connections (default: 100, 0 = unlimited)
+        --max-sessions      Maximum concurrent terminal sessions (default: 50, 0 = unlimited)
     -v, --version           Print version and exit
     -h, --help              Print this help and exit
 
@@ -81,6 +85,8 @@ try {
     'tls-key': values['tls-key'],
     'tls-ca': values['tls-ca'],
     'max-payload': values['max-payload'],
+    'max-connections': values['max-connections'],
+    'max-sessions': values['max-sessions'],
   });
 } catch (err) {
   if (err instanceof ConfigError) {
@@ -107,6 +113,8 @@ const config: ServerConfig = {
   prefsJson: JSON.stringify(isWindows ? { isWindows: true } : {}),
   dataFolder,
   maxPayloadBytes: resolved.maxPayloadBytes,
+  maxConnections: resolved.maxConnections,
+  maxSessions: resolved.maxSessions,
   tls: resolved.tls,
 };
 
