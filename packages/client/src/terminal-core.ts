@@ -158,6 +158,7 @@ export class TerminalCore {
   private preferredRendererType: RendererType = 'dom';
   private rendererTeardownTimer?: ReturnType<typeof setTimeout>;
   private pendingConnectRaf?: number;
+  private lastBlurWasInternal = false;
 
   constructor(private options: TerminalCoreOptions) {
     this.scrollback = this.options.termOptions.scrollback ?? 5000;
@@ -380,6 +381,18 @@ export class TerminalCore {
     if (socket?.readyState !== WebSocket.OPEN) return;
 
     if (typeof data === 'string') {
+      // Suppress focus reporting sequences from internal UI focus transitions.
+      // When focus moves within the page (terminal → batch input, dialog, etc.),
+      // document.hasFocus() stays true.  When focus leaves the page (tab switch),
+      // it becomes false.  Drop the internal pairs so shells like sh/dash don't
+      // echo ^[[O^[[I garbage when mode 1004 is active.
+      if (data === '\x1b[O') {
+        if (document.hasFocus()) { this.lastBlurWasInternal = true; return; }
+        this.lastBlurWasInternal = false;
+      } else if (data === '\x1b[I') {
+        if (this.lastBlurWasInternal) { this.lastBlurWasInternal = false; return; }
+      }
+
       const outgoing = this.modifierSource ? this.applyModifierToText(data) : data;
 
       if (outgoing.length === 1) {
