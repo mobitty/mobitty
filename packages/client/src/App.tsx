@@ -71,14 +71,6 @@ function buildWsUrl(): string {
   return [protocol, '//', window.location.host, path, '/ws', window.location.search].join('');
 }
 
-function buildTokenUrl(): string {
-  const path = window.location.pathname.replace(/[/]+$/, '');
-  return [window.location.protocol, '//', window.location.host, path, '/token'].join('');
-}
-
-const DEFAULT_SOFTKEY_SIZE = 44;
-const DEFAULT_SESSION_SWITCHER_HOTKEY = 'Ctrl+Shift+s';
-
 export function App() {
   const [profile, setProfile] = useState<Profile | undefined>();
   const [profileReady, setProfileReady] = useState(false);
@@ -250,7 +242,7 @@ export function App() {
   // Desktop-only hotkey to toggle session panel
   useEffect(() => {
     if (isMobile) return;
-    const hotkeyStr = profile?.sessionSwitcherHotkey ?? DEFAULT_SESSION_SWITCHER_HOTKEY;
+    const hotkeyStr = profile?.sessionSwitcherHotkey ?? '';
     if (hotkeyStr === '') return;
     const combo = parseComboString(hotkeyStr);
     if (!combo) return;
@@ -272,7 +264,6 @@ export function App() {
   const termOptions = useMemo((): TerminalCoreOptions => {
     return {
       wsUrl: buildWsUrl(),
-      tokenUrl: buildTokenUrl(),
       clientOptions: {
         rendererType: 'webgl',
   
@@ -303,7 +294,7 @@ export function App() {
     };
   }, [profile?.softkeys, isMobile]);
 
-  const softkeySize = profile?.softkeySize ?? DEFAULT_SOFTKEY_SIZE;
+  const softkeySize = profile?.softkeySize ?? 44;
 
   // Derive gesture mapping from profile
   const gestureMapping = useMemo((): GestureMapping => {
@@ -507,11 +498,13 @@ export function App() {
     terminalRef.current?.core?.focus();
   }, []);
 
+  if (!profileReady || !profile) return null;
+
   return (
     <>
       {/* Terminal area — flex-1, always present for layout stability */}
       <div className="flex-1 min-h-0 overflow-hidden relative">
-        {profileReady && !pendingShellSelection && (
+        {!pendingShellSelection && (
           <XtermTerminal
             ref={terminalRef}
             options={termOptions}

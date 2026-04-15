@@ -6,7 +6,7 @@ import {
 } from './profile-schema.ts';
 
 function validCandidate(): Record<string, unknown> {
-  return { name: 'test', fontSize: 14, fontFamily: 'monospace', themeLight: 'default-light', themeDark: 'default-dark', scrollback: 5000, padding: 4, optionIsMeta: true, notificationMode: 'ghostty', remoteEditor: false, copyOnSelect: false };
+  return { name: 'test', fontSize: 14, fontFamily: 'monospace', themeLight: 'default-light', themeDark: 'default-dark', scrollback: 5000, padding: 4, sessionSwitcherHotkey: 'Ctrl+Shift+s', optionIsMeta: true, notificationMode: 'ghostty', remoteEditor: false, copyOnSelect: false };
 }
 
 describe('validateProfileFields', () => {
@@ -205,8 +205,10 @@ describe('isProfile', () => {
     assert.ok(isProfile({ ...validCandidate(), sessionSwitcherHotkey: 'Ctrl+Shift+s' }));
   });
 
-  it('accepts profile without sessionSwitcherHotkey', () => {
-    assert.ok(isProfile(validCandidate()));
+  it('rejects profile without sessionSwitcherHotkey', () => {
+    const c = validCandidate();
+    delete c['sessionSwitcherHotkey'];
+    assert.ok(!isProfile(c));
   });
 
   it('accepts empty sessionSwitcherHotkey (disabled)', () => {

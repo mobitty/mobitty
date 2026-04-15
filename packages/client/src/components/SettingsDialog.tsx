@@ -187,7 +187,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
     setSoftkeys(profile.softkeys ?? defaultSoftkeyConfig('desktop'));
     setGestures(profile.gestures ?? { ...DEFAULT_GESTURE_MAPPING });
     setSoftkeySettings(profile.softkeySettings ?? { ...DEFAULT_SOFTKEY_SETTINGS });
-    setSessionSwitcherHotkey(profile.sessionSwitcherHotkey ?? '');
+    setSessionSwitcherHotkey(profile.sessionSwitcherHotkey);
     setImagePasteDir(profile.imagePasteDir ?? 'tmp');
     setOptionIsMeta(profile.optionIsMeta);
     setNotificationMode(profile.notificationMode);
@@ -261,9 +261,9 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
     if (hotkeyTrimmed !== '') {
       const err = validateHotkeyString(hotkeyTrimmed);
       if (err) { setHotkeyError(err); return undefined; }
-      candidate['sessionSwitcherHotkey'] = hotkeyTrimmed;
     }
     setHotkeyError(undefined);
+    candidate['sessionSwitcherHotkey'] = hotkeyTrimmed;
     const errors = validateProfileFields(candidate);
     if (errors.size > 0) {
       setFieldErrors(errors);

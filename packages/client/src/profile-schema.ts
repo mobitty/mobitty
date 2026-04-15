@@ -60,7 +60,7 @@ export interface Profile {
   softkeySize?: number;
   gestures?: GestureMapping;
   softkeySettings?: Record<string, SoftkeyKeySettings>;
-  sessionSwitcherHotkey?: string;
+  sessionSwitcherHotkey: string;
   imagePasteDir?: string;
   optionIsMeta: boolean;
   notificationMode: 'iterm' | 'kitty' | 'ghostty' | 'off';
@@ -514,10 +514,8 @@ export function isProfile(obj: unknown): obj is Profile {
     if (!isGestureMapping(record['gestures'], customKeyIds)) return false;
   }
   if (record['softkeySettings'] !== undefined && !isSoftkeySettings(record['softkeySettings'])) return false;
-  if (record['sessionSwitcherHotkey'] !== undefined) {
-    if (typeof record['sessionSwitcherHotkey'] !== 'string') return false;
-    if (record['sessionSwitcherHotkey'] !== '' && validateHotkeyString(record['sessionSwitcherHotkey']) !== null) return false;
-  }
+  if (typeof record['sessionSwitcherHotkey'] !== 'string') return false;
+  if (record['sessionSwitcherHotkey'] !== '' && validateHotkeyString(record['sessionSwitcherHotkey']) !== null) return false;
   return true;
 }
 
