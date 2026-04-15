@@ -7,7 +7,7 @@ import {
   CLIPBOARD_IMAGE, CLIPBOARD_IMAGE_ACK, RTT_REPORT, SESSION_ALERT, SESSION_NOTIFICATION,
   EDITOR_OPEN, EDITOR_DONE, DOWNLOAD_START,
   HEARTBEAT_INTERVAL_MS, HEARTBEAT_TIMEOUT_MS,
-  isResizeMessage, isAuthMessage, isUpdateSettingsMessage,
+  isResizeMessage, isHandshakeMessage, isUpdateSettingsMessage,
   isClientLogBatch,
 } from './types.ts';
 import type { ServerState } from './types.ts';
@@ -309,9 +309,9 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         return;
       }
 
-      if (!isAuthMessage(parsed)) {
-        socketLogger.warn('invalid auth message');
-        ws.close(1008, 'Invalid auth message');
+      if (!isHandshakeMessage(parsed)) {
+        socketLogger.warn('invalid handshake message');
+        ws.close(1008, 'Invalid handshake');
         return;
       }
 

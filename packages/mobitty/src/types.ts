@@ -126,8 +126,7 @@ export interface ResizeMessage {
   rows: number;
 }
 
-export interface AuthMessage {
-  AuthToken?: string;
+export interface HandshakeMessage {
   columns?: number;
   rows?: number;
   sessionId?: string;
@@ -164,7 +163,7 @@ export function isResizeMessage(obj: unknown): obj is ResizeMessage {
 export const HEARTBEAT_INTERVAL_MS = 5000;   // ping every 5s
 export const HEARTBEAT_TIMEOUT_MS = 15000;    // dead after 15s with no pong
 
-export function isAuthMessage(obj: unknown): obj is AuthMessage {
+export function isHandshakeMessage(obj: unknown): obj is HandshakeMessage {
   if (typeof obj !== 'object' || obj === null) return false;
   return true;
 }

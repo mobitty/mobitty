@@ -104,7 +104,6 @@ export interface TerminalCoreCallbacks {
 
 export interface TerminalCoreOptions {
   wsUrl: string;
-  tokenUrl: string;
   clientOptions: ClientOptions;
   termOptions: ITerminalOptions;
   sessionId?: string;
@@ -137,7 +136,6 @@ export class TerminalCore {
   private canvasAddon?: CanvasAddon;
 
   private socket?: WebSocket;
-  private token = '';
   private opened = false;
   private title?: string;
   private titleFixed?: string;
@@ -289,18 +287,6 @@ export class TerminalCore {
     this.gestureDetector?.updateContinuousScrollGestures(this.computeContinuousScrollGestures());
   }
 
-  async refreshToken() {
-    try {
-      const resp = await fetch(this.options.tokenUrl);
-      if (resp.ok) {
-        const json = await resp.json() as { token: string };
-        this.token = json.token;
-      }
-    } catch {
-      this.logger.warn('fetch token failed');
-    }
-  }
-
   open(parent: HTMLElement) {
     this.terminal = new Terminal(this.options.termOptions);
     const { terminal, fitAddon, overlayAddon, webLinksAddon } = this;
@@ -408,7 +394,7 @@ export class TerminalCore {
     this.logger.info('manual reconnect');
     this.doReconnect = true;
     this.reconnectDelay = 0;
-    this.refreshToken().then(() => this.connect());
+    this.connect();
   }
 
   focus() {
@@ -425,7 +411,7 @@ export class TerminalCore {
       this.socket.close(4001, 'Switching session');
     } else {
       // Socket already closed (e.g. process exited) — connect directly
-      this.refreshToken().then(() => this.connect());
+      this.connect();
     }
   }
 
@@ -1043,7 +1029,6 @@ export class TerminalCore {
       this.initListeners();
 
       const handshake: Record<string, unknown> = {
-        AuthToken: this.token,
         columns: terminal.cols,
         rows: terminal.rows,
       };
@@ -1073,7 +1058,7 @@ export class TerminalCore {
     this.logger.info('reconnecting', { delay: this.reconnectDelay });
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
-      this.refreshToken().then(() => this.connect());
+      this.connect();
     }, this.reconnectDelay);
   }
 
@@ -1148,7 +1133,7 @@ export class TerminalCore {
       // Replaced by another connection or switching sessions — auto-reconnect
       this.logger.info('session switch, reconnecting');
       overlayAddon.showOverlay('Reconnecting...');
-      this.refreshToken().then(() => this.connect());
+      this.connect();
       return;
     }
 

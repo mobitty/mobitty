@@ -35,7 +35,7 @@ export const XtermTerminal = forwardRef<XtermTerminalHandle, XtermTerminalProps>
       const core = new TerminalCore(options);
       coreRef.current = core;
       core.open(container);
-      core.refreshToken().then(() => core.connect());
+      core.connect();
 
       return () => {
         core.destroy();

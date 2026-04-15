@@ -38,9 +38,6 @@ export default defineConfig({
         target: backendTarget,
         ws: true,
       },
-      '/token': {
-        target: backendTarget,
-      },
       '/api': {
         target: backendTarget,
       },

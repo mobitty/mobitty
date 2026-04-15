@@ -220,11 +220,6 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
   const method = req.method ?? 'GET';
   const pathname = new URL(url, 'http://localhost').pathname;
 
-  if (url === '/token') {
-    jsonResponse(res, 200, { token: '' });
-    return;
-  }
-
   if (pathname === '/api/profiles' && method === 'GET') {
     jsonResponse(res, 200, { profiles: profileStore.list() });
     return;
