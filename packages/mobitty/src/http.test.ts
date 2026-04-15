@@ -1,8 +1,14 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { resolveAssetPath } from './http.ts';
+import { EventEmitter } from 'node:events';
+import { resolveAssetPath, handleHttpRequest } from './http.ts';
 import type { PathFns } from './http.ts';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { ProfileStore } from './profiles.ts';
+import type { ThemeStore } from './themes.ts';
+import type { ShellStore } from './shells.ts';
+import type { SessionRegistry } from './sessions.ts';
 
 const posixFns: PathFns = {
   resolve: path.posix.resolve,
@@ -62,5 +68,66 @@ describe('resolveAssetPath (win32)', () => {
 
   it('blocks cross-drive traversal', () => {
     assert.equal(resolveAssetPath(clientDir, '/D:/other', win32Fns), undefined);
+  });
+});
+
+// --- Security headers ---
+
+function mockReq(url: string, method = 'GET'): IncomingMessage {
+  const req = new EventEmitter() as IncomingMessage;
+  req.url = url;
+  req.method = method;
+  req.headers = {};
+  return req;
+}
+
+function mockRes(): ServerResponse & { _headers: Map<string, string | string[]>; _status: number } {
+  const headers = new Map<string, string | string[]>();
+  const res = {
+    _headers: headers,
+    _status: 0,
+    setHeader(name: string, value: string) { headers.set(name.toLowerCase(), value); },
+    getHeader(name: string) { return headers.get(name.toLowerCase()); },
+    writeHead(status: number) { res._status = status; },
+    end() {},
+    headersSent: false,
+  } as unknown as ServerResponse & { _headers: Map<string, string | string[]>; _status: number };
+  return res;
+}
+
+const stubProfileStore = { list: () => [], get: () => undefined } as unknown as ProfileStore;
+const stubThemeStore = { list: () => [], get: () => undefined } as unknown as ThemeStore;
+const stubShellStore = { list: () => [], get: () => undefined } as unknown as ShellStore;
+const stubRegistry = { listSessions: () => [] } as unknown as SessionRegistry;
+
+describe('security headers', () => {
+  it('sets CSP on JSON API responses', () => {
+    const req = mockReq('/api/profiles');
+    const res = mockRes();
+    handleHttpRequest(req, res, stubProfileStore, stubThemeStore, stubShellStore, stubRegistry);
+    assert.equal(res._headers.get('content-security-policy'), "default-src 'self'; connect-src 'self' ws: wss:; style-src 'self'");
+  });
+
+  it('sets X-Frame-Options DENY', () => {
+    const req = mockReq('/api/profiles');
+    const res = mockRes();
+    handleHttpRequest(req, res, stubProfileStore, stubThemeStore, stubShellStore, stubRegistry);
+    assert.equal(res._headers.get('x-frame-options'), 'DENY');
+  });
+
+  it('sets X-Content-Type-Options nosniff', () => {
+    const req = mockReq('/api/profiles');
+    const res = mockRes();
+    handleHttpRequest(req, res, stubProfileStore, stubThemeStore, stubShellStore, stubRegistry);
+    assert.equal(res._headers.get('x-content-type-options'), 'nosniff');
+  });
+
+  it('sets security headers on 404 responses', () => {
+    const req = mockReq('/nonexistent-path');
+    const res = mockRes();
+    handleHttpRequest(req, res, stubProfileStore, stubThemeStore, stubShellStore, stubRegistry);
+    assert.equal(res._headers.get('content-security-policy'), "default-src 'self'; connect-src 'self' ws: wss:; style-src 'self'");
+    assert.equal(res._headers.get('x-frame-options'), 'DENY');
+    assert.equal(res._headers.get('x-content-type-options'), 'nosniff');
   });
 });
