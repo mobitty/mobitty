@@ -39,11 +39,16 @@ function writeAndWait(terminal: InstanceType<typeof Terminal>, data: string): Pr
   return new Promise(resolve => terminal.write(data, resolve));
 }
 
+/** Capture snapshot using baseY as scrollCount (equivalent to pre-capacity behavior). */
+function takeSnapshot(terminal: InstanceType<typeof Terminal>, title = '', cursorHidden = false, scrollCount?: number) {
+  return captureSnapshot(terminal, title, cursorHidden, scrollCount ?? terminal.buffer.active.baseY);
+}
+
 describe('captureSnapshot', () => {
   it('captures characters and cursor position', async () => {
     const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
     await writeAndWait(term, 'Hello');
-    const snap = captureSnapshot(term, '', false);
+    const snap = takeSnapshot(term);
     assert.equal(snap.cells[0]![0]!.char, 'H');
     assert.equal(snap.cells[0]![1]!.char, 'e');
     assert.equal(snap.cells[0]![2]!.char, 'l');
@@ -57,7 +62,7 @@ describe('captureSnapshot', () => {
   it('captures SGR attributes', async () => {
     const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
     await writeAndWait(term, '\x1b[1mBold\x1b[0m');
-    const snap = captureSnapshot(term, '', false);
+    const snap = takeSnapshot(term);
     // Bold bit (1) should be set
     assert.ok(snap.cells[0]![0]!.attrs & 1, 'bold bit should be set');
     term.dispose();
@@ -66,7 +71,7 @@ describe('captureSnapshot', () => {
   it('captures palette and RGB colors', async () => {
     const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
     await writeAndWait(term, '\x1b[32mGreen\x1b[38;5;196mRed\x1b[0m');
-    const snap = captureSnapshot(term, '', false);
+    const snap = takeSnapshot(term);
     // P16 green: fgMode should be 0x1000000
     assert.equal(snap.cells[0]![0]!.fgMode, 0x1000000, 'P16 color mode');
     assert.equal(snap.cells[0]![0]!.fg, 2, 'green = palette 2');
@@ -78,7 +83,7 @@ describe('captureSnapshot', () => {
 
   it('captures title passed in', async () => {
     const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
-    const snap = captureSnapshot(term, 'MyTitle', false);
+    const snap = takeSnapshot(term, 'MyTitle');
     assert.equal(snap.title, 'MyTitle');
     term.dispose();
   });
@@ -93,9 +98,9 @@ describe('generateDiff', () => {
 
   it('detects character changes and emits CUP + content', async () => {
     const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
-    const prev = captureSnapshot(term, '', false);
+    const prev = takeSnapshot(term);
     await writeAndWait(term, 'X');
-    const curr = captureSnapshot(term, '', false);
+    const curr = takeSnapshot(term);
     const diff = generateDiff(prev, curr);
     assert.ok(diff !== null);
     assert.ok(diff.includes('\x1b[1;1H')); // CUP for char at (0,0)
@@ -105,9 +110,9 @@ describe('generateDiff', () => {
 
   it('handles SGR attribute changes', async () => {
     const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
-    const prev = captureSnapshot(term, '', false);
+    const prev = takeSnapshot(term);
     await writeAndWait(term, '\x1b[1mB\x1b[0m');
-    const curr = captureSnapshot(term, '', false);
+    const curr = takeSnapshot(term);
     const diff = generateDiff(prev, curr);
     assert.ok(diff !== null);
     // Should contain SGR for bold
@@ -118,10 +123,10 @@ describe('generateDiff', () => {
 
   it('handles scroll (baseY increase <= rows)', async () => {
     const term = new Terminal({ cols: 80, rows: 5, scrollback: 100, allowProposedApi: true });
-    const prev = captureSnapshot(term, '', false);
+    const prev = takeSnapshot(term);
     // Write enough lines to cause scroll
     await writeAndWait(term, 'line1\r\nline2\r\nline3\r\nline4\r\nline5\r\nline6\r\n');
-    const curr = captureSnapshot(term, '', false);
+    const curr = takeSnapshot(term);
     assert.ok(curr.baseY > 0, 'should have scrolled');
     const diff = generateDiff(prev, curr);
     assert.ok(diff !== null, 'should not need STATE_FULL for small scroll');
@@ -130,12 +135,12 @@ describe('generateDiff', () => {
 
   it('returns null for deltaScroll > rows', async () => {
     const term = new Terminal({ cols: 80, rows: 3, scrollback: 100, allowProposedApi: true });
-    const prev = captureSnapshot(term, '', false);
+    const prev = takeSnapshot(term);
     // Write many lines to cause large scroll
     let data = '';
     for (let i = 0; i < 20; i++) data += `line${i}\r\n`;
     await writeAndWait(term, data);
-    const curr = captureSnapshot(term, '', false);
+    const curr = takeSnapshot(term);
     assert.ok(curr.baseY > 3, 'should have scrolled past rows');
     const diff = generateDiff(prev, curr);
     assert.equal(diff, null, 'should signal STATE_FULL needed');
@@ -144,9 +149,9 @@ describe('generateDiff', () => {
 
   it('emits correct SGR for palette colors', async () => {
     const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
-    const prev = captureSnapshot(term, '', false);
+    const prev = takeSnapshot(term);
     await writeAndWait(term, '\x1b[32mG\x1b[0m');
-    const curr = captureSnapshot(term, '', false);
+    const curr = takeSnapshot(term);
     const diff = generateDiff(prev, curr);
     assert.ok(diff !== null);
     // Should contain standard SGR 32 for green (P16), not 38;5;2
@@ -174,6 +179,78 @@ describe('generateDiff', () => {
   });
 });
 
+describe('scrollback at capacity', () => {
+  it('emits newlines when scrollCount increases but baseY stays the same', async () => {
+    const scrollback = 10;
+    const rows = 5;
+    const term = new Terminal({ cols: 40, rows, scrollback, allowProposedApi: true });
+
+    // Fill the buffer to capacity: scrollback + rows lines
+    let data = '';
+    for (let i = 1; i <= scrollback + rows; i++) data += `line${i}\r\n`;
+    await writeAndWait(term, data);
+
+    const baseYAtCapacity = term.buffer.active.baseY;
+    assert.equal(baseYAtCapacity, scrollback, 'baseY should equal scrollback at capacity');
+
+    // Capture the "previous" snapshot, using baseY as scrollCount (simulating tracked value)
+    let scrollCount = baseYAtCapacity;
+    const prev = takeSnapshot(term, '', false, scrollCount);
+
+    // Write more lines — baseY stays at scrollback (circular buffer wraps)
+    await writeAndWait(term, 'newline1\r\nnewline2\r\nnewline3\r\n');
+    scrollCount += 3; // 3 more scroll events happened
+
+    assert.equal(term.buffer.active.baseY, baseYAtCapacity, 'baseY should NOT have changed');
+
+    const curr = takeSnapshot(term, '', false, scrollCount);
+    assert.equal(curr.baseY, prev.baseY, 'baseY should be identical');
+    assert.equal(curr.scrollCount - prev.scrollCount, 3, 'scrollCount delta should be 3');
+
+    const diff = generateDiff(prev, curr);
+    assert.ok(diff !== null, 'should not trigger STATE_FULL');
+    assert.ok(diff !== '', 'should produce a diff');
+
+    // The diff should contain 3 newlines at the bottom (scroll handling)
+    const newlineSequence = `\x1b[${rows};1H\n\n\n`;
+    assert.ok(diff.includes(newlineSequence), 'diff should emit 3 newlines for scroll at capacity');
+
+    term.dispose();
+  });
+
+  it('caps deltaScroll at rows when scrollCount delta exceeds rows', async () => {
+    const scrollback = 10;
+    const rows = 5;
+    const term = new Terminal({ cols: 40, rows, scrollback, allowProposedApi: true });
+
+    // Fill to capacity
+    let data = '';
+    for (let i = 1; i <= scrollback + rows; i++) data += `line${i}\r\n`;
+    await writeAndWait(term, data);
+
+    let scrollCount = term.buffer.active.baseY;
+    const prev = takeSnapshot(term, '', false, scrollCount);
+
+    // Write many more lines (scrollCount delta >> rows)
+    for (let i = 0; i < 20; i++) data += `extra${i}\r\n`;
+    await writeAndWait(term, data);
+    scrollCount += 20;
+
+    const curr = takeSnapshot(term, '', false, scrollCount);
+    const diff = generateDiff(prev, curr);
+
+    // Should NOT return null (STATE_FULL) since baseYDelta = 0
+    assert.ok(diff !== null, 'should not trigger STATE_FULL when baseY unchanged');
+    assert.ok(diff !== '', 'should produce a diff');
+
+    // Should contain exactly `rows` newlines (capped)
+    const cappedNewlines = `\x1b[${rows};1H` + '\n'.repeat(rows);
+    assert.ok(diff.includes(cappedNewlines), 'should cap newlines at rows');
+
+    term.dispose();
+  });
+});
+
 describe('serializeFullState', () => {
   it('reproduces visible area on a fresh terminal', async () => {
     const src = new Terminal({ cols: 40, rows: 10, scrollback: 100, allowProposedApi: true });
@@ -184,8 +261,8 @@ describe('serializeFullState', () => {
     await writeAndWait(dst, vt);
 
     // Check that "Hello World" appears in the destination
-    const srcSnap = captureSnapshot(src, '', false);
-    const dstSnap = captureSnapshot(dst, '', false);
+    const srcSnap = takeSnapshot(src);
+    const dstSnap = takeSnapshot(dst);
     for (let x = 0; x < 11; x++) {
       assert.equal(dstSnap.cells[0]![x]!.char, srcSnap.cells[0]![x]!.char, `char at col ${x} should match`);
     }
@@ -257,8 +334,8 @@ describe('serializeFullState', () => {
     assert.equal(dst.buffer.active.type, 'normal', 'should exit alternate buffer');
     assert.ok(dst.buffer.active.baseY > 0, 'should have scrollback after recovery');
 
-    const srcSnap = captureSnapshot(src, '', false);
-    const dstSnap = captureSnapshot(dst, '', false);
+    const srcSnap = takeSnapshot(src);
+    const dstSnap = takeSnapshot(dst);
     const mismatches = compareSnapshots(srcSnap, dstSnap, 20);
     assert.equal(mismatches.length, 0, `mismatches: ${JSON.stringify(mismatches)}`);
 
@@ -270,9 +347,9 @@ describe('serializeFullState', () => {
 describe('cursor visibility in diff', () => {
   it('omits cursor show when app has cursor hidden', async () => {
     const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
-    const prev = captureSnapshot(term, '', true);
+    const prev = takeSnapshot(term, '', true);
     await writeAndWait(term, 'X');
-    const curr = captureSnapshot(term, '', true);
+    const curr = takeSnapshot(term, '', true);
     const diff = generateDiff(prev, curr);
     assert.ok(diff !== null && diff !== '');
     assert.ok(diff.includes('\x1b[?25l'), 'should start with cursor hide');
@@ -282,9 +359,9 @@ describe('cursor visibility in diff', () => {
 
   it('shows cursor when app has cursor visible', async () => {
     const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
-    const prev = captureSnapshot(term, '', false);
+    const prev = takeSnapshot(term);
     await writeAndWait(term, 'X');
-    const curr = captureSnapshot(term, '', false);
+    const curr = takeSnapshot(term);
     const diff = generateDiff(prev, curr);
     assert.ok(diff !== null && diff !== '');
     assert.ok(diff.endsWith('\x1b[?25h'), 'should end with cursor show');
@@ -342,7 +419,7 @@ describe('wide characters', () => {
   it('handles CJK characters', async () => {
     const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
     await writeAndWait(term, '漢字');
-    const snap = captureSnapshot(term, '', false);
+    const snap = takeSnapshot(term);
     // Wide chars take 2 cells: char cell (width=2) + continuation cell (width=0)
     assert.equal(snap.cells[0]![0]!.char, '漢');
     assert.equal(snap.cells[0]![0]!.width, 2);
@@ -356,9 +433,9 @@ describe('wide characters', () => {
 describe('P16 color SGR emission', () => {
   it('emits standard SGR for low palette FG (0-7)', async () => {
     const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
-    const prev = captureSnapshot(term, '', false);
+    const prev = takeSnapshot(term);
     await writeAndWait(term, '\x1b[31mR\x1b[0m'); // red = palette 1
-    const curr = captureSnapshot(term, '', false);
+    const curr = takeSnapshot(term);
     const diff = generateDiff(prev, curr)!;
     assert.ok(diff.includes(';31m'), 'should emit 31 for red FG');
     assert.ok(!diff.includes('38;5;'), 'should not use 256-color format for P16');
@@ -367,9 +444,9 @@ describe('P16 color SGR emission', () => {
 
   it('emits bright SGR for high palette FG (8-15)', async () => {
     const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
-    const prev = captureSnapshot(term, '', false);
+    const prev = takeSnapshot(term);
     await writeAndWait(term, '\x1b[91mBR\x1b[0m'); // bright red = palette 9
-    const curr = captureSnapshot(term, '', false);
+    const curr = takeSnapshot(term);
     const diff = generateDiff(prev, curr)!;
     assert.ok(diff.includes(';91m'), 'should emit 91 for bright red FG');
     term.dispose();
@@ -377,9 +454,9 @@ describe('P16 color SGR emission', () => {
 
   it('emits standard SGR for low palette BG (0-7)', async () => {
     const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
-    const prev = captureSnapshot(term, '', false);
+    const prev = takeSnapshot(term);
     await writeAndWait(term, '\x1b[44mB\x1b[0m'); // blue BG = palette 4
-    const curr = captureSnapshot(term, '', false);
+    const curr = takeSnapshot(term);
     const diff = generateDiff(prev, curr)!;
     assert.ok(diff.includes(';44m'), 'should emit 44 for blue BG');
     assert.ok(!diff.includes('48;5;'), 'should not use 256-color format for P16 BG');
@@ -388,9 +465,9 @@ describe('P16 color SGR emission', () => {
 
   it('still uses 256-color format for P256 colors', async () => {
     const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
-    const prev = captureSnapshot(term, '', false);
+    const prev = takeSnapshot(term);
     await writeAndWait(term, '\x1b[38;5;196mR\x1b[0m'); // P256 red
-    const curr = captureSnapshot(term, '', false);
+    const curr = takeSnapshot(term);
     const diff = generateDiff(prev, curr)!;
     assert.ok(diff.includes('38;5;196'), 'should use 256-color format for P256');
     term.dispose();
@@ -421,9 +498,9 @@ describe('compareSnapshots', () => {
 
   it('detects character differences', async () => {
     const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
-    const snap1 = captureSnapshot(term, '', false);
+    const snap1 = takeSnapshot(term);
     await writeAndWait(term, 'A');
-    const snap2 = captureSnapshot(term, '', false);
+    const snap2 = takeSnapshot(term);
     const mismatches = compareSnapshots(snap1, snap2, 10);
     assert.ok(mismatches.length > 0);
     const charMismatch = mismatches.find(m => m.field === 'char' && m.row === 0 && m.col === 0);
@@ -438,8 +515,8 @@ describe('compareSnapshots', () => {
     const term2 = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
     await writeAndWait(term1, '\x1b[32mG\x1b[0m');
     await writeAndWait(term2, '\x1b[31mR\x1b[0m');
-    const snap1 = captureSnapshot(term1, '', false);
-    const snap2 = captureSnapshot(term2, '', false);
+    const snap1 = takeSnapshot(term1);
+    const snap2 = takeSnapshot(term2);
     const mismatches = compareSnapshots(snap1, snap2, 10);
     assert.ok(mismatches.some(m => m.field === 'fg'), 'should detect fg color difference');
     assert.ok(mismatches.some(m => m.field === 'char'), 'should detect char difference');
@@ -472,14 +549,14 @@ describe('serializeFullState BCE prevention', () => {
     await writeAndWait(src, '\x1b[48;2;55;55;55mRGB bg\x1b[0m\r\n');
     await writeAndWait(src, '\r\n\r\n\r\n\r\n\r\n'); // push into scrollback
 
-    const srcSnap = captureSnapshot(src, '', false);
+    const srcSnap = takeSnapshot(src);
 
     // Serialize and apply to shadow
     const vt = serializeFullState(src, '', false);
     const shadow = new Terminal({ cols: 20, rows: 5, scrollback: 100, allowProposedApi: true });
     await writeAndWait(shadow, '\x1b[3J' + vt);
 
-    const shadowSnap = captureSnapshot(shadow, '', false);
+    const shadowSnap = takeSnapshot(shadow);
     const mismatches = compareSnapshots(srcSnap, shadowSnap, 50);
     assert.equal(mismatches.length, 0,
       `BCE color leak: ${JSON.stringify(mismatches.slice(0, 5))}`);
@@ -503,8 +580,8 @@ describe('serializeFullState BCE prevention', () => {
     const vt = serializeFullState(src, '', false);
     await writeAndWait(shadow, '\x1b[3J' + vt);
 
-    const srcSnap = captureSnapshot(src, '', false);
-    const shadowSnap = captureSnapshot(shadow, '', false);
+    const srcSnap = takeSnapshot(src);
+    const shadowSnap = takeSnapshot(shadow);
     const mismatches = compareSnapshots(srcSnap, shadowSnap, 50);
     assert.equal(mismatches.length, 0,
       `BCE leak with dirty SGR: ${JSON.stringify(mismatches.slice(0, 5))}`);
@@ -525,9 +602,9 @@ describe('diff round-trip verification', () => {
     await writeAndWait(shadow, '\x1b[3J' + fullVt);
 
     // Make a change with colors
-    const prev = captureSnapshot(src, '', false);
+    const prev = takeSnapshot(src);
     await writeAndWait(src, '\x1b[32mGreen text\x1b[0m');
-    const curr = captureSnapshot(src, '', false);
+    const curr = takeSnapshot(src);
 
     const diff = generateDiff(prev, curr);
     assert.ok(diff !== null && diff !== '', 'should produce a diff');
@@ -536,7 +613,7 @@ describe('diff round-trip verification', () => {
     await writeAndWait(shadow, diff);
 
     // Compare
-    const shadowSnap = captureSnapshot(shadow, '', false);
+    const shadowSnap = takeSnapshot(shadow);
     const mismatches = compareSnapshots(curr, shadowSnap, 20);
     assert.equal(mismatches.length, 0, `unexpected mismatches: ${JSON.stringify(mismatches)}`);
 
@@ -553,11 +630,11 @@ describe('diff round-trip verification', () => {
     const fullVt = serializeFullState(src, '', false);
     await writeAndWait(shadow, '\x1b[3J' + fullVt);
 
-    const prev = captureSnapshot(src, '', false);
+    const prev = takeSnapshot(src);
 
     // Cause a scroll with colored content
     await writeAndWait(src, '\x1b[34mBlue line 3\x1b[0m\r\n\x1b[35mMagenta line 4\x1b[0m\r\nline5\r\nline6\r\n');
-    const curr = captureSnapshot(src, '', false);
+    const curr = takeSnapshot(src);
 
     const diff = generateDiff(prev, curr);
     if (diff === null) {
@@ -568,7 +645,7 @@ describe('diff round-trip verification', () => {
       await writeAndWait(shadow, diff);
     }
 
-    const shadowSnap = captureSnapshot(shadow, '', false);
+    const shadowSnap = takeSnapshot(shadow);
     const mismatches = compareSnapshots(curr, shadowSnap, 20);
     assert.equal(mismatches.length, 0, `scroll mismatches: ${JSON.stringify(mismatches)}`);
 

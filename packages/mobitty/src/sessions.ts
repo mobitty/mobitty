@@ -41,6 +41,7 @@ interface SessionEntry {
   } | null;
   editorSender: ((filePath: string, content: string, contentType?: string) => void) | null;
   downloadSender: ((fileName: string, fileSize: number, token: string) => void) | null;
+  scrollCount: number;
 }
 
 interface SessionsDiskData {
@@ -125,6 +126,7 @@ export class SessionRegistry {
         editorPending: null,
         editorSender: null,
         downloadSender: null,
+        scrollCount: 0,
       });
     }
 
@@ -185,7 +187,18 @@ export class SessionRegistry {
 
     headless.onCursorMove(notifyChange);
     headless.onLineFeed(notifyChange);
-    headless.onScroll(notifyChange);
+    let prevScrollBaseY = 0;
+    headless.onScroll(() => {
+      const baseY = headless.buffer.active.baseY;
+      if (baseY < prevScrollBaseY) {
+        // baseY decreased (CSI 3J or resize) — don't count
+        prevScrollBaseY = baseY;
+      } else {
+        entry.scrollCount++;
+        prevScrollBaseY = baseY;
+      }
+      notifyChange();
+    });
     headless.onBell(() => {
       entry.hasAlert = true;
       for (const cb of this.alertListeners) cb(sessionId);
@@ -262,6 +275,7 @@ export class SessionRegistry {
       editorPending: null,
       editorSender: null,
       downloadSender: null,
+      scrollCount: 0,
     };
 
     this.sessions.set(sessionId, entry);
@@ -296,6 +310,10 @@ export class SessionRegistry {
 
   getTitle(sessionId: string): string {
     return this.sessions.get(sessionId)?.title ?? '';
+  }
+
+  getScrollCount(sessionId: string): number {
+    return this.sessions.get(sessionId)?.scrollCount ?? 0;
   }
 
   clearAlert(sessionId: string): void {

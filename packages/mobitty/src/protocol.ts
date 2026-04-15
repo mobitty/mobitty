@@ -117,7 +117,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
     const cursorHidden = registry.getCursorHidden(sid);
     const vtFull = serializeFullState(headless, title, cursorHidden);
     ws.send(Buffer.from(String.fromCharCode(STATE_FULL) + vtFull));
-    lastSnapshot = captureSnapshot(headless, title, cursorHidden);
+    lastSnapshot = captureSnapshot(headless, title, cursorHidden, registry.getScrollCount(sid));
 
     // --- Verification terminal (when MOBITTY_VERIFY_DIFF=1) ---
     let verifyTerm: InstanceType<typeof HeadlessTerminal> | null = null;
@@ -142,7 +142,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
     function runVerifyComparison(expectedSnapshot: FrameSnapshot): void {
       if (!verifyTerm || !socketLogger) return;
 
-      const verifySnapshot = captureSnapshot(verifyTerm, expectedSnapshot.title, expectedSnapshot.cursorHidden);
+      const verifySnapshot = captureSnapshot(verifyTerm, expectedSnapshot.title, expectedSnapshot.cursorHidden, 0);
       const mismatches = compareSnapshots(expectedSnapshot, verifySnapshot, 20);
 
       if (mismatches.length > 0) {
@@ -162,7 +162,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
           const ch = registry.getCursorHidden(sid);
           const healVt = serializeFullState(h, t, ch);
           ws.send(Buffer.from(String.fromCharCode(STATE_FULL) + healVt));
-          lastSnapshot = captureSnapshot(h, t, ch);
+          lastSnapshot = captureSnapshot(h, t, ch, registry.getScrollCount(sid));
           verifyTerm.write('\x1b[3J' + healVt);
         }
       }
@@ -184,7 +184,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       if (!h) { stopSync(); return; }
 
       const ch = registry.getCursorHidden(sid);
-      const curr = captureSnapshot(h, t, ch);
+      const curr = captureSnapshot(h, t, ch, registry.getScrollCount(sid));
       const prevSnapshot = lastSnapshot;
 
       let vtPayload = '';
@@ -210,8 +210,8 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
 
       // Frame statistics
       if (socketLogger && vtPayload !== '') {
-        const deltaScroll = prevSnapshot ? curr.baseY - prevSnapshot.baseY : 0;
-        socketLogger.debug('frame', { wasFull, deltaScroll, baseY: curr.baseY, diffBytes: vtPayload.length });
+        const scrollDelta = prevSnapshot ? curr.scrollCount - prevSnapshot.scrollCount : 0;
+        socketLogger.debug('frame', { wasFull, scrollDelta, baseY: curr.baseY, diffBytes: vtPayload.length });
       }
 
 
