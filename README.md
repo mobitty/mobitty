@@ -2,7 +2,7 @@
 
 [![npm version](https://img.shields.io/npm/v/mobitty)](https://www.npmjs.com/package/mobitty)
 [![npm downloads](https://img.shields.io/npm/dm/mobitty)](https://www.npmjs.com/package/mobitty)
-[![GitHub license](https://img.shields.io/github/license/mobitty/mobitty)](https://github.com/mobitty/mobitty/blob/main/LICENSE)
+[![license](https://img.shields.io/badge/license-BSL--1.1-blue)](https://github.com/mobitty/mobitty/blob/main/LICENSE)
 [![GitHub stars](https://img.shields.io/github/stars/mobitty/mobitty)](https://github.com/mobitty/mobitty)
 
 A touch-first web terminal for AI agent workflows. Self-hosted, source-available.
