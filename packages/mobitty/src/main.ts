@@ -23,6 +23,7 @@ const { values } = parseArgs({
     'tls-cert': { type: 'string' },
     'tls-key': { type: 'string' },
     'tls-ca': { type: 'string' },
+    'max-payload': { type: 'string' },
     help: { type: 'boolean', short: 'h', default: false },
     version: { type: 'boolean', short: 'v', default: false },
   },
@@ -48,6 +49,7 @@ OPTIONS:
         --tls-cert          Path to TLS certificate file (PEM)
         --tls-key           Path to TLS private key file (PEM)
         --tls-ca            Path to TLS CA chain file (PEM, optional)
+        --max-payload       Maximum WebSocket payload in MB (default: 50)
     -v, --version           Print version and exit
     -h, --help              Print this help and exit
 
@@ -78,6 +80,7 @@ try {
     'tls-cert': values['tls-cert'],
     'tls-key': values['tls-key'],
     'tls-ca': values['tls-ca'],
+    'max-payload': values['max-payload'],
   });
 } catch (err) {
   if (err instanceof ConfigError) {
@@ -103,6 +106,7 @@ const config: ServerConfig = {
   terminalType: 'xterm-256color',
   prefsJson: JSON.stringify(isWindows ? { isWindows: true } : {}),
   dataFolder,
+  maxPayloadBytes: resolved.maxPayloadBytes,
   tls: resolved.tls,
 };
 

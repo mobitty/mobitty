@@ -22,6 +22,7 @@ Mobitty auto-generates a `settings.ini` file in the data folder on first run. Ed
 [server]
 port = 8000
 interface = 127.0.0.1
+max-payload = 50
 
 [logging]
 console-level = warn
@@ -50,6 +51,7 @@ mobitty [options]
 |------|-------------|---------|
 | `-p, --port <number>` | HTTP server port | `8000` |
 | `-i, --interface <address>` | Bind address | `127.0.0.1` |
+| `--max-payload <number>` | Maximum WebSocket message size in MB | `50` |
 | `-l, --log-level <level>` | Console log level (`debug`, `info`, `warn`, `error`) | `warn` |
 | `--file-log-level <level>` | File log level (`debug`, `info`, `warn`, `error`) | `info` |
 | `--log-rotation-interval <duration>` | Log file rotation interval (e.g., `1h`, `24h`, `7d`) | `24h` |

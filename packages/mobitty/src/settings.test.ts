@@ -55,6 +55,7 @@ describe('generateDefaultIni', () => {
     assert.equal(ini['logging']!['file-level'], 'info');
     assert.equal(ini['logging']!['rotation-interval'], '24h');
     assert.equal(ini['logging']!['retention'], '7d');
+    assert.equal(ini['server']!['max-payload'], '50');
     // TLS keys are commented out — should not appear
     assert.equal(ini['tls']?.['cert'], undefined);
     assert.equal(ini['tls']?.['key'], undefined);
@@ -83,6 +84,7 @@ describe('loadConfig', () => {
     assert.equal(config.logRotationMs, 86400000);
     assert.equal(config.logRetentionMs, 604800000);
     assert.equal(config.dataFolder, tmpDir);
+    assert.equal(config.maxPayloadBytes, 50 * 1024 * 1024);
     assert.equal(config.tls, undefined);
   });
 
@@ -125,6 +127,39 @@ describe('loadConfig', () => {
     assert.throws(
       () => loadConfig(tmpDir, { port: 'abc' }),
       (err: unknown) => err instanceof ConfigError && /invalid port/.test(err.message),
+    );
+  });
+
+  it('reads max-payload from INI', () => {
+    writeFileSync(join(tmpDir, 'settings.ini'), '[server]\nmax-payload = 100\n');
+    const config = loadConfig(tmpDir, noCli);
+    assert.equal(config.maxPayloadBytes, 100 * 1024 * 1024);
+  });
+
+  it('CLI overrides max-payload from INI', () => {
+    writeFileSync(join(tmpDir, 'settings.ini'), '[server]\nmax-payload = 100\n');
+    const config = loadConfig(tmpDir, { 'max-payload': '25' });
+    assert.equal(config.maxPayloadBytes, 25 * 1024 * 1024);
+  });
+
+  it('throws on invalid max-payload', () => {
+    assert.throws(
+      () => loadConfig(tmpDir, { 'max-payload': 'abc' }),
+      (err: unknown) => err instanceof ConfigError && /invalid max-payload/.test(err.message),
+    );
+  });
+
+  it('throws on zero max-payload', () => {
+    assert.throws(
+      () => loadConfig(tmpDir, { 'max-payload': '0' }),
+      (err: unknown) => err instanceof ConfigError && /invalid max-payload/.test(err.message),
+    );
+  });
+
+  it('throws on negative max-payload', () => {
+    assert.throws(
+      () => loadConfig(tmpDir, { 'max-payload': '-5' }),
+      (err: unknown) => err instanceof ConfigError && /invalid max-payload/.test(err.message),
     );
   });
 

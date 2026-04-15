@@ -106,7 +106,7 @@ Mobitty stores all server-side data in a single folder. Set its location with th
 
 Mobitty auto-generates a settings.ini file in the data folder on first run. Edit it to set persistent defaults without passing CLI flags every time. CLI flags take precedence over settings.ini values. The file is never overwritten by the server — user edits are preserved across upgrades.
 
-Sections: [server] (port, interface), [logging] (console-level, file-level, rotation-interval, retention), [tls] (cert, key, ca — paths resolved relative to the settings file directory).
+Sections: [server] (port, interface, max-payload), [logging] (console-level, file-level, rotation-interval, retention), [tls] (cert, key, ca — paths resolved relative to the settings file directory).
 
 ### CLI flags
 
@@ -117,6 +117,7 @@ mobitty [options]
 Flags:
 - `-p, --port <number>` — HTTP server port (default: 8000)
 - `-i, --interface <address>` — Bind address (default: 127.0.0.1)
+- `--max-payload <number>` — Maximum WebSocket message size in MB (default: 50)
 - `-l, --log-level <level>` — Console log level: debug, info, warn, error (default: warn)
 - `--file-log-level <level>` — File log level: debug, info, warn, error (default: info)
 - `--log-rotation-interval <duration>` — Log file rotation interval, e.g. 1h, 24h, 7d (default: 24h)

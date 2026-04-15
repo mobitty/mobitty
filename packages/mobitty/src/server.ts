@@ -41,6 +41,7 @@ export function startServer(config: ServerConfig, logger: Logger): void {
   const wss = new WebSocketServer({
     server: httpServer,
     path: '/ws',
+    maxPayload: config.maxPayloadBytes,
     perMessageDeflate: {
       threshold: 256,
     },

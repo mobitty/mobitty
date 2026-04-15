@@ -88,6 +88,7 @@ export interface ServerConfig {
   terminalType: string;
   prefsJson: string;
   dataFolder: string;
+  maxPayloadBytes: number;
   tls?: TlsConfig;
 }
 

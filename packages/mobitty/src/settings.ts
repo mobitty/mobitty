@@ -48,6 +48,9 @@ port = 8000
 # Network interface to bind
 interface = 127.0.0.1
 
+# Maximum WebSocket message size in MB (minimum 1)
+max-payload = 50
+
 [logging]
 # Console log level: debug | info | warn | error
 console-level = warn
@@ -87,6 +90,7 @@ export interface CliArgs {
   'tls-cert'?: string;
   'tls-key'?: string;
   'tls-ca'?: string;
+  'max-payload'?: string;
 }
 
 /** Fully validated, ready-to-use configuration. */
@@ -97,6 +101,7 @@ export interface ResolvedConfig {
   fileLogLevel: LogLevel;
   logRotationMs: number;
   logRetentionMs: number;
+  maxPayloadBytes: number;
   dataFolder: string;
   tls?: TlsConfig;
 }
@@ -156,6 +161,15 @@ export function loadConfig(dataFolder: string, cli: CliArgs): ResolvedConfig {
     'log retention',
   );
 
+  // ── Max payload ──
+
+  const maxPayloadMbStr = cli['max-payload'] ?? nonEmpty(server['max-payload']) ?? '50';
+  const maxPayloadMb = parseInt(maxPayloadMbStr, 10);
+  if (!Number.isFinite(maxPayloadMb) || maxPayloadMb < 1) {
+    throw new ConfigError(`invalid max-payload: ${maxPayloadMbStr} (must be a positive integer in MB)`);
+  }
+  const maxPayloadBytes = maxPayloadMb * 1024 * 1024;
+
   // ── TLS ──
   // INI paths resolve relative to dataFolder; CLI paths resolve relative to cwd.
 
@@ -199,7 +213,7 @@ export function loadConfig(dataFolder: string, cli: CliArgs): ResolvedConfig {
     tlsConfig = { cert, key, ca };
   }
 
-  return { port, host, consoleLogLevel, fileLogLevel, logRotationMs, logRetentionMs, dataFolder, tls: tlsConfig };
+  return { port, host, consoleLogLevel, fileLogLevel, logRotationMs, logRetentionMs, maxPayloadBytes, dataFolder, tls: tlsConfig };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
