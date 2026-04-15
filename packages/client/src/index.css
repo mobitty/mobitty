@@ -138,16 +138,9 @@ html, body {
    reach the actual touch targets (.xterm-screen, .xterm-link-layer, canvas).
    Without this, the browser fires pointercancel and stops delivering pointermove
    events that Hammer.js (PointerEventInput) needs for gesture recognition.
-   xterm's own scroll is JS-driven (scrollTop += deltaY in touchmove handler),
-   not native CSS scroll, so this doesn't break xterm — our capture-phase
-   gatekeeper in gesture-detector.ts controls which touch events reach xterm. */
+   xterm 6.0 uses SmoothScrollableElement for scroll (not native DOM scroll),
+   so this doesn't break scrolling — our capture-phase gatekeeper in
+   gesture-detector.ts controls which touch events reach xterm. */
 .xterm * {
   touch-action: none;
 }
-
-/* Minimal scrollbar everywhere */
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: oklch(0.5 0 0 / 0.2); border-radius: 2px; }
-::-webkit-scrollbar-thumb:hover { background: oklch(0.5 0 0 / 0.35); }
-* { scrollbar-width: thin; scrollbar-color: oklch(0.5 0 0 / 0.2) transparent; }

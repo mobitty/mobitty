@@ -3,7 +3,6 @@
 
 import type { IDisposable, ITerminalOptions } from '@xterm/xterm';
 import { Terminal } from '@xterm/xterm';
-import { CanvasAddon } from '@xterm/addon-canvas';
 import { WebglAddon } from '@xterm/addon-webgl';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
@@ -58,7 +57,7 @@ const Command = {
   RESIZE_TERMINAL: '1',
 } as const;
 
-type RendererType = 'dom' | 'canvas' | 'webgl';
+type RendererType = 'dom' | 'webgl';
 
 interface ClientOptions {
   rendererType: RendererType;
@@ -134,7 +133,6 @@ export class TerminalCore {
   private selectionOverlay?: SelectionOverlayAddon;
   private webLinksAddon = new WebLinksAddon();
   private webglAddon?: WebglAddon;
-  private canvasAddon?: CanvasAddon;
 
   private socket?: WebSocket;
   private token = '';
@@ -169,8 +167,6 @@ export class TerminalCore {
   private copyOnSelect = false;
   private themeForeground?: string;
   private themeBackground?: string;
-  private scrollbarHealthTimer?: ReturnType<typeof setInterval>;
-  private scrollbarStuckCount = 0;
   private preferredRendererType: RendererType = 'dom';
   private rendererTeardownTimer?: ReturnType<typeof setTimeout>;
   private pendingConnectRaf?: number;
@@ -326,10 +322,7 @@ export class TerminalCore {
     observer.observe(parent);
     this.registerTerminal({ dispose: () => observer.disconnect() });
     this.registerRendererVisibility();
-    this.registerWheelDiagnostics();
     this.registerGestureDetection();
-    this.startScrollbarHealthCheck();
-    this.registerTerminal({ dispose: () => this.stopScrollbarHealthCheck() });
     this.registerTerminal(terminal.onTitleChange(data => {
       if (data && data !== '' && !this.titleFixed) {
         this.title = data;
@@ -586,174 +579,6 @@ export class TerminalCore {
   }
 
 
-  // --- Scrollbar health monitoring ---
-
-  private getScrollbarDiagnostics(): Record<string, unknown> {
-    const buf = this.terminal.buffer.active;
-    const el = this.terminal.element;
-    const viewport = el?.querySelector('.xterm-viewport') as HTMLElement | null;
-    const scrollArea = el?.querySelector('.xterm-scroll-area') as HTMLElement | null;
-    return {
-      baseY: buf.baseY,
-      viewportY: buf.viewportY,
-      bufferLength: buf.length,
-      scrollbackOption: this.terminal.options.scrollback,
-      rows: this.terminal.rows,
-      cols: this.terminal.cols,
-      vpScrollHeight: viewport?.scrollHeight ?? -1,
-      vpClientHeight: viewport?.clientHeight ?? -1,
-      vpScrollTop: viewport?.scrollTop ?? -1,
-      scrollAreaHeight: scrollArea?.offsetHeight ?? -1,
-      hasScrollback: buf.baseY > 0,
-      isScrollable: (viewport?.scrollHeight ?? 0) > (viewport?.clientHeight ?? 0),
-    };
-  }
-
-  private isScrollbarStuck(): boolean {
-    const buf = this.terminal.buffer.active;
-    if (buf.baseY === 0) return false;
-    const viewport = this.terminal.element?.querySelector('.xterm-viewport') as HTMLElement | null;
-    if (!viewport) return false;
-    return viewport.scrollHeight <= viewport.clientHeight;
-  }
-
-  private startScrollbarHealthCheck(): void {
-    this.stopScrollbarHealthCheck();
-    this.scrollbarStuckCount = 0;
-    this.scrollbarHealthTimer = setInterval(() => this.checkScrollbarHealth(), 10_000);
-  }
-
-  private stopScrollbarHealthCheck(): void {
-    if (this.scrollbarHealthTimer !== undefined) {
-      clearInterval(this.scrollbarHealthTimer);
-      this.scrollbarHealthTimer = undefined;
-    }
-  }
-
-  private checkScrollbarHealth(): void {
-    if (!this.terminal?.element) return;
-    if (this.isScrollbarStuck()) {
-      this.scrollbarStuckCount++;
-      this.logger.warn('scrollbar-stuck-detected', {
-        ...this.getScrollbarDiagnostics(),
-        consecutiveCount: this.scrollbarStuckCount,
-      });
-      if (this.scrollbarStuckCount >= 2) {
-        this.attemptScrollbarRecovery();
-      }
-    } else {
-      if (this.scrollbarStuckCount > 0) {
-        this.logger.info('scrollbar-unstuck', {
-          previousStuckCount: this.scrollbarStuckCount,
-        });
-      }
-      this.scrollbarStuckCount = 0;
-    }
-  }
-
-  private attemptScrollbarRecovery(): void {
-    this.logger.info('scrollbar-recovery-start', this.getScrollbarDiagnostics());
-    const savedViewportY = this.terminal.buffer.active.viewportY;
-
-    // Phase 1: Force render refresh + scroll poke
-    this.terminal.refresh(0, this.terminal.rows - 1);
-    this.terminal.scrollToBottom();
-    requestAnimationFrame(() => {
-      this.terminal.scrollToLine(savedViewportY);
-
-      if (!this.isScrollbarStuck()) {
-        this.logger.info('scrollbar-recovery-success', { method: 'refresh-poke' });
-        this.scrollbarStuckCount = 0;
-        this.overlayAddon.showOverlay('Scroll fixed', 500);
-        return;
-      }
-
-      // Phase 2: Clear scrollback separately, then request STATE_FULL
-      this.logger.info('scrollbar-recovery-escalating', { method: 'clear-then-state-full' });
-      const clearScrollback = new Uint8Array([0x1b, 0x5b, 0x33, 0x4a]); // \x1b[3J
-      this.terminal.write(clearScrollback, () => {
-        // Request STATE_FULL from server by sending current dimensions as resize
-        const msg = JSON.stringify({ columns: this.terminal.cols, rows: this.terminal.rows });
-        this.socket?.send(this.textEncoder.encode(Command.RESIZE_TERMINAL + msg));
-        this.scrollbarStuckCount = 0;
-        this.overlayAddon.showOverlay('Scroll repair', 500);
-      });
-    });
-  }
-
-  /** Capture-phase wheel listener that logs diagnostics for scroll issues.
-   *  See: workspace/docs/bug-windows-wheel-scroll.md */
-  private registerWheelDiagnostics(): void {
-    const element = this.terminal?.element;
-    if (!element) return;
-
-    let lastLogTime = 0;
-    let stuckCount = 0;
-    const RATE_LIMIT_MS = 2_000;
-    const STUCK_THRESHOLD = 3;
-
-    const viewport = element.querySelector('.xterm-viewport');
-    const handler = (ev: WheelEvent) => {
-      if (!(viewport instanceof HTMLElement)) return;
-
-      const scrollTopBefore = viewport.scrollTop;
-      const mouseTracking = element.classList.contains('enable-mouse-events');
-
-      // Check after the event has been processed by xterm.js
-      requestAnimationFrame(() => {
-        const scrollTopAfter = viewport.scrollTop;
-        const moved = scrollTopAfter !== scrollTopBefore;
-
-        if (moved) {
-          if (stuckCount >= STUCK_THRESHOLD) {
-            this.logger.info('wheel-scroll-diag', { event: 'unstuck', previousStuckCount: stuckCount });
-          }
-          stuckCount = 0;
-          return;
-        }
-
-        // Viewport didn't move — possible stuck condition
-        const atBottom = viewport.scrollTop >= viewport.scrollHeight - viewport.clientHeight - 1;
-        const atTop = viewport.scrollTop <= 0;
-        const scrollingDown = ev.deltaY > 0;
-        const atEdge = (scrollingDown && atBottom) || (!scrollingDown && atTop);
-
-        // Being at the scroll edge is normal — not stuck
-        if (atEdge) {
-          stuckCount = 0;
-          return;
-        }
-
-        stuckCount++;
-        const now = Date.now();
-        if (now - lastLogTime < RATE_LIMIT_MS) return;
-        lastLogTime = now;
-
-        const data = {
-          mouseTracking,
-          stuckCount,
-          deltaY: ev.deltaY,
-          deltaMode: ev.deltaMode,
-          scrollTop: viewport.scrollTop,
-          scrollHeight: viewport.scrollHeight,
-          clientHeight: viewport.clientHeight,
-          baseY: this.terminal?.buffer?.active?.baseY ?? -1,
-          defaultPrevented: ev.defaultPrevented,
-        };
-
-        if (stuckCount >= STUCK_THRESHOLD) {
-          this.logger.warn('wheel-scroll-diag', { event: 'stuck', ...data });
-        } else {
-          this.logger.debug('wheel-scroll-diag', { event: 'no-move', ...data });
-        }
-      });
-    };
-
-    // Capture phase so we see the event before xterm.js's handlers
-    element.addEventListener('wheel', handler, { capture: true, passive: true });
-    this.registerTerminal({ dispose: () => element.removeEventListener('wheel', handler, { capture: true }) });
-  }
-
   isTouchDevice(): boolean {
     return (navigator.maxTouchPoints > 0 || 'ontouchstart' in window) &&
       window.matchMedia('(hover: none) and (pointer: coarse)').matches;
@@ -823,14 +648,6 @@ export class TerminalCore {
       if (event.type !== 'keydown' || !event.ctrlKey || !event.shiftKey
           || event.altKey || event.metaKey) {
         return true;
-      }
-
-      // Ctrl+Shift+Home: manual scrollbar recovery
-      if (event.key === 'Home') {
-        event.preventDefault();
-        this.logger.info('scrollbar-recovery-manual');
-        this.attemptScrollbarRecovery();
-        return false;
       }
 
       // Ctrl+Shift+C: copy selection to clipboard
@@ -1349,7 +1166,7 @@ export class TerminalCore {
 
     for (const [key, value] of Object.entries(prefs)) {
       switch (key) {
-        case 'rendererType': this.setRendererType(value as RendererType); break;
+        case 'rendererType': this.setRendererType(value === 'webgl' ? 'webgl' : 'dom'); break;
 
         case 'disableResizeOverlay':
           if (value) this.resizeOverlay = false;
@@ -1395,28 +1212,20 @@ export class TerminalCore {
 
   private applyRendererType(value: RendererType) {
     const { terminal } = this;
-    const disposeCanvas = () => { try { this.canvasAddon?.dispose(); } catch { /* */ } this.canvasAddon = undefined; };
     const disposeWebgl = () => { try { this.webglAddon?.dispose(); } catch { /* */ } this.webglAddon = undefined; };
-    const enableCanvas = () => {
-      if (this.canvasAddon) return;
-      this.canvasAddon = new CanvasAddon();
-      disposeWebgl();
-      try { terminal.loadAddon(this.canvasAddon); } catch { this.logger.warn('canvas renderer failed, falling back to DOM'); disposeCanvas(); }
-    };
-    const enableWebgl = () => {
-      if (this.webglAddon) return;
-      this.webglAddon = new WebglAddon();
-      disposeCanvas();
-      try {
-        this.webglAddon.onContextLoss(() => { this.webglAddon?.dispose(); });
-        terminal.loadAddon(this.webglAddon);
-      } catch { this.logger.warn('webgl renderer failed, falling back to canvas'); disposeWebgl(); enableCanvas(); }
-    };
 
     switch (value) {
-      case 'canvas': enableCanvas(); break;
-      case 'webgl': enableWebgl(); break;
-      case 'dom': disposeWebgl(); disposeCanvas(); break;
+      case 'webgl':
+        if (this.webglAddon) return;
+        this.webglAddon = new WebglAddon();
+        try {
+          this.webglAddon.onContextLoss(() => { this.webglAddon?.dispose(); });
+          terminal.loadAddon(this.webglAddon);
+        } catch { this.logger.warn('webgl renderer failed, falling back to DOM'); disposeWebgl(); }
+        break;
+      case 'dom':
+        disposeWebgl();
+        break;
     }
   }
 
@@ -1532,8 +1341,13 @@ export class TerminalCore {
   private sendWheelDelta(deltaY: number) {
     const element = this.terminal?.element;
     if (!element) return;
-    const rect = element.getBoundingClientRect();
-    element.dispatchEvent(new WheelEvent('wheel', {
+    // Dispatch on .xterm-screen so the event bubbles through xterm.js 6.0's
+    // SmoothScrollableElement (which listens on its own DOM node, a parent
+    // of .xterm-screen). Dispatching on the root .xterm element wouldn't
+    // reach the scrollable element since events bubble up, not down.
+    const target = element.querySelector('.xterm-screen') ?? element;
+    const rect = target.getBoundingClientRect();
+    target.dispatchEvent(new WheelEvent('wheel', {
       bubbles: true, cancelable: true, deltaMode: 0, deltaX: 0, deltaY,
       clientX: rect.left + rect.width / 2, clientY: rect.top + rect.height / 2,
     }));
