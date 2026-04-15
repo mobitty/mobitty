@@ -18,12 +18,13 @@
   --mobitty-font-display: 'JetBrains Mono', monospace;
 
   /* Accent — amber/gold (light mode) */
-  --mobitty-accent: #c48a20;
+  --mobitty-accent: #c48a20;           /* backgrounds (CTA buttons): 5.8:1 with #1a1a1a text */
+  --mobitty-accent-text: #946614;      /* text on white: 5.0:1 */
   --mobitty-accent-hover: #a87518;
   --mobitty-accent-subtle: rgba(196, 138, 32, 0.1);
 
-  /* Trust — muted teal (light mode) */
-  --mobitty-trust: #3d9985;
+  /* Trust — muted teal (light mode, 4.8:1 on white) */
+  --mobitty-trust: #337f6c;
   --mobitty-trust-subtle: rgba(61, 153, 133, 0.08);
 
   /* Surface */
@@ -42,6 +43,7 @@
 
   /* Accent — amber/gold (dark mode) */
   --mobitty-accent: #e5a843;
+  --mobitty-accent-text: #e5a843;      /* 8.2:1 on dark bg — same as accent in dark mode */
   --mobitty-accent-hover: #f0b955;
   --mobitty-accent-subtle: rgba(229, 168, 67, 0.1);
 
@@ -52,6 +54,33 @@
   /* Surface */
   --mobitty-surface: rgba(30, 30, 30, 0.92);
   --mobitty-surface-border: rgba(255, 255, 255, 0.06);
+}
+
+/* ==========================================================================
+   Accessibility — focus indicators
+   ========================================================================== */
+
+a:focus-visible,
+button:focus-visible,
+summary:focus-visible,
+[role="button"]:focus-visible {
+  outline: 2px solid var(--mobitty-accent-text);
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
+   Accessibility — reduced motion
+   ========================================================================== */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* ==========================================================================
@@ -81,6 +110,15 @@
   border-top: none;
   padding-top: 0;
   margin-top: 0;
+}
+
+/* Phone screenshots in docs — display at phone-like width, not full column */
+.markdown img[src$=".webp"] {
+  max-width: 320px;
+  border-radius: 0.5rem;
+  border: 1px solid var(--mobitty-surface-border);
+  display: block;
+  margin: 1.5rem 0;
 }
 
 /* External link icon for markdown content */

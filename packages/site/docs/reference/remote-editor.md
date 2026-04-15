@@ -8,6 +8,8 @@ description: Edit remote files from your browser when programs need an editor.
 
 When a program running in your terminal needs a text editor — for example `git commit`, `crontab -e`, or an AI agent editing a file — Mobitty can open the file in your browser instead of launching a terminal-based editor like vim or nano. This is especially useful on mobile, where terminal editors are difficult to use.
 
+![Browser-based file editor showing package.json with Cancel and Save buttons](/img/local-editor.webp)
+
 ## Enabling
 
 Toggle **Remote Editor** in Settings. The setting applies to new sessions only — existing sessions keep their current setting.

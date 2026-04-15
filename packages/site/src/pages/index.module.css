@@ -41,7 +41,7 @@
   font-size: 0.75rem;
   font-weight: 700;
   letter-spacing: 0.03em;
-  color: var(--mobitty-accent);
+  color: var(--mobitty-accent-text);
   background: var(--mobitty-accent-subtle);
   padding: 0.3rem 0.85rem;
   border-radius: 9999px;
@@ -70,7 +70,7 @@
 
 .cursorBlink {
   display: inline-block;
-  color: var(--mobitty-accent);
+  color: var(--mobitty-accent-text);
   animation: blink 700ms step-end infinite;
   margin-left: 2px;
 }
@@ -161,6 +161,65 @@
 .productVisual {
   padding: 2rem 2rem 3rem;
   text-align: center;
+}
+
+/* Screenshot showcase */
+.phoneShowcase {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 1.5rem;
+  animation: fadeInUp 600ms ease-out;
+}
+
+.showcaseItem {
+  margin: 0;
+  flex-shrink: 0;
+  text-align: center;
+}
+
+.showcaseImg {
+  width: 200px;
+  height: auto;
+  display: block;
+  border-radius: 0.75rem;
+  box-shadow: 0 8px 30px -8px rgba(0, 0, 0, 0.3);
+}
+
+.showcaseHero .showcaseImg {
+  width: 260px;
+}
+
+.showcaseCaption {
+  font-family: var(--mobitty-font-display);
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: var(--ifm-font-color-secondary);
+  margin-top: 0.75rem;
+}
+
+@media (max-width: 768px) {
+  .phoneShowcase {
+    justify-content: flex-start;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    padding: 0 2rem;
+    gap: 1rem;
+  }
+
+  .showcaseItem {
+    scroll-snap-align: center;
+  }
+
+  .showcaseImg {
+    width: 180px;
+  }
+
+  .showcaseHero .showcaseImg {
+    width: 220px;
+  }
 }
 
 .visualPills {
@@ -254,13 +313,13 @@
 .audienceCta {
   font-size: 0.9rem;
   font-weight: 600;
-  color: var(--mobitty-accent);
+  color: var(--mobitty-accent-text);
   text-decoration: none;
 }
 
 .audienceCta:hover {
   text-decoration: underline;
-  color: var(--mobitty-accent-hover);
+  color: var(--mobitty-accent-text);
 }
 
 /* ==========================================================================
@@ -301,7 +360,7 @@
 }
 
 .primaryIcon {
-  color: var(--mobitty-accent);
+  color: var(--mobitty-accent-text);
   margin-bottom: 0.75rem;
 }
 
@@ -453,7 +512,7 @@
 }
 
 [data-theme='light'] .terminalSuccess {
-  color: #3d9985;
+  color: #337f6c;
 }
 
 .terminalMuted {

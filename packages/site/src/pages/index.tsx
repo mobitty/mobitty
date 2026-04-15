@@ -1,5 +1,5 @@
+import { useEffect, useRef } from 'react';
 import Layout from '@theme/Layout';
-import TerminalMockup from '../components/TerminalMockup';
 import styles from './index.module.css';
 
 /* =========================================================================
@@ -126,9 +126,48 @@ function Hero() {
 }
 
 function ProductVisual() {
+  const heroRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    heroRef.current?.scrollIntoView({ inline: 'center', block: 'nearest' });
+  }, []);
+
   return (
     <section className={styles.productVisual}>
-      <TerminalMockup />
+      <div className={styles.phoneShowcase}>
+        <figure className={styles.showcaseItem}>
+          <img
+            src="/img/sessions.webp"
+            alt="Session management panel showing multiple persistent sessions"
+            className={styles.showcaseImg}
+            width={800}
+            height={1734}
+            loading="lazy"
+          />
+          <figcaption className={styles.showcaseCaption}>Sessions</figcaption>
+        </figure>
+        <figure ref={heroRef} className={`${styles.showcaseItem} ${styles.showcaseHero}`}>
+          <img
+            src="/img/main-interface.webp"
+            alt="Mobitty terminal on mobile with soft key bar and terminal output"
+            className={styles.showcaseImg}
+            width={800}
+            height={1734}
+            loading="eager"
+          />
+        </figure>
+        <figure className={styles.showcaseItem}>
+          <img
+            src="/img/softkey-setting.webp"
+            alt="Soft key customization settings with key layout editor"
+            className={styles.showcaseImg}
+            width={800}
+            height={1734}
+            loading="lazy"
+          />
+          <figcaption className={styles.showcaseCaption}>Settings</figcaption>
+        </figure>
+      </div>
       <div className={styles.visualPills}>
         <span className={styles.pill}>Touch-first</span>
         <span className={styles.pill}>Persistent sessions</span>
@@ -144,7 +183,7 @@ function AudienceSplit() {
       <div className={styles.audienceGrid}>
         {/* Individuals */}
         <div className={styles.audienceCard}>
-          <div className={styles.audienceIcon}>
+          <div className={styles.audienceIcon} aria-hidden="true">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="4 17 10 11 4 5" />
               <line x1="12" y1="19" x2="20" y2="19" />
@@ -163,7 +202,7 @@ function AudienceSplit() {
 
         {/* Teams */}
         <div className={styles.audienceCard}>
-          <div className={styles.audienceIcon}>
+          <div className={styles.audienceIcon} aria-hidden="true">
             <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10" />
               <path d="m9 12 2 2 4-4" />
@@ -195,7 +234,7 @@ function Features() {
             className={styles.primaryCard}
             style={{ animationDelay: `${idx * 100}ms` }}
           >
-            <div className={styles.primaryIcon}>{f.icon}</div>
+            <div className={styles.primaryIcon} aria-hidden="true">{f.icon}</div>
             <h3 className={styles.primaryTitle}>{f.title}</h3>
             <p className={styles.primaryDesc}>{f.description}</p>
           </div>
@@ -210,7 +249,7 @@ function Features() {
             className={styles.secondaryCard}
             style={{ animationDelay: `${idx * 80}ms` }}
           >
-            <div className={styles.secondaryIcon}>{f.icon}</div>
+            <div className={styles.secondaryIcon} aria-hidden="true">{f.icon}</div>
             <h3 className={styles.secondaryTitle}>{f.title}</h3>
             <p className={styles.secondaryDesc}>{f.description}</p>
           </div>
@@ -225,7 +264,7 @@ function QuickStart() {
     <section className={styles.quickStart}>
       <h2 className={styles.sectionTitle}>Quick Start</h2>
       <div className={styles.terminalWindow}>
-        <div className={styles.terminalBar}>
+        <div className={styles.terminalBar} aria-hidden="true">
           <span className={styles.terminalDot} data-color="red" />
           <span className={styles.terminalDot} data-color="yellow" />
           <span className={styles.terminalDot} data-color="green" />

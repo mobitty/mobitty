@@ -31,6 +31,15 @@ const config: Config = {
       },
     },
     {
+      tagName: 'link',
+      attributes: {
+        rel: 'preload',
+        as: 'image',
+        href: '/img/main-interface.webp',
+        type: 'image/webp',
+      },
+    },
+    {
       tagName: 'meta',
       attributes: {
         name: 'keywords',

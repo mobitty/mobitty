@@ -43,6 +43,8 @@ Press **Ctrl+Shift+V** (Linux/Windows) or **Cmd+V** (macOS) to paste from the cl
 
 Mobitty lets you paste images (screenshots, photos) directly into the terminal — useful for sending visual context to AI agents.
 
+![Terminal showing "Image saved, path typed" after pasting a screenshot](/img/image-paste.webp)
+
 1. Copy an image to your clipboard as usual (screenshot, photo, etc.)
 2. Paste into the terminal using the same gesture as text paste (see above)
 3. Mobitty sends the image to the server

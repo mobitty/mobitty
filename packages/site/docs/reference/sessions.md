@@ -8,6 +8,8 @@ description: How sessions work — persistent PTY processes accessible from any 
 
 A **session** is a named, persistent shell process running on the server. Sessions are the core of how Mobitty works — they keep running whether or not a browser is connected, and any device can attach to them over the network.
 
+![Session management panel showing active sessions with New Session, Settings, and Edit controls](/img/sessions.webp)
+
 ## Persistence
 
 Sessions are not tied to a browser tab or a device. When you close a tab, navigate away, or lose your connection, the shell process keeps running on the server. Next time you open Mobitty, you are automatically reconnected to where you left off — your shell history, running processes, and working directory are all intact.

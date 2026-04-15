@@ -31,3 +31,5 @@ Reads text from the system clipboard and sends it to the terminal. Requires clip
 | `inline_input` | Input |
 
 Shows a text input directly in the soft key bar. Characters are sent to the terminal as you type — similar to typing on a physical keyboard. Included in the default desktop layout.
+
+![Terminal with inline input bar for fast typing, with soft key bar visible](/img/inline-editor.webp)
