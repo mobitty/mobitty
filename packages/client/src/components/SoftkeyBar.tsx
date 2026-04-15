@@ -23,6 +23,7 @@ interface SoftkeyBarProps {
   customKeys: SoftkeyCustomKeySpec[];
   containers?: SoftkeyContainerSpec[];
   activeContainerId?: string | null;
+  batchInputOpen?: boolean;
   softkeySize?: number;
   hasAlerts?: boolean;
   onSessionsOpen: () => void;
@@ -124,7 +125,7 @@ function InlineInput({ softkeySize, onSubmit, onKeepFocus }: InlineInputProps) {
 // --- SoftkeyBar ---
 
 export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
-  function SoftkeyBar({ pages, customKeys, containers, activeContainerId, softkeySize = 44, hasAlerts, onSessionsOpen, onMeterToggle, onAction, onPaste, onBatchInputToggle, onBatchSubmit, onContainerToggle, onKeepFocus, onModifiersChange }, ref) {
+  function SoftkeyBar({ pages, customKeys, containers, activeContainerId, batchInputOpen, softkeySize = 44, hasAlerts, onSessionsOpen, onMeterToggle, onAction, onPaste, onBatchInputToggle, onBatchSubmit, onContainerToggle, onKeepFocus, onModifiersChange }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     const [currentPage, setCurrentPage] = useState(0);
     const [modifiers, setModifiers] = useState<ModifierFlags>(emptyModifiers());
@@ -303,6 +304,18 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
                   size={softkeySize}
                   isModifierActive={modifiers[mod]}
                   onPress={() => handleToggleModifier(mod)}
+                />
+              );
+            }
+
+            if (keySpec.behavior.kind === 'batch-input-toggle') {
+              return (
+                <SoftkeyButton
+                  key={`${keyId}-${idx}`}
+                  keySpec={keySpec}
+                  size={softkeySize}
+                  isContainerActive={batchInputOpen}
+                  onPress={() => handleKeyPress(keySpec)}
                 />
               );
             }

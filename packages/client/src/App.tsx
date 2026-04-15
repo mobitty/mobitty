@@ -548,6 +548,7 @@ export function App() {
         customKeys={softkeyConfig.customKeys}
         containers={softkeyConfig.containers}
         activeContainerId={openContainerId}
+        batchInputOpen={batchInputOpen}
         softkeySize={softkeySize}
         hasAlerts={alertedSessionIds.size > 0}
         onSessionsOpen={() => setSessionPanelOpen(true)}
