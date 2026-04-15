@@ -57,7 +57,6 @@ const defaultTermOptions: ITerminalOptions = {
   fontFamily: DEFAULT_DESKTOP_PROFILE.fontFamily,
   theme: defaultTheme,
   scrollback: DEFAULT_SCROLLBACK,
-  overviewRuler: { width: 4 },
   allowProposedApi: true,
 };
 
