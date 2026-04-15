@@ -36,6 +36,7 @@ export interface FrameSnapshot {
   cols: number;
   rows: number;
   baseY: number;
+  scrollCount: number;
   title: string;
   modes: TerminalModes;
 }
@@ -97,7 +98,7 @@ function readModes(terminal: Terminal): TerminalModes {
   };
 }
 
-export function captureSnapshot(terminal: Terminal, title: string, cursorHidden: boolean): FrameSnapshot {
+export function captureSnapshot(terminal: Terminal, title: string, cursorHidden: boolean, scrollCount: number): FrameSnapshot {
   const buf = terminal.buffer.active;
   const cols = terminal.cols;
   const rows = terminal.rows;
@@ -138,6 +139,7 @@ export function captureSnapshot(terminal: Terminal, title: string, cursorHidden:
     cols,
     rows,
     baseY,
+    scrollCount,
     title,
     modes: readModes(terminal),
   };
@@ -161,6 +163,7 @@ export function blankSnapshot(cols: number, rows: number): FrameSnapshot {
     cols,
     rows,
     baseY: 0,
+    scrollCount: 0,
     title: '',
     modes: defaultModes(),
   };
@@ -260,12 +263,16 @@ export function generateDiff(prev: FrameSnapshot, curr: FrameSnapshot): string |
     out += `\x1b]2;${curr.title}\x07`;
   }
 
-  // Scroll handling
-  const deltaScroll = curr.baseY - prev.baseY;
-  if (deltaScroll > rows) {
+  // Scroll handling — use baseY delta for the STATE_FULL threshold (large
+  // pre-capacity burst) and scrollCount delta for actual newline emission.
+  // scrollCount is a monotonic counter that keeps incrementing even when
+  // baseY plateaus at the scrollback limit, fixing stale client scrollback.
+  const baseYDelta = curr.baseY - prev.baseY;
+  if (baseYDelta > rows) {
     return null; // Signal caller to send STATE_FULL
   }
-  if (deltaScroll > 0 && deltaScroll <= rows) {
+  const deltaScroll = Math.min(curr.scrollCount - prev.scrollCount, rows);
+  if (deltaScroll > 0) {
     // Move cursor to bottom of screen and emit newlines to scroll
     out += `\x1b[${rows};1H`;
     for (let i = 0; i < deltaScroll; i++) {
