@@ -1,25 +1,25 @@
 # Mobitty
 
-Powerful mobile-first web terminal to help you stay productive anywhere.
+[![npm version](https://img.shields.io/npm/v/mobitty)](https://www.npmjs.com/package/mobitty)
+[![npm downloads](https://img.shields.io/npm/dm/mobitty)](https://www.npmjs.com/package/mobitty)
+[![GitHub license](https://img.shields.io/github/license/mobitty/mobitty)](https://github.com/mobitty/mobitty/blob/main/LICENSE)
+[![GitHub stars](https://img.shields.io/github/stars/mobitty/mobitty)](https://github.com/mobitty/mobitty)
 
-Unlike other web terminals that bolt mobile support onto a desktop design, Mobitty is built touch-first — soft keys, gestures, and adaptive rendering make it genuinely usable on a phone.
+A touch-first web terminal for AI agent workflows. Self-hosted, source-available.
 
-### Who is this for?
+Mobitty is a self-hosted web terminal for running AI coding agents like Claude Code and Codex from your phone, tablet, or any browser. Unlike web terminals that bolt mobile support onto a desktop design (ttyd, Wetty), Mobitty is built for fingers — soft keys, gestures, and adaptive rendering that stays responsive even on slow connections.
 
-- Access your dev server from an iPad on the couch
-- SSH into machines from your phone without a native app
-- Talk to AI agents and get things done in spare moments and on the go
-- Start work on your desktop, continue on your phone — or the other way around
+Run Claude Code from your phone. Paste screenshots into AI agents. SSH into machines from an iPad. Start on your desktop, continue on your phone.
 
 ## Features
 
-- **Touch-first UI** -- Highly customizable soft keys, macros, simulated mouse scroll, multi-touch gestures.
-- **Multiple sessions** -- Create, switch, and manage multiple shells. Get OSC 9, 99, 777 notifications.
-- **Profiles & themes** -- Per-profile fonts, colors, scrollback, softkey layouts, gesture mappings, and hotkeys.
-- **Adaptive sync** -- WebGL, Canvas, and DOM renderer backends with incremental sync that adapts to network latency — stays responsive even on slow connections.
-- **TCP protocol** -- Works through any TCP tunnel (SSH, Cloudflare Tunnel, Tailscale) for best network compatibility.
+- **AI agent integration** -- Paste screenshots directly into AI agents. Watch output in real time. Interrupt when needed.
+- **Touch-first UI** -- Customizable soft keys, macros, simulated mouse scroll, multi-touch gestures.
+- **Persistent sessions** -- Sessions survive disconnects. Pick up on any device.
+- **Adaptive sync** -- Stays responsive on slow connections by adapting to network latency (WebGL, Canvas, and DOM renderer backends).
+- **Tunnel-friendly** -- Works through SSH, Cloudflare Tunnel, Tailscale — any TCP tunnel.
 - **PWA support** -- Installable as a standalone app on mobile and desktop.
-- **Image paste** -- Paste screenshots directly into AI agents running in your terminal.
+- **Profiles & themes** -- Per-profile fonts, colors, scrollback, softkey layouts, gesture mappings, and hotkeys.
 
 ## Get Started
 
@@ -37,11 +37,15 @@ npx mobitty -i 0.0.0.0
 
 Then open `http://<your-ip>:8000` from any device on the network.
 
-Usable out of the box with sensible default settings. Press the hamburger button in the lower left to customize. `--help` to see all CLI options.
+No Docker, no config files, no accounts. `--help` to see all CLI options. Open the menu in the lower left to customize.
 
 ## Security
 
 Mobitty does not provide encryption or authentication on its own. Do not expose it directly to the internet. Instead, access it over a TCP tunnel with strong authentication (e.g., SSH port forwarding, Cloudflare Tunnel, Tailscale Funnel) or through a VPN.
+
+## Documentation
+
+[mobitty.dev](https://mobitty.dev)
 
 ## License
 
