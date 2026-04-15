@@ -35,6 +35,19 @@ const MAX_PASTE_IMAGE_BYTES = 25 * 1024 * 1024; // 25 MB
 
 const RENDERER_TEARDOWN_DELAY_MS = 5000;
 
+/** Max time for a WebSocket to reach OPEN before we close and retry.
+ *  Mobile radios can take 10-20s to power up after phone wake;
+ *  TCP SYN timeout is 30-120s. 10s lets us retry faster. */
+const CONNECT_TIMEOUT_MS = 10_000;
+
+/** Client-side liveness: close the socket if no data arrives for this
+ *  long while readyState is OPEN.  Server sends RTT_REPORT every 5s
+ *  via heartbeat; 20s = 4 missed cycles. */
+const LIVENESS_TIMEOUT_MS = 20_000;
+
+/** How often to run the liveness check. */
+const LIVENESS_CHECK_MS = 5_000;
+
 const Command = {
   SET_WINDOW_TITLE: '1',
   SET_PREFERENCES: '2',
@@ -133,6 +146,9 @@ export class TerminalCore {
   private doReconnect = true;
   private closeOnDisconnect = false;
   private reconnectDelay = 0;
+  private reconnectTimer?: ReturnType<typeof setTimeout>;
+  private connectTimer?: ReturnType<typeof setTimeout>;
+  private lastMessageAt = 0;
   private gestureDetector?: GestureDetector;
   private lastGestureCenter: { x: number; y: number } = { x: 0, y: 0 };
   private gestureMapping: GestureMapping = DEFAULT_GESTURE_MAPPING;
@@ -168,6 +184,14 @@ export class TerminalCore {
   }
 
   dispose() {
+    if (this.reconnectTimer !== undefined) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
+    if (this.connectTimer !== undefined) {
+      clearTimeout(this.connectTimer);
+      this.connectTimer = undefined;
+    }
     if (this.pendingConnectRaf !== undefined) {
       cancelAnimationFrame(this.pendingConnectRaf);
       this.pendingConnectRaf = undefined;
@@ -315,6 +339,7 @@ export class TerminalCore {
     }));
     this.registerTerminal(terminal.onSelectionChange(() => this.onSelectionChange()));
     this.registerWakeDetection();
+    this.registerLivenessCheck();
   }
 
   applyProfile(profile: Profile, themeColors?: ProfileTheme): void {
@@ -341,6 +366,23 @@ export class TerminalCore {
   }
 
   connect() {
+    // Cancel any pending reconnect timer to prevent duplicate connections
+    if (this.reconnectTimer !== undefined) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = undefined;
+    }
+    // Close any stale socket still in CONNECTING or OPEN state and
+    // remove its event listeners so its async close event cannot
+    // dispose the new socket's listeners (Layer 2 race prevention).
+    const prev = this.socket;
+    if (prev) {
+      if (prev.readyState === WebSocket.CONNECTING || prev.readyState === WebSocket.OPEN) {
+        prev.close();
+      }
+      this.dispose();
+      this.socket = undefined;
+    }
+
     this.socket = new WebSocket(this.options.wsUrl, ['tty']);
     const { socket } = this;
 
@@ -348,6 +390,17 @@ export class TerminalCore {
     this.registerSocket(addEventListener(socket, 'open', () => this.onSocketOpen()));
     this.registerSocket(addEventListener(socket, 'message', (e) => this.onSocketData(e as MessageEvent)));
     this.registerSocket(addEventListener(socket, 'close', (e) => this.onSocketClose(e as CloseEvent)));
+
+    // Connection timeout: if the socket doesn't reach OPEN within the
+    // deadline, close it.  The close event triggers scheduleReconnect().
+    // `socket` is a local capture — safe even if connect() is called again.
+    this.connectTimer = setTimeout(() => {
+      this.connectTimer = undefined;
+      if (socket.readyState === WebSocket.CONNECTING) {
+        this.logger.warn('connect timeout');
+        socket.close();
+      }
+    }, CONNECT_TIMEOUT_MS);
   }
 
   /** Manual reconnect — called by the React UI when user clicks Reconnect. */
@@ -941,6 +994,11 @@ export class TerminalCore {
 
 
   private onSocketOpen() {
+    if (this.connectTimer !== undefined) {
+      clearTimeout(this.connectTimer);
+      this.connectTimer = undefined;
+    }
+    this.lastMessageAt = Date.now();
     this.logger.info('websocket opened');
     const { overlayAddon } = this;
 
@@ -1013,7 +1071,10 @@ export class TerminalCore {
   private scheduleReconnect() {
     this.reconnectDelay = Math.min(Math.max(this.reconnectDelay, 500) * 2, 10000);
     this.logger.info('reconnecting', { delay: this.reconnectDelay });
-    setTimeout(() => this.refreshToken().then(() => this.connect()), this.reconnectDelay);
+    this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = undefined;
+      this.refreshToken().then(() => this.connect());
+    }, this.reconnectDelay);
   }
 
   private registerWakeDetection() {
@@ -1027,6 +1088,21 @@ export class TerminalCore {
       if (document.visibilityState === 'visible') check();
     }));
     this.registerTerminal(addEventListener(window, 'online', check));
+  }
+
+  /** Periodic check for zombie sockets: readyState OPEN but no data
+   *  received.  Terminal-scoped so it survives reconnections. */
+  private registerLivenessCheck() {
+    const timer = setInterval(() => {
+      if (this.socket?.readyState !== WebSocket.OPEN) return;
+      if (this.lastMessageAt === 0) return;
+      const elapsed = Date.now() - this.lastMessageAt;
+      if (elapsed > LIVENESS_TIMEOUT_MS) {
+        this.logger.warn('liveness timeout', { elapsed });
+        this.socket.close();
+      }
+    }, LIVENESS_CHECK_MS);
+    this.registerTerminal({ dispose: () => clearInterval(timer) });
   }
 
   /** Tear down GPU renderer after a debounce when the tab is hidden,
@@ -1112,6 +1188,7 @@ export class TerminalCore {
   }
 
   private onSocketData(event: MessageEvent) {
+    this.lastMessageAt = Date.now();
     const rawData = event.data as ArrayBuffer;
     const bytes = new Uint8Array(rawData);
     const cmd = bytes[0]!;
