@@ -12,7 +12,7 @@ import {
 } from './types.ts';
 import type { ServerState } from './types.ts';
 const DEFAULT_SCROLLBACK = 5000;
-import { resolve } from 'node:path';
+import { resolve, relative, isAbsolute } from 'node:path';
 import { writePty } from './pty.ts';
 import { writeImageToSystemClipboard, writeImageToFile, getProcessCwd } from './clipboard.ts';
 import type { SessionRegistry } from './sessions.ts';
@@ -332,7 +332,8 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         ? parsed.scrollback : DEFAULT_SCROLLBACK;
 
       // Parse image paste directory
-      if (typeof parsed.imagePasteDir === 'string' && parsed.imagePasteDir.length <= 256) {
+      if (typeof parsed.imagePasteDir === 'string' && parsed.imagePasteDir.length <= 256
+          && !isAbsolute(parsed.imagePasteDir)) {
         imagePasteDir = parsed.imagePasteDir;
       }
 
@@ -567,6 +568,15 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
 
         const cwd = getProcessCwd(handle.pid);
         const dirPath = resolve(cwd, imagePasteDir);
+        const rel = relative(cwd, dirPath);
+        if (rel.startsWith('..') || isAbsolute(rel)) {
+          socketLogger.warn('imagePasteDir escapes cwd, rejecting', { cwd, imagePasteDir, resolved: dirPath });
+          sendClipboardImageAck(ws, requestId, 1, JSON.stringify({
+            clipboardError: clipResult.error,
+            containmentError: 'imagePasteDir resolves outside working directory',
+          }));
+          return;
+        }
 
         return writeImageToFile(imageData, mimeType, dirPath).then(fileResult => {
           if (fileResult.success && fileResult.filePath) {

@@ -1,6 +1,25 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { computeAutoInterval } from './protocol.ts';
+import { isUpdateSettingsMessage } from './types.ts';
+
+describe('isUpdateSettingsMessage — imagePasteDir', () => {
+  it('accepts relative directory', () => {
+    assert.equal(isUpdateSettingsMessage({ imagePasteDir: 'images' }), true);
+  });
+
+  it('accepts nested relative directory', () => {
+    assert.equal(isUpdateSettingsMessage({ imagePasteDir: 'sub/images' }), true);
+  });
+
+  it('rejects absolute path', () => {
+    assert.equal(isUpdateSettingsMessage({ imagePasteDir: '/tmp/evil' }), false);
+  });
+
+  it('allows traversal (caught at use-time containment check)', () => {
+    assert.equal(isUpdateSettingsMessage({ imagePasteDir: '../../etc' }), true);
+  });
+});
 
 describe('computeAutoInterval', () => {
   it('stays at 30fps with oscillating RTT (audit scenario)', () => {

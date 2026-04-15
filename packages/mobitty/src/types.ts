@@ -1,4 +1,5 @@
 import type { IPty } from 'node-pty';
+import { isAbsolute } from 'node:path';
 
 // Protocol command bytes
 // Server -> Client
@@ -180,7 +181,8 @@ export function isUpdateSettingsMessage(obj: unknown): obj is UpdateSettingsMess
         || r['scrollback'] < 100 || r['scrollback'] > 50000) return false;
   }
   if (r['imagePasteDir'] !== undefined) {
-    if (typeof r['imagePasteDir'] !== 'string' || r['imagePasteDir'].length > 256) return false;
+    if (typeof r['imagePasteDir'] !== 'string' || r['imagePasteDir'].length > 256
+        || isAbsolute(r['imagePasteDir'])) return false;
   }
   if (r['notificationMode'] !== undefined) {
     if (typeof r['notificationMode'] !== 'string'
