@@ -1,52 +1,146 @@
-// Hammer.js wrapper for touch gesture detection.
-// Maps Hammer events to GestureId values and handles xterm.js integration.
+// Pointer-event gesture recognizers for touch gesture detection.
+// Maps pointer events to GestureId values and handles xterm.js integration.
 //
 // Architecture: two independent event channels prevent conflicts with xterm.js.
-//   Pointer events → Hammer (PointerEventInput) → gesture recognition
+//   Pointer events → gesture recognizers → gesture callbacks
 //   Touch events   → capture-phase gatekeeper   → block or pass to xterm
-// xterm only listens to touch events (no pointer listeners), so Hammer's
-// pointer-based detection is completely invisible to xterm.  The gatekeeper
-// uses stopImmediatePropagation in the capture phase to prevent xterm's
-// bubble-phase touchmove handler from firing when gestures are active.
+// xterm only listens to touch events (no pointer listeners), so pointer-based
+// detection is completely invisible to xterm.  The gatekeeper uses
+// stopImmediatePropagation in the capture phase to prevent xterm's bubble-phase
+// touchmove handler from firing when gestures are active.
 
-import Hammer from 'hammerjs';
 import type { GestureId, GestureMapping, GestureDirection } from './gesture-types';
+
 export interface GestureDetectorCallbacks {
   onGesture: (gestureId: GestureId, center: { x: number; y: number }) => void;
   onContinuousScroll?: (deltaY: number) => void;
   onLongPressDefault: (clientX: number, clientY: number) => void;
 }
 
-function hammerDirectionToGesture(direction: number): GestureDirection | undefined {
-  switch (direction) {
-    case Hammer.DIRECTION_UP: return 'up';
-    case Hammer.DIRECTION_DOWN: return 'down';
-    case Hammer.DIRECTION_LEFT: return 'left';
-    case Hammer.DIRECTION_RIGHT: return 'right';
-    default: return undefined;
-  }
+// --- Internal types ---
+
+interface PointerState {
+  readonly id: number;
+  readonly startX: number;
+  readonly startY: number;
+  readonly startTime: number;
+  x: number;
+  y: number;
 }
 
+interface Point {
+  readonly x: number;
+  readonly y: number;
+}
+
+type Phase = 'idle' | 'pending' | 'tracking' | 'tap-wait';
+
+// --- Constants ---
+
+const PAN_THRESHOLD_1 = 30;
+const PAN_THRESHOLD_MULTI = 10;
+const FLICK_VELOCITY = 0.6;      // px/ms — matches Hammer Swipe velocity option
+const LONG_PRESS_TIME = 500;
+const LONG_PRESS_MOVE = 10;
+const TAP_MAX_TIME = 250;         // max hold duration per tap (Hammer default)
+const TAP_MAX_MOVE = 9;           // max movement during a tap (Hammer default)
+const TAP_INTERVAL = 300;         // max time between consecutive taps
+const TAP_POS_THRESHOLD = 24;     // max distance between multi-tap positions
+const PINCH_THRESHOLD = 0.1;      // |scale - 1|
+const ROTATE_THRESHOLD = 15;      // degrees
+
+// --- Helpers ---
+
+function computeCentroid(pointers: Map<number, PointerState>): Point {
+  let sx = 0;
+  let sy = 0;
+  for (const p of pointers.values()) {
+    sx += p.x;
+    sy += p.y;
+  }
+  const n = pointers.size;
+  return { x: sx / n, y: sy / n };
+}
+
+function distance(x1: number, y1: number, x2: number, y2: number): number {
+  const dx = x2 - x1;
+  const dy = y2 - y1;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
+function angle(p1: PointerState, p2: PointerState): number {
+  return Math.atan2(p2.y - p1.y, p2.x - p1.x) * (180 / Math.PI);
+}
+
+function dominantDirection(dx: number, dy: number): GestureDirection | undefined {
+  if (dx === 0 && dy === 0) return undefined;
+  if (Math.abs(dx) >= Math.abs(dy)) {
+    return dx > 0 ? 'right' : 'left';
+  }
+  return dy > 0 ? 'down' : 'up';
+}
+
+function getTwoPointers(pointers: Map<number, PointerState>): readonly [PointerState, PointerState] | undefined {
+  if (pointers.size < 2) return undefined;
+  const iter = pointers.values();
+  const a = iter.next().value;
+  const b = iter.next().value;
+  if (!a || !b) return undefined;
+  return [a, b];
+}
+
+// --- GestureDetector ---
+
 export class GestureDetector {
-  private manager: HammerManager;
   private mapping: GestureMapping;
   private callbacks: GestureDetectorCallbacks;
+  private continuousScrollGestures: ReadonlySet<string>;
+  private element: HTMLElement;
+  private viewport: HTMLElement | null;
+
+  // Pointer tracking
+  private pointers = new Map<number, PointerState>();
+  private phase: Phase = 'idle';
+  private gestureStartTime = 0;
+
+  // Pan state
+  private panFingerCount = 0;
+  private panStartCentroid: Point = { x: 0, y: 0 };
+  private lastCentroid: Point = { x: 0, y: 0 };
+  private swipeDidContinuousScroll = false;
+
+  // 1-finger intercept (flick/pan coexistence)
   private intercepting = false;
   private interceptDirection: GestureDirection | undefined;
 
-  // Continuous scroll state — keyed by finger count (1/2/3)
-  private continuousScrollGestures: ReadonlySet<string>;
-  private swipeLastDeltaY: Record<number, number> = {};
-  private swipeDidContinuousScroll: Record<number, boolean> = {};
+  // 2-finger state (pinch + rotate)
+  private initialPinchDist = 0;
+  private initialRotateAngle = 0;
+  private currentScale = 1;
+  private currentRotation = 0;
+
+  // Tap state
+  private tapCount = 0;
+  private tapTimer: ReturnType<typeof setTimeout> | undefined;
+  private lastTapX = 0;
+  private lastTapY = 0;
+
+  // Long press
+  private longPressTimer: ReturnType<typeof setTimeout> | undefined;
+  private longPressPointer: PointerState | undefined;
 
   // Capture-phase touch gatekeeper: blocks touch events from reaching xterm's
   // bubble-phase handlers when gestures are mapped for the current finger count.
-  private element: HTMLElement;
-  private viewport: HTMLElement | null;
   private didIntercept = false;
   private didLongPress = false;
-  private onCaptureTouchMove: (e: TouchEvent) => void;
-  private onCaptureTouchEnd: (e: TouchEvent) => void;
+  private boundOnCaptureTouchMove: (e: TouchEvent) => void;
+  private boundOnCaptureTouchEnd: (e: TouchEvent) => void;
+
+  // Pointer event handlers (bound for removal)
+  private boundOnPointerDown: (e: PointerEvent) => void;
+  private boundOnPointerMove: (e: PointerEvent) => void;
+  private boundOnPointerUp: (e: PointerEvent) => void;
+  private boundOnPointerCancel: (e: PointerEvent) => void;
 
   constructor(element: HTMLElement, mapping: GestureMapping, callbacks: GestureDetectorCallbacks, continuousScrollGestures?: ReadonlySet<string>) {
     this.mapping = mapping;
@@ -55,103 +149,27 @@ export class GestureDetector {
     this.element = element;
     this.viewport = element.querySelector('.xterm-viewport');
 
-    // Hammer uses pointer events — completely independent of touch events.
-    // touch-action must be 'none' so the browser doesn't take over multi-finger
-    // touches for native scroll/zoom, which would fire pointercancel and stop
-    // delivering pointermove events that Hammer needs for gesture recognition.
-    this.manager = new Hammer.Manager(element, {
-      touchAction: 'none',
-      inputClass: Hammer.PointerEventInput,
-    });
+    // --- Pointer event listeners ---
+    // Pointer events are independent of touch events.  touch-action: none on
+    // .xterm * (set in CSS) prevents the browser from firing pointercancel
+    // when it would otherwise take over for native scroll/zoom.
 
-    // --- Recognizers ---
+    this.boundOnPointerDown = (e) => this.onPointerDown(e);
+    this.boundOnPointerMove = (e) => this.onPointerMove(e);
+    this.boundOnPointerUp = (e) => this.onPointerUp(e);
+    this.boundOnPointerCancel = (e) => this.onPointerCancel(e);
 
-    // Multi-finger swipes — Pan recognizers give continuous movement tracking
-    // (for smooth scroll when mapped to wheel-step) plus direction at gesture end
-    // (for discrete actions). Lower threshold (10) for responsive continuous tracking.
-    const swipe2 = new Hammer.Pan({ event: 'swipe2', pointers: 2, direction: Hammer.DIRECTION_ALL, threshold: 10 });
-    const swipe3 = new Hammer.Pan({ event: 'swipe3', pointers: 3, direction: Hammer.DIRECTION_ALL, threshold: 10 });
-
-    // Single-finger pan (for swipe-1 direction tracking)
-    const pan1 = new Hammer.Pan({ event: 'pan1', pointers: 1, direction: Hammer.DIRECTION_ALL, threshold: 30 });
-
-    // Single-finger flick (velocity-based, fires at gesture end)
-    const flick1 = new Hammer.Swipe({ event: 'flick1', pointers: 1, direction: Hammer.DIRECTION_ALL, threshold: 30, velocity: 0.6 });
-
-    // Long-press
-    const press = new Hammer.Press({ event: 'longpress', time: 500, pointers: 1 });
-
-    // Pinch (2-finger squeeze / spread)
-    const pinch = new Hammer.Pinch({ event: 'pinch', pointers: 2, threshold: 0.1 });
-
-    // Rotate (2-finger twist)
-    const rotate = new Hammer.Rotate({ event: 'rotate', pointers: 2, threshold: 15 });
-
-    // Taps
-    const tripletap = new Hammer.Tap({ event: 'tripletap', taps: 3, interval: 300, posThreshold: 24 });
-    const doubletap = new Hammer.Tap({ event: 'doubletap', taps: 2, interval: 300, posThreshold: 24 });
-
-    // Add recognizers (order matters — multi-finger first)
-    this.manager.add([swipe3, swipe2, pan1, flick1, press, pinch, rotate, tripletap, doubletap]);
-
-    // Relationships: tripletap requires doubletap to fail first
-    tripletap.recognizeWith(doubletap);
-    doubletap.requireFailure(tripletap);
-
-    // flick1 and pan1 can coexist — we use the intercepting flag to prevent double-fire
-    flick1.recognizeWith(pan1);
-
-    // pan1 grabs curRecognizer when the first finger moves.  Multi-finger
-    // recognizers must be allowed to run simultaneously, otherwise Hammer's
-    // curRecognizer lock resets them before the second finger arrives.
-    pan1.recognizeWith([swipe2, swipe3, pinch, rotate]);
-
-    // Pinch and rotate can coexist with each other and with 2-finger swipe
-    pinch.recognizeWith([rotate, swipe2]);
-    rotate.recognizeWith([pinch, swipe2]);
-
-    // --- Event handlers ---
-
-    // 2-finger swipe (Pan: start/move/end)
-    this.manager.on('swipe2start', () => this.handleSwipeStart(2));
-    this.manager.on('swipe2move', (e) => this.handleSwipeMove(2, e));
-    this.manager.on('swipe2end', (e) => this.handleSwipeEnd(2, e));
-    this.manager.on('swipe2cancel', () => this.handleSwipeCancel(2));
-
-    // 3-finger swipe (Pan: start/move/end)
-    this.manager.on('swipe3start', () => this.handleSwipeStart(3));
-    this.manager.on('swipe3move', (e) => this.handleSwipeMove(3, e));
-    this.manager.on('swipe3end', (e) => this.handleSwipeEnd(3, e));
-    this.manager.on('swipe3cancel', () => this.handleSwipeCancel(3));
-
-    // 1-finger pan (for swipe-1 direction tracking, continuous scroll, and flick double-fire prevention)
-    this.manager.on('pan1start', (e) => this.handlePanStart(e));
-    this.manager.on('pan1move', (e) => this.handleSwipeMove(1, e));
-    this.manager.on('pan1end', (e) => this.handlePanEnd(e));
-    this.manager.on('pan1cancel', () => this.handlePanCancel());
-
-    // 1-finger flick
-    this.manager.on('flick1', (e) => this.handleFlick(e));
-
-    // Taps
-    this.manager.on('doubletap', (e) => this.handleDoubleTap(e));
-    this.manager.on('tripletap', (e) => this.handleTripleTap(e));
-
-    // Long-press
-    this.manager.on('longpress', (e) => this.handleLongPress(e));
-
-    // Pinch — fire once at end based on final scale
-    this.manager.on('pinchend', (e) => this.handlePinchEnd(e));
-
-    // Rotate — fire once at end based on cumulative rotation
-    this.manager.on('rotateend', (e) => this.handleRotateEnd(e));
+    element.addEventListener('pointerdown', this.boundOnPointerDown);
+    element.addEventListener('pointermove', this.boundOnPointerMove);
+    element.addEventListener('pointerup', this.boundOnPointerUp);
+    element.addEventListener('pointercancel', this.boundOnPointerCancel);
 
     // --- Capture-phase touch gatekeeper ---
-    // Registered on the .xterm element in the capture phase so they fire BEFORE
-    // xterm's bubble-phase touch handlers. When gestures are mapped for the
-    // current finger count, we block the touch event from reaching xterm entirely.
+    // Registered in the capture phase so they fire BEFORE xterm's bubble-phase
+    // touch handlers. When gestures are mapped for the current finger count, we
+    // block the touch event from reaching xterm entirely.
 
-    this.onCaptureTouchMove = (e: TouchEvent) => {
+    this.boundOnCaptureTouchMove = (e: TouchEvent) => {
       if (this.shouldBlockTouch(e.touches.length)) {
         e.stopImmediatePropagation();
         e.preventDefault();
@@ -159,7 +177,7 @@ export class GestureDetector {
       }
     };
 
-    this.onCaptureTouchEnd = (e: TouchEvent) => {
+    this.boundOnCaptureTouchEnd = (e: TouchEvent) => {
       if (this.didIntercept || this.didLongPress) {
         e.preventDefault(); // suppress synthetic mousedown → xterm focus → keyboard
       }
@@ -169,8 +187,8 @@ export class GestureDetector {
       }
     };
 
-    element.addEventListener('touchmove', this.onCaptureTouchMove, { capture: true, passive: false });
-    element.addEventListener('touchend', this.onCaptureTouchEnd, { capture: true, passive: false });
+    element.addEventListener('touchmove', this.boundOnCaptureTouchMove, { capture: true, passive: false });
+    element.addEventListener('touchend', this.boundOnCaptureTouchEnd, { capture: true, passive: false });
 
     this.applyViewportTouchAction();
   }
@@ -185,141 +203,389 @@ export class GestureDetector {
   }
 
   dispose(): void {
-    this.element.removeEventListener('touchmove', this.onCaptureTouchMove, { capture: true });
-    this.element.removeEventListener('touchend', this.onCaptureTouchEnd, { capture: true });
+    this.element.removeEventListener('pointerdown', this.boundOnPointerDown);
+    this.element.removeEventListener('pointermove', this.boundOnPointerMove);
+    this.element.removeEventListener('pointerup', this.boundOnPointerUp);
+    this.element.removeEventListener('pointercancel', this.boundOnPointerCancel);
+    this.element.removeEventListener('touchmove', this.boundOnCaptureTouchMove, { capture: true });
+    this.element.removeEventListener('touchend', this.boundOnCaptureTouchEnd, { capture: true });
     if (this.viewport) this.viewport.style.touchAction = '';
-    this.manager.destroy();
+    this.clearLongPress();
+    this.clearTapTimer();
+    this.pointers.clear();
+    this.phase = 'idle';
   }
 
-  // --- Handlers ---
+  // --- Pointer event handlers ---
 
-  // --- Unified swipe handlers (continuous scroll or discrete action) ---
+  private onPointerDown(e: PointerEvent): void {
+    const now = performance.now();
+    this.pointers.set(e.pointerId, {
+      id: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      startTime: now,
+      x: e.clientX,
+      y: e.clientY,
+    });
 
-  private handleSwipeStart(fingers: number): void {
-    this.swipeLastDeltaY[fingers] = 0;
-    this.swipeDidContinuousScroll[fingers] = false;
-  }
+    if (this.phase === 'idle' || this.phase === 'tap-wait') {
+      // Keep tapCount when coming from tap-wait (multi-tap sequence in progress)
+      if (this.phase === 'tap-wait') {
+        this.clearTapTimer();
+      }
+      this.phase = 'pending';
+      this.gestureStartTime = now;
+      this.panStartCentroid = computeCentroid(this.pointers);
+      this.lastCentroid = this.panStartCentroid;
 
-  private handleSwipeMove(fingers: number, e: HammerInput): void {
-    if (this.continuousScrollGestures.size === 0) return;
-    if (!this.callbacks.onContinuousScroll) return;
+      if (this.pointers.size === 1) {
+        this.startLongPress(e.clientX, e.clientY);
+      }
+    } else if (this.phase === 'pending') {
+      // Additional finger arrived — reset start centroid so threshold is
+      // measured from when all current fingers are down
+      this.clearLongPress();
+      this.panStartCentroid = computeCentroid(this.pointers);
+      this.lastCentroid = this.panStartCentroid;
+    } else if (this.phase === 'tracking') {
+      // Finger count upgrade during active pan
+      this.panFingerCount = this.pointers.size;
+      this.lastCentroid = computeCentroid(this.pointers);
+      this.swipeDidContinuousScroll = false;
+    }
 
-    const incrementalDeltaY = e.deltaY - (this.swipeLastDeltaY[fingers] ?? 0);
-    this.swipeLastDeltaY[fingers] = e.deltaY;
-    if (incrementalDeltaY === 0) return;
-
-    // Hammer deltaY: negative = fingers moved up. For gesture ID matching,
-    // fingers-up = swipe-up. For WheelEvent, negate: fingers-up should produce
-    // positive deltaY (scroll down / natural scrolling).
-    const gestureId = `swipe-${fingers}-${incrementalDeltaY < 0 ? 'up' : 'down'}` as GestureId;
-    if (!this.continuousScrollGestures.has(gestureId)) return;
-
-    this.swipeDidContinuousScroll[fingers] = true;
-    this.callbacks.onContinuousScroll(-incrementalDeltaY);
-  }
-
-  private handleSwipeEnd(fingers: number, e: HammerInput): void {
-    if (this.swipeDidContinuousScroll[fingers]) return;
-
-    // Discrete: determine direction and fire gesture (same as old swipe behavior)
-    const dir = hammerDirectionToGesture(e.direction);
-    if (!dir) return;
-    const gestureId = `swipe-${fingers}-${dir}` as GestureId;
-    if (this.mapping[gestureId]) {
-      this.callbacks.onGesture(gestureId, e.center);
+    // Record 2-finger baseline (pinch distance + rotate angle)
+    if (this.pointers.size === 2) {
+      this.initTwoFingerState();
     }
   }
 
-  private handleSwipeCancel(fingers: number): void {
-    this.swipeLastDeltaY[fingers] = 0;
-    this.swipeDidContinuousScroll[fingers] = false;
-  }
+  private onPointerMove(e: PointerEvent): void {
+    const ptr = this.pointers.get(e.pointerId);
+    if (!ptr) return;
 
-  // --- 1-finger pan (swipe-1 direction tracking + flick double-fire prevention) ---
+    ptr.x = e.clientX;
+    ptr.y = e.clientY;
 
-  private handlePanStart(e: HammerInput): void {
-    this.handleSwipeStart(1);
-    const dir = hammerDirectionToGesture(e.direction);
-    if (!dir) return;
-    const swipeId = `swipe-1-${dir}` as GestureId;
-    const flickId = `flick-1-${dir}` as GestureId;
-    if (this.mapping[swipeId] || this.mapping[flickId]) {
-      this.intercepting = true;
-      this.interceptDirection = dir;
+    if (this.phase === 'pending') {
+      this.handlePendingMove();
+    } else if (this.phase === 'tracking') {
+      this.handleTrackingMove();
     }
   }
 
-  private handlePanEnd(e: HammerInput): void {
-    if (this.intercepting) {
-      // If continuous scroll handled it, skip the discrete event
-      if (!this.swipeDidContinuousScroll[1]) {
-        const dir = hammerDirectionToGesture(e.direction) ?? this.interceptDirection;
+  private onPointerUp(e: PointerEvent): void {
+    const ptr = this.pointers.get(e.pointerId);
+    if (!ptr) return;
+
+    ptr.x = e.clientX;
+    ptr.y = e.clientY;
+
+    // Compute final centroid BEFORE removing the pointer
+    const finalCentroid = computeCentroid(this.pointers);
+    const now = performance.now();
+
+    this.pointers.delete(e.pointerId);
+
+    if (this.phase === 'tracking') {
+      if (this.pointers.size === 0) {
+        this.finishTracking(finalCentroid, now);
+      } else {
+        // Finger lifted but others remain — reset centroid baseline to prevent jump
+        this.lastCentroid = computeCentroid(this.pointers);
+      }
+    } else if (this.phase === 'pending') {
+      this.clearLongPress();
+      if (this.pointers.size === 0) {
+        this.handlePotentialTap(ptr, now);
+      }
+    }
+  }
+
+  private onPointerCancel(e: PointerEvent): void {
+    this.pointers.delete(e.pointerId);
+    if (this.pointers.size === 0) {
+      this.resetToIdle();
+    } else if (this.phase === 'pending') {
+      this.panStartCentroid = computeCentroid(this.pointers);
+      this.lastCentroid = this.panStartCentroid;
+    } else if (this.phase === 'tracking') {
+      this.lastCentroid = computeCentroid(this.pointers);
+    }
+  }
+
+  // --- Pending phase: detect threshold crossing ---
+
+  private handlePendingMove(): void {
+    const c = computeCentroid(this.pointers);
+    const displacement = distance(this.panStartCentroid.x, this.panStartCentroid.y, c.x, c.y);
+
+    // Cancel long press if finger moved too far
+    if (this.longPressPointer && displacement > LONG_PRESS_MOVE) {
+      this.clearLongPress();
+    }
+
+    const threshold = this.pointers.size === 1 ? PAN_THRESHOLD_1 : PAN_THRESHOLD_MULTI;
+    if (displacement >= threshold) {
+      this.activateTracking(c);
+    }
+  }
+
+  private activateTracking(currentCentroid: Point): void {
+    this.clearLongPress();
+    this.tapCount = 0; // pan activation cancels pending tap sequence
+    this.phase = 'tracking';
+    this.panFingerCount = this.pointers.size;
+    this.lastCentroid = currentCentroid;
+    this.swipeDidContinuousScroll = false;
+
+    // 1-finger: set intercepting if swipe-1 or flick-1 is mapped for
+    // the initial direction (prevents flick from also firing at gesture end)
+    this.intercepting = false;
+    this.interceptDirection = undefined;
+    if (this.panFingerCount === 1) {
+      const dx = currentCentroid.x - this.panStartCentroid.x;
+      const dy = currentCentroid.y - this.panStartCentroid.y;
+      const dir = dominantDirection(dx, dy);
+      if (dir) {
+        const swipeId = `swipe-1-${dir}` as GestureId;
+        const flickId = `flick-1-${dir}` as GestureId;
+        if (this.mapping[swipeId] || this.mapping[flickId]) {
+          this.intercepting = true;
+          this.interceptDirection = dir;
+        }
+      }
+    }
+
+    // Record 2-finger baseline if activating with 2 fingers
+    if (this.pointers.size === 2) {
+      this.initTwoFingerState();
+    }
+  }
+
+  // --- Tracking phase: continuous movement ---
+
+  private handleTrackingMove(): void {
+    const c = computeCentroid(this.pointers);
+
+    // Continuous scroll — forward incremental deltaY when the gesture maps
+    // to a wheel-step action
+    if (this.continuousScrollGestures.size > 0 && this.callbacks.onContinuousScroll) {
+      const incrementalDeltaY = c.y - this.lastCentroid.y;
+      if (incrementalDeltaY !== 0) {
+        // Centroid Y decreasing = fingers moved up = swipe-up gesture.
+        // For WheelEvent: negate so fingers-up produces positive deltaY
+        // (scroll down / natural scrolling).
+        const gestureId = `swipe-${this.panFingerCount}-${incrementalDeltaY < 0 ? 'up' : 'down'}` as GestureId;
+        if (this.continuousScrollGestures.has(gestureId)) {
+          this.swipeDidContinuousScroll = true;
+          this.callbacks.onContinuousScroll(-incrementalDeltaY);
+        }
+      }
+    }
+
+    // 2-finger: track pinch scale and rotation
+    if (this.pointers.size === 2 && this.initialPinchDist > 0) {
+      const pair = getTwoPointers(this.pointers);
+      if (pair) {
+        const [a, b] = pair;
+        this.currentScale = distance(a.x, a.y, b.x, b.y) / this.initialPinchDist;
+        let rotation = angle(a, b) - this.initialRotateAngle;
+        if (rotation > 180) rotation -= 360;
+        if (rotation < -180) rotation += 360;
+        this.currentRotation = rotation;
+      }
+    }
+
+    this.lastCentroid = c;
+  }
+
+  // --- Tracking end: fire discrete gestures ---
+
+  private finishTracking(finalCentroid: Point, now: number): void {
+    const fingers = this.panFingerCount;
+
+    if (!this.swipeDidContinuousScroll) {
+      if (fingers === 1) {
+        this.finish1FingerTracking(finalCentroid, now);
+      } else {
+        const dx = finalCentroid.x - this.panStartCentroid.x;
+        const dy = finalCentroid.y - this.panStartCentroid.y;
+        const dir = dominantDirection(dx, dy);
         if (dir) {
-          const gestureId = `swipe-1-${dir}` as GestureId;
+          const gestureId = `swipe-${fingers}-${dir}` as GestureId;
           if (this.mapping[gestureId]) {
-            this.callbacks.onGesture(gestureId, e.center);
+            this.callbacks.onGesture(gestureId, finalCentroid);
           }
+        }
+      }
+    }
+
+    // Pinch — fire once at end based on final scale (2-finger only)
+    if (fingers === 2 && Math.abs(this.currentScale - 1) > PINCH_THRESHOLD) {
+      const gestureId: GestureId = this.currentScale < 1 ? 'pinch-in' : 'pinch-out';
+      if (this.mapping[gestureId]) {
+        this.callbacks.onGesture(gestureId, finalCentroid);
+      }
+    }
+
+    // Rotate — fire once at end based on cumulative rotation (2-finger only)
+    if (fingers === 2 && Math.abs(this.currentRotation) > ROTATE_THRESHOLD) {
+      const gestureId: GestureId = this.currentRotation > 0 ? 'rotate-cw' : 'rotate-ccw';
+      if (this.mapping[gestureId]) {
+        this.callbacks.onGesture(gestureId, finalCentroid);
+      }
+    }
+
+    this.resetToIdle();
+  }
+
+  private finish1FingerTracking(finalCentroid: Point, now: number): void {
+    // Pan end: fire swipe-1 if intercepting and mapped.  Uses final direction
+    // (total displacement) with fallback to the initial intercept direction.
+    if (this.intercepting) {
+      const dx = finalCentroid.x - this.panStartCentroid.x;
+      const dy = finalCentroid.y - this.panStartCentroid.y;
+      const dir = dominantDirection(dx, dy) ?? this.interceptDirection;
+      if (dir) {
+        const gestureId = `swipe-1-${dir}` as GestureId;
+        if (this.mapping[gestureId]) {
+          this.callbacks.onGesture(gestureId, finalCentroid);
         }
       }
       this.intercepting = false;
       this.interceptDirection = undefined;
     }
+
+    // Flick: velocity-based, fires after pan end.  In the Hammer-based code,
+    // the Swipe recognizer ran after the Pan recognizer in the same input cycle,
+    // so intercepting was already reset — flick could fire independently.
+    // We preserve this: pan resets intercepting above, then flick checks below.
+    const dt = now - this.gestureStartTime;
+    if (dt > 0) {
+      const dx = finalCentroid.x - this.panStartCentroid.x;
+      const dy = finalCentroid.y - this.panStartCentroid.y;
+      const speed = Math.max(Math.abs(dx / dt), Math.abs(dy / dt));
+      if (speed >= FLICK_VELOCITY) {
+        const dir = dominantDirection(dx, dy);
+        if (dir) {
+          const gestureId = `flick-1-${dir}` as GestureId;
+          if (this.mapping[gestureId]) {
+            this.callbacks.onGesture(gestureId, finalCentroid);
+          }
+        }
+      }
+    }
   }
 
-  private handlePanCancel(): void {
+  // --- Tap detection ---
+
+  private handlePotentialTap(ptr: PointerState, now: number): void {
+    const holdTime = now - ptr.startTime;
+    const movement = distance(ptr.startX, ptr.startY, ptr.x, ptr.y);
+
+    if (holdTime > TAP_MAX_TIME || movement > TAP_MAX_MOVE) {
+      // Too long or too much movement — not a tap
+      this.tapCount = 0;
+      this.phase = 'idle';
+      return;
+    }
+
+    // Multi-tap: check position proximity to previous tap
+    if (this.tapCount > 0) {
+      const tapDist = distance(this.lastTapX, this.lastTapY, ptr.x, ptr.y);
+      if (tapDist > TAP_POS_THRESHOLD) {
+        // Too far — resolve existing taps and start a fresh sequence
+        this.resolveTaps();
+      }
+    }
+
+    this.tapCount++;
+    this.lastTapX = ptr.x;
+    this.lastTapY = ptr.y;
+
+    // Wait for additional taps.  The timer naturally handles triple-tap
+    // priority: 3 taps within the window resolve as triple-tap, not
+    // double-tap.  This replaces Hammer's requireFailure(tripletap).
+    this.clearTapTimer();
+    this.tapTimer = setTimeout(() => this.resolveTaps(), TAP_INTERVAL);
+    this.phase = 'tap-wait';
+  }
+
+  private resolveTaps(): void {
+    const count = this.tapCount;
+    this.tapCount = 0;
+    this.clearTapTimer();
+    this.phase = 'idle';
+
+    const center = { x: this.lastTapX, y: this.lastTapY };
+    if (count >= 3 && this.mapping['triple-tap']) {
+      this.callbacks.onGesture('triple-tap', center);
+    } else if (count >= 2 && this.mapping['double-tap']) {
+      this.callbacks.onGesture('double-tap', center);
+    }
+  }
+
+  // --- Long press ---
+
+  private startLongPress(x: number, y: number): void {
+    this.clearLongPress();
+    const first = this.pointers.values().next().value;
+    if (!first) return;
+    this.longPressPointer = first;
+    this.longPressTimer = setTimeout(() => {
+      this.didLongPress = true;
+      this.callbacks.onLongPressDefault(x, y);
+      this.longPressTimer = undefined;
+      this.longPressPointer = undefined;
+    }, LONG_PRESS_TIME);
+  }
+
+  private clearLongPress(): void {
+    if (this.longPressTimer !== undefined) {
+      clearTimeout(this.longPressTimer);
+      this.longPressTimer = undefined;
+    }
+    this.longPressPointer = undefined;
+  }
+
+  // --- 2-finger state ---
+
+  private initTwoFingerState(): void {
+    const pair = getTwoPointers(this.pointers);
+    if (!pair) return;
+    const [a, b] = pair;
+    this.initialPinchDist = distance(a.x, a.y, b.x, b.y);
+    this.initialRotateAngle = angle(a, b);
+    this.currentScale = 1;
+    this.currentRotation = 0;
+  }
+
+  // --- Reset ---
+
+  private resetToIdle(): void {
+    this.phase = 'idle';
     this.intercepting = false;
     this.interceptDirection = undefined;
-    this.handleSwipeCancel(1);
+    this.swipeDidContinuousScroll = false;
+    this.panFingerCount = 0;
+    this.initialPinchDist = 0;
+    this.currentScale = 1;
+    this.currentRotation = 0;
+    this.clearLongPress();
+    this.pointers.clear();
   }
 
-  private handleFlick(e: HammerInput): void {
-    // Don't fire flick if pan1 already intercepted this gesture as a swipe-1
-    if (this.intercepting) return;
-
-    const dir = hammerDirectionToGesture(e.direction);
-    if (!dir) return;
-    const gestureId = `flick-1-${dir}` as GestureId;
-    if (this.mapping[gestureId]) {
-      this.callbacks.onGesture(gestureId, e.center);
+  private clearTapTimer(): void {
+    if (this.tapTimer !== undefined) {
+      clearTimeout(this.tapTimer);
+      this.tapTimer = undefined;
     }
   }
 
-  private handleDoubleTap(e: HammerInput): void {
-    if (this.mapping['double-tap']) {
-      this.callbacks.onGesture('double-tap', e.center);
-    }
-  }
+  // --- Touch gatekeeper helpers (unchanged — no pointer-event dependency) ---
 
-  private handleTripleTap(e: HammerInput): void {
-    if (this.mapping['triple-tap']) {
-      this.callbacks.onGesture('triple-tap', e.center);
-    }
-  }
-
-  private handleLongPress(e: HammerInput): void {
-    this.didLongPress = true;
-    this.callbacks.onLongPressDefault(e.center.x, e.center.y);
-  }
-
-  private handlePinchEnd(e: HammerInput): void {
-    // scale < 1 = pinch in (fingers moved together), scale > 1 = pinch out (spread)
-    const gestureId: GestureId = e.scale < 1 ? 'pinch-in' : 'pinch-out';
-    if (this.mapping[gestureId]) {
-      this.callbacks.onGesture(gestureId, e.center);
-    }
-  }
-
-  private handleRotateEnd(e: HammerInput): void {
-    // rotation > 0 = clockwise, rotation < 0 = counter-clockwise
-    const gestureId: GestureId = e.rotation > 0 ? 'rotate-cw' : 'rotate-ccw';
-    if (this.mapping[gestureId]) {
-      this.callbacks.onGesture(gestureId, e.center);
-    }
-  }
-
-  // --- Touch gatekeeper helpers ---
-
-  /** Returns true if touch events should be blocked for the given finger count. */
   private shouldBlockTouch(touchCount: number): boolean {
     if (touchCount === 1) {
       return !!(this.mapping['swipe-1-left'] || this.mapping['swipe-1-right'] ||
@@ -344,7 +610,6 @@ export class GestureDetector {
               this.mapping['swipe-2-up'] || this.mapping['swipe-2-down']);
   }
 
-  /** Set touch-action on xterm's viewport to prevent native touch scroll. */
   private applyViewportTouchAction(): void {
     if (!this.viewport) return;
     const v = this.hasVerticalGesture();
