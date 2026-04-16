@@ -630,6 +630,23 @@ export class TerminalCore {
     requestAnimationFrame(() => this.selectionOverlay?.show());
   }
 
+  /** Sample first N and last N buffer lines for diagnostic logging. */
+  private sampleBufferLines(n: number): { first: string[]; last: string[] } {
+    const buf = this.terminal.buffer.active;
+    const total = buf.length;
+    const first: string[] = [];
+    const last: string[] = [];
+    for (let i = 0; i < Math.min(n, total); i++) {
+      const line = buf.getLine(i);
+      first.push(line ? line.translateToString(true).slice(0, 40) : '');
+    }
+    for (let i = Math.max(0, total - n); i < total; i++) {
+      const line = buf.getLine(i);
+      last.push(line ? line.translateToString(true).slice(0, 40) : '');
+    }
+    return { first, last };
+  }
+
   private selectVisibleViewportLines() {
     const terminal = this.terminal;
     if (!terminal) return;
@@ -1141,29 +1158,69 @@ export class TerminalCore {
 
     switch (cmdChar) {
       case Command.STATE_FULL: {
-        const distFromBottom = this.terminal.buffer.active.baseY - this.terminal.buffer.active.viewportY;
+        // Snapshot state BEFORE any pending WriteBuffer entries drain.
+        // If these differ from the post-drain values, pending writes were
+        // in-flight — a likely cause of stale distFromBottom.
+        const preBaseY = this.terminal.buffer.active.baseY;
+        const preViewportY = this.terminal.buffer.active.viewportY;
+        const preLength = this.terminal.buffer.active.length;
         const bufferTypeBefore = this.terminal.buffer.active.type;
-        // Exit alternate buffer (no-op if already normal) before clearing scrollback,
-        // so \x1b[3J operates on the normal buffer where scrollback lives.
-        // The payload re-enters alternate mode if needed via \x1b[?1049h.
-        const exitAlt = new Uint8Array([0x1b, 0x5b, 0x3f, 0x31, 0x30, 0x34, 0x39, 0x6c]); // \x1b[?1049l
-        const clearScrollback = new Uint8Array([0x1b, 0x5b, 0x33, 0x4a]); // \x1b[3J
-        const combined = new Uint8Array(exitAlt.length + clearScrollback.length + payload.length);
-        combined.set(exitAlt);
-        combined.set(clearScrollback, exitAlt.length);
-        combined.set(payload, exitAlt.length + clearScrollback.length);
-        this.terminal.write(combined, () => {
-          const target = this.terminal.buffer.active.baseY - distFromBottom;
-          this.terminal.scrollToLine(Math.max(0, target));
-          this.logger.debug('state-full-applied', {
-            baseY: this.terminal.buffer.active.baseY,
-            viewportY: this.terminal.buffer.active.viewportY,
-            bufferLength: this.terminal.buffer.active.length,
-            bufferType: this.terminal.buffer.active.type,
-            bufferTypeBefore,
-            payloadSize: payload.length,
-            scrollbackOption: this.terminal.options.scrollback,
-            rows: this.terminal.rows,
+
+        // Flush pending WriteBuffer entries so distFromBottom reflects the
+        // fully-processed state, not a stale intermediate.  When the tab is
+        // hidden the browser throttles setTimeout, causing STATE_UPDATE
+        // writes to pile up unprocessed.
+        this.terminal.write('', () => {
+          const drainedBaseY = this.terminal.buffer.active.baseY;
+          const drainedViewportY = this.terminal.buffer.active.viewportY;
+          const drainedLength = this.terminal.buffer.active.length;
+          const hadPendingWrites = drainedBaseY !== preBaseY
+            || drainedViewportY !== preViewportY
+            || drainedLength !== preLength;
+          const distFromBottom = drainedBaseY - drainedViewportY;
+
+          // Sample first and last 3 lines of the pre-clear buffer for post-hoc
+          // corruption diagnosis (text only, truncated to 40 chars).
+          const preLines = this.sampleBufferLines(3);
+
+          // Exit alternate buffer (no-op if already normal) before clearing scrollback,
+          // so \x1b[3J operates on the normal buffer where scrollback lives.
+          // The payload re-enters alternate mode if needed via \x1b[?1049h.
+          const exitAlt = new Uint8Array([0x1b, 0x5b, 0x3f, 0x31, 0x30, 0x34, 0x39, 0x6c]); // \x1b[?1049l
+          const clearScrollback = new Uint8Array([0x1b, 0x5b, 0x33, 0x4a]); // \x1b[3J
+          const combined = new Uint8Array(exitAlt.length + clearScrollback.length + payload.length);
+          combined.set(exitAlt);
+          combined.set(clearScrollback, exitAlt.length);
+          combined.set(payload, exitAlt.length + clearScrollback.length);
+          this.terminal.write(combined, () => {
+            const postBaseY = this.terminal.buffer.active.baseY;
+            const target = postBaseY - distFromBottom;
+            this.terminal.scrollToLine(Math.max(0, target));
+
+            // Sample first and last 3 lines of the post-write buffer.
+            const postLines = this.sampleBufferLines(3);
+
+            this.logger.debug('state-full-applied', {
+              preBaseY,
+              preViewportY,
+              preLength,
+              drainedBaseY,
+              drainedViewportY,
+              drainedLength,
+              hadPendingWrites,
+              distFromBottom,
+              postBaseY,
+              target,
+              viewportY: this.terminal.buffer.active.viewportY,
+              bufferLength: this.terminal.buffer.active.length,
+              bufferType: this.terminal.buffer.active.type,
+              bufferTypeBefore,
+              payloadSize: payload.length,
+              scrollbackOption: this.terminal.options.scrollback,
+              rows: this.terminal.rows,
+              preLines,
+              postLines,
+            });
           });
         });
         break;
