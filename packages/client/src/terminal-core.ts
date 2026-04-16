@@ -175,6 +175,7 @@ export class TerminalCore {
     this.logger = new ClientLogger({
       sendToServer: (payload) => { try { this.socket?.send(payload); } catch { /* socket may be closing */ } },
     });
+    this.terminalDisposables.push({ dispose: () => this.logger.dispose() });
   }
 
   dispose() {

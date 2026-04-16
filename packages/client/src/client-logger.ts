@@ -1,5 +1,5 @@
 const CMD_CLIENT_LOG = 0x39;
-const FLUSH_INTERVAL_MS = 200;
+const FLUSH_INTERVAL_MS = 5000;
 const STORAGE_KEY = 'mobitty-log-buffer';
 const MAX_BUFFER_SIZE = 200;
 
@@ -27,10 +27,27 @@ export class ClientLogger {
   private flushIntervalMs: number;
   private encoder = new TextEncoder();
   private sendToServer: (payload: Uint8Array) => void;
+  private visibilityCleanup: (() => void) | null = null;
 
   constructor(options: ClientLoggerOptions) {
     this.sendToServer = options.sendToServer;
     this.flushIntervalMs = options.flushIntervalMs ?? FLUSH_INTERVAL_MS;
+
+    const onVisibilityChange = () => {
+      if (document.hidden) {
+        this.cancelFlush();
+      } else if (this.connected && this.buffer.length > 0) {
+        this.flush();
+      }
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+    this.visibilityCleanup = () => document.removeEventListener('visibilitychange', onVisibilityChange);
+  }
+
+  dispose(): void {
+    this.cancelFlush();
+    this.visibilityCleanup?.();
+    this.visibilityCleanup = null;
   }
 
   /** Mark the connection as established. Restores sessionStorage buffer and starts flushing. */
@@ -86,6 +103,7 @@ export class ClientLogger {
   }
 
   private scheduleFlush(): void {
+    if (document.hidden) return;
     if (this.flushTimer !== null) return;
     this.flushTimer = setTimeout(() => {
       this.flushTimer = null;
