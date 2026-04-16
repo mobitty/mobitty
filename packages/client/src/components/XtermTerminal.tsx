@@ -35,7 +35,12 @@ export const XtermTerminal = forwardRef<XtermTerminalHandle, XtermTerminalProps>
       const core = new TerminalCore(options);
       coreRef.current = core;
       core.open(container);
-      core.connect();
+      // Only auto-connect if there's a session to resume or a shell to create with.
+      // When neither is set, the user needs to pick from the session/shell panel first;
+      // switchSession() will initiate the connection after their selection.
+      if (options.sessionId || options.shellName) {
+        core.connect();
+      }
 
       return () => {
         core.destroy();
