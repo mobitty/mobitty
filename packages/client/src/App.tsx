@@ -1,12 +1,9 @@
-import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
 import type { ITerminalOptions, ITheme } from '@xterm/xterm';
 import { XtermTerminal, type XtermTerminalHandle } from '@/components/XtermTerminal';
 import { SoftkeyBar, type SoftkeyBarHandle } from '@/components/SoftkeyBar';
 import { ContainerPanel } from '@/components/ContainerPanel';
 import { BatchInputPanel } from '@/components/BatchInputPanel';
-import { SettingsDialog } from '@/components/SettingsDialog';
-import { ImagePasteErrorDialog } from '@/components/ImagePasteErrorDialog';
-import { ConnectionClosedDialog } from '@/components/ConnectionClosedDialog';
 import { SessionPanel } from '@/components/SessionPanel';
 import { SystemMeterPanel } from '@/components/SystemMeterPanel';
 import { SystemMetrics } from '@/system-metrics';
@@ -29,6 +26,10 @@ import { ShellSelectionPanel } from '@/components/ShellSelectionPanel';
 import { RemoteEditorPanel } from '@/components/RemoteEditorPanel';
 import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
+
+const SettingsDialog = lazy(() => import('@/components/SettingsDialog').then(m => ({ default: m.SettingsDialog })));
+const ConnectionClosedDialog = lazy(() => import('@/components/ConnectionClosedDialog').then(m => ({ default: m.ConnectionClosedDialog })));
+const ImagePasteErrorDialog = lazy(() => import('@/components/ImagePasteErrorDialog').then(m => ({ default: m.ImagePasteErrorDialog })));
 
 const defaultTheme: ITheme = {
   foreground: '#d2d2d2',
@@ -580,23 +581,35 @@ export function App() {
         onClose={() => setMeterOpen(false)}
       />
 
-      <SettingsDialog
-        open={settingsOpen}
-        onOpenChange={setSettingsOpen}
-        currentProfile={profile}
-        isMobile={isMobile}
-        onApply={handleApplyProfile}
-      />
+      {settingsOpen && (
+        <Suspense fallback={null}>
+          <SettingsDialog
+            open={settingsOpen}
+            onOpenChange={setSettingsOpen}
+            currentProfile={profile}
+            isMobile={isMobile}
+            onApply={handleApplyProfile}
+          />
+        </Suspense>
+      )}
 
-      <ImagePasteErrorDialog
-        error={imagePasteError}
-        onClose={() => setImagePasteError(null)}
-      />
+      {imagePasteError !== null && (
+        <Suspense fallback={null}>
+          <ImagePasteErrorDialog
+            error={imagePasteError}
+            onClose={() => setImagePasteError(null)}
+          />
+        </Suspense>
+      )}
 
-      <ConnectionClosedDialog
-        reason={connectionClosedReason}
-        onReconnect={handleReconnect}
-      />
+      {connectionClosedReason !== null && (
+        <Suspense fallback={null}>
+          <ConnectionClosedDialog
+            reason={connectionClosedReason}
+            onReconnect={handleReconnect}
+          />
+        </Suspense>
+      )}
 
       {/* Notification toasts */}
       <Toaster />
