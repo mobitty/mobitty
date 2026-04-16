@@ -33,7 +33,10 @@ export function SystemMeterPanel({ open, metrics, onClose }: SystemMeterPanelPro
   useEffect(() => {
     if (!open) return;
     setSnap(metrics.getSnapshot());
-    const id = setInterval(() => setSnap(metrics.getSnapshot()), 1000);
+    const id = setInterval(() => {
+      if (document.hidden) return;
+      setSnap(metrics.getSnapshot());
+    }, 1000);
     return () => clearInterval(id);
   }, [open, metrics]);
 
