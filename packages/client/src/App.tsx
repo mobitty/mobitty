@@ -168,12 +168,6 @@ export function App() {
     });
   }, [pendingShellSelection, initialCheckComplete]);
 
-  // Cleanup metrics on unmount
-  useEffect(() => {
-    const m = metricsRef.current;
-    return () => m.dispose();
-  }, []);
-
   // Load profile on mount (optimistic cache → background reconciliation)
   useEffect(() => {
     const device = isMobile ? 'mobile' : 'desktop';

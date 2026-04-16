@@ -1,10 +1,6 @@
 // Collects and exposes system performance metrics: RTT, FPS, data transfer.
 // Plain TypeScript — no React dependency.
-
-interface TimestampedSample {
-  ts: number;
-  value: number;
-}
+// See workspace/docs/design-system-metrics.md for architecture.
 
 interface WindowedStats {
   min1: number;
@@ -19,64 +15,82 @@ export interface SystemMetricsSnapshot {
   dataOut: WindowedStats;
 }
 
-const WINDOW_1M = 60_000;
-const WINDOW_5M = 300_000;
-const WINDOW_10M = 600_000;
-const PRUNE_INTERVAL = 30_000;
+const BUCKET_MS = 10_000; // 10 seconds per bucket
+const NUM_BUCKETS = 60; // 60 buckets = 10-minute window
+const BUCKETS_1M = 6;
+const BUCKETS_5M = 30;
+const BUCKETS_10M = 60;
 
-function windowedAvg(samples: TimestampedSample[], windowMs: number, now: number): number {
-  const cutoff = now - windowMs;
-  let sum = 0;
-  let count = 0;
-  for (let i = samples.length - 1; i >= 0; i--) {
-    const s = samples[i]!;
-    if (s.ts < cutoff) break;
-    sum += s.value;
-    count++;
-  }
-  return count > 0 ? Math.round(sum / count) : 0;
+interface Bucket {
+  epoch: number;
+  sum: number;
+  count: number;
 }
 
-function windowedSum(samples: TimestampedSample[], windowMs: number, now: number): number {
-  const cutoff = now - windowMs;
-  let sum = 0;
-  for (let i = samples.length - 1; i >= 0; i--) {
-    const s = samples[i]!;
-    if (s.ts < cutoff) break;
-    sum += s.value;
-  }
-  return sum;
+function makeBuckets(): Bucket[] {
+  return Array.from({ length: NUM_BUCKETS }, () => ({ epoch: -1, sum: 0, count: 0 }));
 }
 
-function pruneOld(samples: TimestampedSample[], maxAge: number, now: number): void {
-  const cutoff = now - maxAge;
-  let i = 0;
-  while (i < samples.length && samples[i]!.ts < cutoff) i++;
-  if (i > 0) samples.splice(0, i);
+class BucketedTimeSeries {
+  private readonly buckets = makeBuckets();
+
+  record(value: number): void {
+    const epoch = Math.floor(Date.now() / BUCKET_MS);
+    const idx = epoch % NUM_BUCKETS;
+    const b = this.buckets[idx]!;
+    if (b.epoch === epoch) {
+      b.sum += value;
+      b.count++;
+    } else {
+      b.epoch = epoch;
+      b.sum = value;
+      b.count = 1;
+    }
+  }
+
+  sum(windowBuckets: number): number {
+    const currentEpoch = Math.floor(Date.now() / BUCKET_MS);
+    let total = 0;
+    for (let i = 0; i < windowBuckets; i++) {
+      const e = currentEpoch - i;
+      const b = this.buckets[e % NUM_BUCKETS]!;
+      if (b.epoch === e) total += b.sum;
+    }
+    return total;
+  }
+
+  avg(windowBuckets: number): number {
+    const currentEpoch = Math.floor(Date.now() / BUCKET_MS);
+    let totalSum = 0;
+    let totalCount = 0;
+    for (let i = 0; i < windowBuckets; i++) {
+      const e = currentEpoch - i;
+      const b = this.buckets[e % NUM_BUCKETS]!;
+      if (b.epoch === e) {
+        totalSum += b.sum;
+        totalCount += b.count;
+      }
+    }
+    return totalCount > 0 ? Math.round(totalSum / totalCount) : 0;
+  }
 }
 
 export class SystemMetrics {
-  private rttSamples: TimestampedSample[] = [];
-  private bytesInSamples: TimestampedSample[] = [];
-  private bytesOutSamples: TimestampedSample[] = [];
-
+  private readonly rtt = new BucketedTimeSeries();
+  private readonly bytesIn = new BucketedTimeSeries();
+  private readonly bytesOut = new BucketedTimeSeries();
   private targetFps = 0;
-  private pruneTimer: ReturnType<typeof setInterval>;
-
-  constructor() {
-    this.pruneTimer = setInterval(() => this.prune(), PRUNE_INTERVAL);
-  }
 
   recordRtt(ms: number): void {
-    this.rttSamples.push({ ts: Date.now(), value: ms });
+    this.rtt.record(ms);
   }
 
   recordBytesIn(n: number): void {
-    this.bytesInSamples.push({ ts: Date.now(), value: n });
+    this.bytesIn.record(n);
   }
 
   recordBytesOut(n: number): void {
-    this.bytesOutSamples.push({ ts: Date.now(), value: n });
+    this.bytesOut.record(n);
   }
 
   setTargetFps(fps: number): void {
@@ -84,35 +98,23 @@ export class SystemMetrics {
   }
 
   getSnapshot(): SystemMetricsSnapshot {
-    const now = Date.now();
     return {
       rtt: {
-        min1: windowedAvg(this.rttSamples, WINDOW_1M, now),
-        min5: windowedAvg(this.rttSamples, WINDOW_5M, now),
-        min10: windowedAvg(this.rttSamples, WINDOW_10M, now),
+        min1: this.rtt.avg(BUCKETS_1M),
+        min5: this.rtt.avg(BUCKETS_5M),
+        min10: this.rtt.avg(BUCKETS_10M),
       },
       fps: this.targetFps,
       dataIn: {
-        min1: windowedSum(this.bytesInSamples, WINDOW_1M, now),
-        min5: windowedSum(this.bytesInSamples, WINDOW_5M, now),
-        min10: windowedSum(this.bytesInSamples, WINDOW_10M, now),
+        min1: this.bytesIn.sum(BUCKETS_1M),
+        min5: this.bytesIn.sum(BUCKETS_5M),
+        min10: this.bytesIn.sum(BUCKETS_10M),
       },
       dataOut: {
-        min1: windowedSum(this.bytesOutSamples, WINDOW_1M, now),
-        min5: windowedSum(this.bytesOutSamples, WINDOW_5M, now),
-        min10: windowedSum(this.bytesOutSamples, WINDOW_10M, now),
+        min1: this.bytesOut.sum(BUCKETS_1M),
+        min5: this.bytesOut.sum(BUCKETS_5M),
+        min10: this.bytesOut.sum(BUCKETS_10M),
       },
     };
-  }
-
-  private prune(): void {
-    const now = Date.now();
-    pruneOld(this.rttSamples, WINDOW_10M, now);
-    pruneOld(this.bytesInSamples, WINDOW_10M, now);
-    pruneOld(this.bytesOutSamples, WINDOW_10M, now);
-  }
-
-  dispose(): void {
-    clearInterval(this.pruneTimer);
   }
 }
