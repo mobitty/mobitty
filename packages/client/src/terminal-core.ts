@@ -47,6 +47,11 @@ const LIVENESS_TIMEOUT_MS = 20_000;
 /** How often to run the liveness check. */
 const LIVENESS_CHECK_MS = 5_000;
 
+/** Delay before disconnecting the WebSocket when the tab is hidden.
+ *  Eliminates all network activity (server pings, sync frames) for
+ *  backgrounded tabs.  Reconnects on visibilitychange → visible. */
+const IDLE_DISCONNECT_DELAY_MS = 30_000;
+
 const Command = {
   SET_WINDOW_TITLE: '1',
   SET_PREFERENCES: '2',
@@ -167,6 +172,8 @@ export class TerminalCore {
   private themeBackground?: string;
   private preferredRendererType: RendererType = 'dom';
   private rendererTeardownTimer?: ReturnType<typeof setTimeout>;
+  private idleDisconnectTimer?: ReturnType<typeof setTimeout>;
+  private idleDisconnected = false;
   private pendingConnectRaf?: number;
   private lastBlurWasInternal = false;
 
@@ -323,6 +330,7 @@ export class TerminalCore {
     this.registerTerminal(terminal.onSelectionChange(() => this.onSelectionChange()));
     this.registerWakeDetection();
     this.registerLivenessCheck();
+    this.registerIdleDisconnect();
   }
 
   applyProfile(profile: Profile, themeColors?: ProfileTheme): void {
@@ -391,6 +399,7 @@ export class TerminalCore {
     this.logger.info('manual reconnect');
     this.doReconnect = true;
     this.reconnectDelay = 0;
+    this.idleDisconnected = false;
     this.connect();
   }
 
@@ -885,6 +894,7 @@ export class TerminalCore {
 
   private registerWakeDetection() {
     const check = () => {
+      if (this.idleDisconnected) return;
       if (this.socket?.readyState !== WebSocket.OPEN && this.doReconnect) {
         this.logger.info('stale connection, reconnecting');
         this.socket?.close();
@@ -900,6 +910,7 @@ export class TerminalCore {
    *  received.  Terminal-scoped so it survives reconnections. */
   private registerLivenessCheck() {
     const timer = setInterval(() => {
+      if (document.hidden) return;
       if (this.socket?.readyState !== WebSocket.OPEN) return;
       if (this.lastMessageAt === 0) return;
       const elapsed = Date.now() - this.lastMessageAt;
@@ -909,6 +920,39 @@ export class TerminalCore {
       }
     }, LIVENESS_CHECK_MS);
     this.registerTerminal({ dispose: () => clearInterval(timer) });
+  }
+
+  /** Disconnect the WebSocket after a grace period when the tab is hidden.
+   *  Eliminates all network activity for backgrounded tabs.
+   *  Reconnects immediately on visibilitychange → visible.
+   *  Terminal-scoped so it survives WebSocket reconnections. */
+  private registerIdleDisconnect() {
+    this.registerTerminal(addEventListener(document, 'visibilitychange', () => {
+      if (document.hidden) {
+        if (this.closeOnDisconnect || !this.autoReconnect) return;
+        if (this.idleDisconnected) return;
+        if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+        clearTimeout(this.idleDisconnectTimer);
+        this.idleDisconnectTimer = setTimeout(() => {
+          this.idleDisconnectTimer = undefined;
+          if (!document.hidden) return;
+          if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
+          this.idleDisconnected = true;
+          this.logger.info('idle disconnect');
+          this.socket.close();
+        }, IDLE_DISCONNECT_DELAY_MS);
+      } else {
+        clearTimeout(this.idleDisconnectTimer);
+        this.idleDisconnectTimer = undefined;
+        if (this.idleDisconnected) {
+          this.idleDisconnected = false;
+          this.reconnectDelay = 0;
+          this.logger.info('wake from idle, reconnecting');
+          this.connect();
+        }
+      }
+    }));
+    this.registerTerminal({ dispose: () => { clearTimeout(this.idleDisconnectTimer); this.idleDisconnectTimer = undefined; } });
   }
 
   /** Tear down GPU renderer after a debounce when the tab is hidden,
@@ -972,6 +1016,10 @@ export class TerminalCore {
       if (this.currentSessionId) {
         this.callbacks.onSessionDied?.(this.currentSessionId);
       }
+      return;
+    }
+
+    if (this.idleDisconnected) {
       return;
     }
 
