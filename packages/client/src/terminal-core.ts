@@ -305,7 +305,10 @@ export class TerminalCore {
     this.syncPageBackground();
     fitAddon.fit();
 
-    const observer = new ResizeObserver(() => this.fitAddon.fit());
+    const observer = new ResizeObserver(() => {
+      if (document.hidden) return;
+      this.fitAddon.fit();
+    });
     observer.observe(parent);
     this.registerTerminal({ dispose: () => observer.disconnect() });
     this.registerRendererVisibility();
@@ -924,9 +927,9 @@ export class TerminalCore {
         clearTimeout(this.rendererTeardownTimer);
         this.rendererTeardownTimer = undefined;
         this.applyRendererType(this.preferredRendererType);
-        // Re-fit in case the renderer change altered cell dimensions
-        // (DOM vs WebGL subpixel rounding). The ResizeObserver won't fire
-        // because the container size didn't change — only cells did.
+        // Re-fit: covers renderer cell-dimension changes (DOM vs WebGL
+        // subpixel rounding) and any container resize that was deferred
+        // by the ResizeObserver hidden guard.
         this.fitAddon.fit();
       }
     }));
