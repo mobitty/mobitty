@@ -137,10 +137,10 @@ html, body {
    touch-action is not inherited, so .xterm { touch-action: none } alone doesn't
    reach the actual touch targets (.xterm-screen, .xterm-link-layer, canvas).
    Without this, the browser fires pointercancel and stops delivering pointermove
-   events that Hammer.js (PointerEventInput) needs for gesture recognition.
-   xterm 6.0 uses SmoothScrollableElement for scroll (not native DOM scroll),
-   so this doesn't break scrolling — our capture-phase gatekeeper in
-   gesture-detector.ts controls which touch events reach xterm. */
+   events that the pointer-based gesture-detector needs for gesture recognition.
+   xterm.js 6.0's SmoothScrollableElement only listens to wheel events — it no
+   longer has the JS-driven touchmove scroll that 5.x had, so touch scroll is
+   synthesized by gesture-detector.ts forwarding 1-finger pan as WheelEvents. */
 .xterm * {
   touch-action: none;
 }
