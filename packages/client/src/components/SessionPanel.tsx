@@ -34,6 +34,7 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
   const focusedRef = useRef<HTMLDivElement>(null);
   const [showShellPicker, setShowShellPicker] = useState(false);
   const [shells, setShells] = useState<ShellInfo[]>([]);
+  const [shellsLoading, setShellsLoading] = useState(false);
   const [shellFocusedIndex, setShellFocusedIndex] = useState(0);
   const shellFocusedRef = useRef<HTMLDivElement>(null);
   const [showHelp, setShowHelp] = useState(false);
@@ -68,6 +69,8 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
       const idx = list.findIndex(s => s.sessionId === currentSessionId);
       setFocusedIndex(idx >= 0 ? idx : 0);
     });
+    // Prefetch shells so "New Session" is instant on slow networks.
+    fetchShells().then(setShells).catch(() => {});
   }, [open, refresh, currentSessionId]);
 
   // Dismiss active rename when exiting edit mode
@@ -231,13 +234,21 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
   };
 
   const handleCreate = async () => {
-    const list = await fetchShells();
+    let list = shells;
+    if (list.length === 0) {
+      setShellsLoading(true);
+      try {
+        list = await fetchShells();
+        setShells(list);
+      } finally {
+        setShellsLoading(false);
+      }
+    }
     if (list.length <= 1) {
       onCreateSession(list[0]?.name);
       onClose();
       return;
     }
-    setShells(list);
     setShellFocusedIndex(0);
     setShowShellPicker(true);
   };
@@ -304,8 +315,8 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
         ) : (
           <>
         <div className="flex gap-2 items-center">
-          <Button variant="outline" size="sm" onClick={handleCreate}>
-            New Session
+          <Button variant="outline" size="sm" onClick={handleCreate} disabled={shellsLoading}>
+            {shellsLoading ? 'Loading…' : 'New Session'}
           </Button>
           <Button variant="outline" size="sm" onClick={() => { onClose(); onSettingsOpen(); }}>
             &#9881; Settings
