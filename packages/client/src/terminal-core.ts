@@ -1502,8 +1502,13 @@ export class TerminalCore {
   }
 
   private getRowHeight(): number {
-    const row = this.terminal?.element?.querySelector<HTMLElement>('.xterm-rows > *');
-    return row?.offsetHeight ?? 0;
+    // .xterm-screen exists in all renderer modes (DOM, WebGL); .xterm-rows only
+    // exists under the DOM renderer, so querying it would return null on WebGL
+    // (the default) and break pan scroll.
+    const screen = this.terminal?.element?.querySelector<HTMLElement>('.xterm-screen');
+    const rows = this.terminal?.rows;
+    if (!screen || !rows) return 0;
+    return screen.clientHeight / rows;
   }
 
   /** Dispatch a raw WheelEvent with the given deltaY (pixels). */
