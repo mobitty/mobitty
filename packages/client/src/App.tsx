@@ -116,6 +116,23 @@ export function App() {
     }
   }, [currentSessionId]);
 
+  // Preload lazy dialog chunks once the terminal handshake lands so that the
+  // first open of Settings / Connection-Closed / Image-Paste-Error does not
+  // stall on a chunk download. See workspace/docs/design-prefetch.md.
+  useEffect(() => {
+    if (!currentSessionId) return;
+    const run = () => {
+      void import('@/components/SettingsDialog');
+      void import('@/components/ConnectionClosedDialog');
+      void import('@/components/ImagePasteErrorDialog');
+    };
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(run);
+    } else {
+      setTimeout(run, 500);
+    }
+  }, [currentSessionId]);
+
   // On-demand diagnostic snapshot when the meter panel opens.
   useEffect(() => {
     if (meterOpen) terminalRef.current?.core?.logDiagnostics('meter-open');
