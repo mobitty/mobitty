@@ -89,6 +89,16 @@ export interface ImagePasteErrorInfo {
 
 export type ConnectionClosedReason = 'replaced' | 'closed';
 
+export interface TerminalDiagnostics {
+  renderer: 'webgl' | 'dom';
+  rows: number;
+  cols: number;
+  baseY: number;
+  viewportY: number;
+  bufferLength: number;
+  scrollback: number;
+}
+
 export interface TerminalCoreCallbacks {
   onTitleChange?: (title: string) => void;
   onSessionInfo?: (info: SessionInfo) => void;
@@ -248,6 +258,23 @@ export class TerminalCore {
   setRemoteEditor(enabled: boolean) {
     this.remoteEditor = enabled;
     this.sendUpdateSettings();
+  }
+
+  getDiagnostics(): TerminalDiagnostics {
+    const buf = this.terminal.buffer.active;
+    return {
+      renderer: this.webglAddon ? 'webgl' : 'dom',
+      rows: this.terminal.rows,
+      cols: this.terminal.cols,
+      baseY: buf.baseY,
+      viewportY: buf.viewportY,
+      bufferLength: buf.length,
+      scrollback: this.terminal.options.scrollback ?? this.scrollback,
+    };
+  }
+
+  logDiagnostics(reason: string) {
+    this.logger.debug('term-diag', { reason, ...this.getDiagnostics() });
   }
 
   sendEditorDone(content: string, cancelled: boolean) {
@@ -1311,6 +1338,7 @@ export class TerminalCore {
 
   private applyRendererType(value: RendererType) {
     const { terminal } = this;
+    const before: RendererType = this.webglAddon ? 'webgl' : 'dom';
     const disposeWebgl = () => { try { this.webglAddon?.dispose(); } catch { /* */ } this.webglAddon = undefined; };
 
     switch (value) {
@@ -1330,6 +1358,8 @@ export class TerminalCore {
         disposeWebgl();
         break;
     }
+    const after: RendererType = this.webglAddon ? 'webgl' : 'dom';
+    if (before !== after) this.logger.info('renderer-change', { from: before, to: after, requested: value });
     this.logger.debug('renderer-applied', this.getRenderDiagnostics(value));
   }
 

@@ -116,6 +116,11 @@ export function App() {
     }
   }, [currentSessionId]);
 
+  // On-demand diagnostic snapshot when the meter panel opens.
+  useEffect(() => {
+    if (meterOpen) terminalRef.current?.core?.logDiagnostics('meter-open');
+  }, [meterOpen]);
+
   // Sync html/body height to visual viewport so the page never exceeds the
   // visible area.  Without this, the layout viewport stays full-screen when the
   // mobile keyboard opens, creating a scrollable region that blocks swipe-up
@@ -579,6 +584,7 @@ export function App() {
         open={meterOpen}
         metrics={metricsRef.current}
         onClose={() => setMeterOpen(false)}
+        getTerminalDiagnostics={() => terminalRef.current?.core?.getDiagnostics()}
       />
 
       {settingsOpen && (

@@ -2,11 +2,13 @@ import { useState, useEffect, useCallback } from 'react';
 import { X } from 'lucide-react';
 import { useDrag } from '@/hooks/use-drag';
 import type { SystemMetrics, SystemMetricsSnapshot } from '@/system-metrics';
+import type { TerminalDiagnostics } from '@/terminal-core';
 
 interface SystemMeterPanelProps {
   open: boolean;
   metrics: SystemMetrics;
   onClose: () => void;
+  getTerminalDiagnostics?: () => TerminalDiagnostics | undefined;
 }
 
 function formatBytes(n: number): string {
@@ -26,19 +28,24 @@ const emptySnapshot: SystemMetricsSnapshot = {
   dataOut: { min1: 0, min5: 0, min10: 0 },
 };
 
-export function SystemMeterPanel({ open, metrics, onClose }: SystemMeterPanelProps) {
+export function SystemMeterPanel({ open, metrics, onClose, getTerminalDiagnostics }: SystemMeterPanelProps) {
   const [snap, setSnap] = useState<SystemMetricsSnapshot>(emptySnapshot);
+  const [diag, setDiag] = useState<TerminalDiagnostics | undefined>(undefined);
   const { x, y, handleProps } = useDrag(window.innerWidth - 260, 16);
 
   useEffect(() => {
     if (!open) return;
-    setSnap(metrics.getSnapshot());
+    const tick = () => {
+      setSnap(metrics.getSnapshot());
+      setDiag(getTerminalDiagnostics?.());
+    };
+    tick();
     const id = setInterval(() => {
       if (document.hidden) return;
-      setSnap(metrics.getSnapshot());
+      tick();
     }, 1000);
     return () => clearInterval(id);
-  }, [open, metrics]);
+  }, [open, metrics, getTerminalDiagnostics]);
 
   const handleClose = useCallback((e: React.PointerEvent) => {
     e.preventDefault();
@@ -95,6 +102,19 @@ export function SystemMeterPanel({ open, metrics, onClose }: SystemMeterPanelPro
           <span className="text-muted-foreground">Out </span>
           <span>1m:{formatBytes(snap.dataOut.min1)} 5m:{formatBytes(snap.dataOut.min5)} 10m:{formatBytes(snap.dataOut.min10)}</span>
         </div>
+
+        {diag && (
+          <>
+            <div>
+              <span className="text-muted-foreground">Term </span>
+              <span>{diag.renderer} {diag.rows}x{diag.cols}</span>
+            </div>
+            <div>
+              <span className="text-muted-foreground">Buf  </span>
+              <span>base:{diag.baseY} vp:{diag.viewportY} len:{diag.bufferLength} cap:{diag.scrollback}</span>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
