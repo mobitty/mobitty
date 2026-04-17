@@ -363,6 +363,7 @@ export class TerminalCore {
   }
 
   applyProfile(profile: Profile, themeColors?: ProfileTheme): void {
+    const prevFontFamily = this.terminal.options.fontFamily;
     this.options.termOptions.fontSize = profile.fontSize;
     this.options.termOptions.fontFamily = profile.fontFamily;
     this.options.termOptions.scrollback = profile.scrollback;
@@ -383,6 +384,9 @@ export class TerminalCore {
     this.copyOnSelect = profile.copyOnSelect;
     this.syncPageBackground();
     this.fitAddon.fit();
+    if (prevFontFamily !== profile.fontFamily) {
+      this.logger.info('font-family-change', { from: prevFontFamily, ...this.getRenderDiagnostics('font-family-change') });
+    }
   }
 
   connect() {
