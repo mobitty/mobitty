@@ -1313,7 +1313,11 @@ export class TerminalCore {
         if (this.webglAddon) return;
         this.webglAddon = new WebglAddon();
         try {
-          this.webglAddon.onContextLoss(() => { this.webglAddon?.dispose(); });
+          this.webglAddon.onContextLoss(() => {
+            this.logger.warn('webgl-context-loss', this.getRenderDiagnostics('context-loss'));
+            this.webglAddon?.dispose();
+            this.webglAddon = undefined;
+          });
           terminal.loadAddon(this.webglAddon);
         } catch { this.logger.warn('webgl renderer failed, falling back to DOM'); disposeWebgl(); }
         break;
@@ -1321,6 +1325,47 @@ export class TerminalCore {
         disposeWebgl();
         break;
     }
+    this.logger.debug('renderer-applied', this.getRenderDiagnostics(value));
+  }
+
+  /** Capture renderer + font state for diagnosing font-rendering issues.
+   *  See: workspace/docs/todo-xterm6-font-rendering.md */
+  private getRenderDiagnostics(trigger: string): Record<string, unknown> {
+    const el = this.terminal.element;
+    const screenRaw = el?.querySelector('.xterm-screen');
+    const screen = screenRaw instanceof HTMLElement ? screenRaw : null;
+    const canvases = el?.querySelectorAll('canvas') ?? [];
+    const opt = this.terminal.options;
+    const computed = screen ? getComputedStyle(screen) : null;
+    const fontFamily = opt.fontFamily ?? '';
+    const firstFontFace = fontFamily.match(/"([^"]+)"|'([^']+)'|([^,]+)/)?.[0]?.replace(/["']/g, '').trim() ?? '';
+    let fontLoaded: boolean | string = 'unknown';
+    try {
+      if (firstFontFace && document.fonts) {
+        fontLoaded = document.fonts.check(`${opt.fontSize ?? 14}px "${firstFontFace}"`);
+      }
+    } catch (e) { fontLoaded = e instanceof Error ? `error:${e.message}` : 'error'; }
+    return {
+      trigger,
+      renderer: this.webglAddon ? 'webgl' : 'dom',
+      preferred: this.preferredRendererType,
+      canvasCount: canvases.length,
+      fontFamily,
+      fontSize: opt.fontSize ?? null,
+      fontWeight: opt.fontWeight ?? null,
+      fontWeightBold: opt.fontWeightBold ?? null,
+      letterSpacing: opt.letterSpacing ?? null,
+      lineHeight: opt.lineHeight ?? null,
+      fontLoaded,
+      fontsReadyStatus: document.fonts?.status ?? 'n/a',
+      computedFontFamily: computed?.fontFamily ?? 'n/a',
+      computedFontVariant: computed?.fontVariant ?? 'n/a',
+      computedFontFeature: computed?.fontFeatureSettings ?? 'n/a',
+      computedTextTransform: computed?.textTransform ?? 'n/a',
+      dpr: window.devicePixelRatio,
+      documentHidden: document.hidden,
+      xtermClassList: el?.className ?? '',
+    };
   }
 
   // --- Modifier/key encoding ---
