@@ -152,6 +152,8 @@ export class TerminalCore {
   private lastMessageAt = 0;
   private gestureDetector?: GestureDetector;
   private lastGestureCenter: { x: number; y: number } = { x: 0, y: 0 };
+  private panScrollAccumulator = 0;
+  private panScrollLastTime = 0;
   private gestureMapping: GestureMapping = DEFAULT_GESTURE_MAPPING;
   private customKeyMap?: Map<string, KeySpec>;
   private clipboardImageRequestId = 0;
@@ -603,6 +605,9 @@ export class TerminalCore {
       },
       onContinuousScroll: (deltaY) => {
         this.sendWheelDelta(deltaY);
+      },
+      onPanScroll: (deltaY) => {
+        this.sendPanScroll(deltaY);
       },
       onLongPressDefault: (clientX, clientY) => {
         this.dispatchTouchMultiClick(2, clientX, clientY);
@@ -1474,6 +1479,31 @@ export class TerminalCore {
     const delta = this.softkeySettings[keyId]?.wheelDelta;
     if (delta === undefined) return;
     this.sendWheelDelta(direction * delta);
+  }
+
+  /**
+   * 1:1 touch pan scroll. Converts pixel drag delta to integer row scroll via
+   * a fractional accumulator — bypasses xterm's WheelEvent pipeline (which
+   * damps synthetic pixel deltas to ~0.42x on Chrome).
+   */
+  private sendPanScroll(deltaY: number): void {
+    if (!this.terminal) return;
+    const rowHeight = this.getRowHeight();
+    if (!rowHeight) return;
+    const now = performance.now();
+    if (now - this.panScrollLastTime > 200) this.panScrollAccumulator = 0;
+    this.panScrollLastTime = now;
+    this.panScrollAccumulator += deltaY;
+    const rows = Math.trunc(this.panScrollAccumulator / rowHeight);
+    if (rows !== 0) {
+      this.terminal.scrollLines(rows);
+      this.panScrollAccumulator -= rows * rowHeight;
+    }
+  }
+
+  private getRowHeight(): number {
+    const row = this.terminal?.element?.querySelector<HTMLElement>('.xterm-rows > *');
+    return row?.offsetHeight ?? 0;
   }
 
   /** Dispatch a raw WheelEvent with the given deltaY (pixels). */

@@ -140,7 +140,9 @@ html, body {
    events that the pointer-based gesture-detector needs for gesture recognition.
    xterm.js 6.0's SmoothScrollableElement only listens to wheel events — it no
    longer has the JS-driven touchmove scroll that 5.x had, so touch scroll is
-   synthesized by gesture-detector.ts forwarding 1-finger pan as WheelEvents. */
+   synthesized by gesture-detector.ts: 1-finger pan calls terminal.scrollLines()
+   for 1:1 pixel tracking; wheel-step swipes (explicit mapping) still use
+   synthetic WheelEvents. */
 .xterm * {
   touch-action: none;
 }

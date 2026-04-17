@@ -14,6 +14,7 @@ import type { GestureId, GestureMapping, GestureDirection } from './gesture-type
 export interface GestureDetectorCallbacks {
   onGesture: (gestureId: GestureId, center: { x: number; y: number }) => void;
   onContinuousScroll?: (deltaY: number) => void;
+  onPanScroll?: (deltaY: number) => void;
   onLongPressDefault: (clientX: number, clientY: number) => void;
 }
 
@@ -369,31 +370,31 @@ export class GestureDetector {
   private handleTrackingMove(): void {
     const c = computeCentroid(this.pointers);
 
-    // Continuous scroll — forward incremental deltaY as a WheelEvent.
-    //
-    // xterm.js 6.0 replaced its JS-driven touchmove scroll (scrollTop += deltaY)
-    // with SmoothScrollableElement, which only listens to wheel events. 1-finger
-    // vertical pan no longer scrolls natively, so we forward it unconditionally
-    // to restore the pre-6.0 touch-scroll behavior.
-    //
-    // Multi-finger pans still require an explicit wheel-step mapping — they're
-    // typically used for discrete actions (swipe-2-up, etc.), not scroll.
-    if (this.callbacks.onContinuousScroll) {
-      const incrementalDeltaY = c.y - this.lastCentroid.y;
-      if (incrementalDeltaY !== 0) {
-        // Centroid Y decreasing = fingers moved up = swipe-up gesture.
-        // For WheelEvent: negate so fingers-up produces positive deltaY
-        // (scroll down / natural scrolling).
-        const gestureId = `swipe-${this.panFingerCount}-${incrementalDeltaY < 0 ? 'up' : 'down'}` as GestureId;
-        const isWheelStep = this.continuousScrollGestures.has(gestureId);
-        if (this.panFingerCount === 1 || isWheelStep) {
-          // Only mark swipeDidContinuousScroll for explicit wheel-step mappings.
-          // For 1-finger auto-scroll, let any discrete swipe-1-<dir> / flick-1-<dir>
-          // still fire at gesture end (matches xterm 5.x where pan scrolled AND
-          // the discrete event fired on release).
-          if (isWheelStep) this.swipeDidContinuousScroll = true;
-          this.callbacks.onContinuousScroll(-incrementalDeltaY);
-        }
+    // Touch pan scroll — two distinct paths:
+    //   1-finger pan (no wheel-step mapping) → onPanScroll: 1:1 pixel tracking
+    //     via terminal.scrollLines(), bypassing xterm's WheelEvent pipeline
+    //     (which damps synthetic events to ~0.42x due to Chrome auto-populating
+    //     wheelDeltaY). Restores pre-xterm-6.0 touch-scroll feel.
+    //   wheel-step swipes (explicit swipe-N-<dir> → wheel_up/wheel_down mapping)
+    //     → onContinuousScroll: synthetic WheelEvent, preserves soft-key
+    //     behavior for users who tuned softkeySettings.wheelDelta.
+    //   Multi-finger pans without a wheel-step mapping are ignored — they're
+    //   typically used for discrete actions (swipe-2-up, etc.), not scroll.
+    const incrementalDeltaY = c.y - this.lastCentroid.y;
+    if (incrementalDeltaY !== 0) {
+      // Centroid Y decreasing = fingers moved up = swipe-up gesture.
+      // Negate so fingers-up produces positive deltaY (natural scrolling).
+      const gestureId = `swipe-${this.panFingerCount}-${incrementalDeltaY < 0 ? 'up' : 'down'}` as GestureId;
+      const isWheelStep = this.continuousScrollGestures.has(gestureId);
+      if (isWheelStep) {
+        // Only mark swipeDidContinuousScroll for explicit wheel-step mappings.
+        // For 1-finger auto-scroll, let any discrete swipe-1-<dir> / flick-1-<dir>
+        // still fire at gesture end (matches xterm 5.x where pan scrolled AND
+        // the discrete event fired on release).
+        this.swipeDidContinuousScroll = true;
+        this.callbacks.onContinuousScroll?.(-incrementalDeltaY);
+      } else if (this.panFingerCount === 1) {
+        this.callbacks.onPanScroll?.(-incrementalDeltaY);
       }
     }
 
