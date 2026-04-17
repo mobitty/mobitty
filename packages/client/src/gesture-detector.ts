@@ -15,7 +15,15 @@ export interface GestureDetectorCallbacks {
   onGesture: (gestureId: GestureId, center: { x: number; y: number }) => void;
   onContinuousScroll?: (deltaY: number) => void;
   onPanScroll?: (deltaY: number) => void;
+  onPanScrollBegin?: () => void;
+  onPanScrollEnd?: (releaseVelocity: number) => void;
+  onTouchStart?: () => void;
   onLongPressDefault: (clientX: number, clientY: number) => void;
+}
+
+export interface VelocitySample {
+  readonly t: number;
+  readonly y: number;
 }
 
 // --- Internal types ---
@@ -49,6 +57,8 @@ const TAP_INTERVAL = 300;         // max time between consecutive taps
 const TAP_POS_THRESHOLD = 24;     // max distance between multi-tap positions
 const PINCH_THRESHOLD = 0.1;      // |scale - 1|
 const ROTATE_THRESHOLD = 15;      // degrees
+const VELOCITY_WINDOW_MS = 100;   // rolling window for release-velocity estimate
+const VEL_BUFFER_SIZE = 16;       // ring capacity — holds >200ms @ 60Hz pointermove
 
 // --- Helpers ---
 
@@ -79,6 +89,26 @@ function dominantDirection(dx: number, dy: number): GestureDirection | undefined
     return dx > 0 ? 'right' : 'left';
   }
   return dy > 0 ? 'down' : 'up';
+}
+
+// Release-velocity estimator: picks the oldest sample still within windowMs of
+// `now`, then computes (y_newest - y_oldest) / dt.  Returns 0 if fewer than 2
+// samples fall in the window — avoids spurious momentum on slow releases.
+export function estimateReleaseVelocity(samples: readonly VelocitySample[], now: number, windowMs: number): number {
+  const n = samples.length;
+  if (n < 2) return 0;
+  const newest = samples[n - 1];
+  if (!newest) return 0;
+  const cutoff = now - windowMs;
+  let oldest: VelocitySample = newest;
+  for (let i = n - 1; i >= 0; i--) {
+    const s = samples[i];
+    if (!s || s.t < cutoff) break;
+    oldest = s;
+  }
+  const dt = newest.t - oldest.t;
+  if (dt <= 0) return 0;
+  return (newest.y - oldest.y) / dt;
 }
 
 function getTwoPointers(pointers: Map<number, PointerState>): readonly [PointerState, PointerState] | undefined {
@@ -113,6 +143,12 @@ export class GestureDetector {
   // 1-finger intercept (flick/pan coexistence)
   private intercepting = false;
   private interceptDirection: GestureDirection | undefined;
+
+  // Pan-scroll release-velocity tracking (1-finger pan path only).
+  // didFirePanBegin gates the Begin/End pair: lazy Begin fires on first
+  // onPanScroll, End fires at release with estimated velocity.
+  private velSamples: VelocitySample[] = [];
+  private didFirePanBegin = false;
 
   // 2-finger state (pinch + rotate)
   private initialPinchDist = 0;
@@ -221,6 +257,10 @@ export class GestureDetector {
 
   private onPointerDown(e: PointerEvent): void {
     const now = performance.now();
+    // Any finger touch interrupts in-flight momentum (handled in terminal-core).
+    // Fires before phase classification so momentum stops the instant the user
+    // touches, even if the gesture later resolves to a tap or multi-finger.
+    this.callbacks.onTouchStart?.();
     this.pointers.set(e.pointerId, {
       id: e.pointerId,
       startX: e.clientX,
@@ -307,6 +347,7 @@ export class GestureDetector {
   private onPointerCancel(e: PointerEvent): void {
     this.pointers.delete(e.pointerId);
     if (this.pointers.size === 0) {
+      this.firePanScrollEndIfNeeded(0);
       this.resetToIdle();
     } else if (this.phase === 'pending') {
       this.panStartCentroid = computeCentroid(this.pointers);
@@ -340,6 +381,12 @@ export class GestureDetector {
     this.panFingerCount = this.pointers.size;
     this.lastCentroid = currentCentroid;
     this.swipeDidContinuousScroll = false;
+
+    // Seed velocity buffer with current centroid Y so the first pointermove in
+    // tracking has a baseline to compute velocity against.  Seeded regardless
+    // of finger count; only consumed by the 1-finger pan path.
+    this.velSamples = [{ t: performance.now(), y: currentCentroid.y }];
+    this.didFirePanBegin = false;
 
     // 1-finger: set intercepting if swipe-1 or flick-1 is mapped for
     // the initial direction (prevents flick from also firing at gesture end)
@@ -394,7 +441,13 @@ export class GestureDetector {
         this.swipeDidContinuousScroll = true;
         this.callbacks.onContinuousScroll?.(-incrementalDeltaY);
       } else if (this.panFingerCount === 1) {
+        if (!this.didFirePanBegin) {
+          this.didFirePanBegin = true;
+          this.callbacks.onPanScrollBegin?.();
+        }
         this.callbacks.onPanScroll?.(-incrementalDeltaY);
+        this.velSamples.push({ t: performance.now(), y: c.y });
+        if (this.velSamples.length > VEL_BUFFER_SIZE) this.velSamples.shift();
       }
     }
 
@@ -415,6 +468,15 @@ export class GestureDetector {
   }
 
   // --- Tracking end: fire discrete gestures ---
+
+  // Fires onPanScrollEnd(velocity) exactly once per Begin.  Safe to call from
+  // multiple termination paths — second call is a no-op.  Velocity 0 means
+  // "end without momentum" (cancel, 1→2 finger upgrade, mixed wheel-step path).
+  private firePanScrollEndIfNeeded(velocity: number): void {
+    if (!this.didFirePanBegin) return;
+    this.didFirePanBegin = false;
+    this.callbacks.onPanScrollEnd?.(velocity);
+  }
 
   private finishTracking(finalCentroid: Point, now: number): void {
     const fingers = this.panFingerCount;
@@ -450,6 +512,10 @@ export class GestureDetector {
         this.callbacks.onGesture(gestureId, finalCentroid);
       }
     }
+
+    // Catches mixed paths not handled by finish1FingerTracking (1→2 finger
+    // upgrade, pan that crossed into wheel-step direction).
+    this.firePanScrollEndIfNeeded(0);
 
     this.resetToIdle();
   }
@@ -490,6 +556,12 @@ export class GestureDetector {
         }
       }
     }
+
+    // Release velocity for iOS-style inertia.  Uses a rolling ~100ms window
+    // (release velocity, not whole-gesture average).  Sign-flipped to match
+    // onPanScroll delta convention (positive = natural-scroll direction).
+    const vRaw = estimateReleaseVelocity(this.velSamples, now, VELOCITY_WINDOW_MS);
+    this.firePanScrollEndIfNeeded(-vRaw);
   }
 
   // --- Tap detection ---
@@ -586,6 +658,8 @@ export class GestureDetector {
     this.initialPinchDist = 0;
     this.currentScale = 1;
     this.currentRotation = 0;
+    this.velSamples = [];
+    this.didFirePanBegin = false;
     this.clearLongPress();
     this.pointers.clear();
   }

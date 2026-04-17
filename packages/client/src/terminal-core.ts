@@ -14,6 +14,10 @@ import { getKeySpec, emptyModifiers } from './softkey-types';
 import type { GestureId, GestureMapping } from './gesture-types';
 import { DEFAULT_GESTURE_MAPPING } from './gesture-types';
 import { GestureDetector } from './gesture-detector';
+import {
+  decayVelocity, composeFlickVelocity,
+  MOMENTUM_DECAY_RATE, MOMENTUM_FRAME_MS, MOMENTUM_EPSILON, MIN_FLICK_VELOCITY,
+} from './scroll-momentum';
 import { ClientLogger } from './client-logger';
 import type { SessionInfo } from './sessions';
 
@@ -164,6 +168,16 @@ export class TerminalCore {
   private lastGestureCenter: { x: number; y: number } = { x: 0, y: 0 };
   private panScrollAccumulator = 0;
   private panScrollLastTime = 0;
+  private momentumVelocity = 0;         // px/ms, signed (same convention as sendPanScroll deltaY)
+  private momentumRAF?: number;
+  private momentumLastFrameTime = 0;
+  // Two-stage residual tracking so multi-touch doesn't clobber an in-flight pan's
+  // carried velocity: onTouchStart parks into pausedMomentum, onPanScrollBegin
+  // promotes it to carriedResidual (safe from further onTouchStart overwrites),
+  // onPanScrollEnd consumes carriedResidual.  Stale pausedMomentum from a tap
+  // (no pan followed) is overwritten on the next onTouchStart.
+  private pausedMomentum = 0;
+  private carriedResidual = 0;
   private gestureMapping: GestureMapping = DEFAULT_GESTURE_MAPPING;
   private customKeyMap?: Map<string, KeySpec>;
   private clipboardImageRequestId = 0;
@@ -218,6 +232,7 @@ export class TerminalCore {
   /** Full teardown — call on unmount (not on reconnect). */
   destroy() {
     this.dispose();
+    this.stopMomentum();
     for (const d of this.terminalDisposables) d.dispose();
     this.terminalDisposables.length = 0;
     this.terminal?.dispose();
@@ -639,6 +654,15 @@ export class TerminalCore {
       },
       onPanScroll: (deltaY) => {
         this.sendPanScroll(deltaY);
+      },
+      onPanScrollBegin: () => {
+        this.onPanScrollBegin();
+      },
+      onPanScrollEnd: (v) => {
+        this.onPanScrollEnd(v);
+      },
+      onTouchStart: () => {
+        this.onTouchStartPause();
       },
       onLongPressDefault: (clientX, clientY) => {
         this.dispatchTouchMultiClick(2, clientX, clientY);
@@ -1521,18 +1545,89 @@ export class TerminalCore {
    * damps synthetic pixel deltas to ~0.42x on Chrome).
    */
   private sendPanScroll(deltaY: number): void {
-    if (!this.terminal) return;
+    this.applyPanDelta(deltaY, 200);
+  }
+
+  /**
+   * Pixel→row converter shared by drag-driven (sendPanScroll) and inertia-driven
+   * (tickMomentum) paths.  Returns `clamped: true` when rows were requested but
+   * the viewport didn't move — used by momentum to stop at buffer edges.
+   * `resetGapMs` is Infinity for the momentum path so 16ms frame gaps don't
+   * trip the idle-reset intended for gesture-to-gesture transitions.
+   */
+  private applyPanDelta(deltaY: number, resetGapMs: number): { rowsApplied: number; clamped: boolean } {
+    if (!this.terminal) return { rowsApplied: 0, clamped: false };
     const rowHeight = this.getRowHeight();
-    if (!rowHeight) return;
+    if (!rowHeight) return { rowsApplied: 0, clamped: false };
     const now = performance.now();
-    if (now - this.panScrollLastTime > 200) this.panScrollAccumulator = 0;
+    if (now - this.panScrollLastTime > resetGapMs) this.panScrollAccumulator = 0;
     this.panScrollLastTime = now;
     this.panScrollAccumulator += deltaY;
     const rows = Math.trunc(this.panScrollAccumulator / rowHeight);
-    if (rows !== 0) {
-      this.terminal.scrollLines(rows);
-      this.panScrollAccumulator -= rows * rowHeight;
+    if (rows === 0) return { rowsApplied: 0, clamped: false };
+    const before = this.terminal.buffer.active.viewportY;
+    this.terminal.scrollLines(rows);
+    this.panScrollAccumulator -= rows * rowHeight;
+    const after = this.terminal.buffer.active.viewportY;
+    return { rowsApplied: rows, clamped: before === after };
+  }
+
+  // --- iOS-style pan-scroll momentum ---
+
+  private onTouchStartPause(): void {
+    // Pause in-flight momentum; retain velocity for onPanScrollBegin to claim.
+    // If the gesture is a tap (no pan follows), pausedMomentum is overwritten
+    // on the next onTouchStart (stopMomentum returns 0 once already stopped).
+    this.pausedMomentum = this.stopMomentum();
+  }
+
+  private onPanScrollBegin(): void {
+    // Promote the paused velocity into this pan session's carried residual.
+    // After this point, further onTouchStart (e.g. a 2nd finger added to the
+    // ongoing pan) won't clobber carriedResidual — pausedMomentum is a separate
+    // field that onTouchStart writes to instead.
+    this.carriedResidual = this.pausedMomentum;
+    this.pausedMomentum = 0;
+  }
+
+  private onPanScrollEnd(releaseVelocity: number): void {
+    const v = composeFlickVelocity(this.carriedResidual, releaseVelocity, MIN_FLICK_VELOCITY);
+    this.carriedResidual = 0;
+    this.startMomentum(v);
+  }
+
+  private startMomentum(velocity: number): void {
+    if (Math.abs(velocity) < MIN_FLICK_VELOCITY) return;
+    if (this.momentumRAF !== undefined) cancelAnimationFrame(this.momentumRAF);
+    this.momentumVelocity = velocity;
+    this.momentumLastFrameTime = performance.now();
+    // panScrollAccumulator is intentionally NOT reset — sub-row residual from
+    // the drag rolls seamlessly into the inertial phase.
+    this.momentumRAF = requestAnimationFrame(() => this.tickMomentum());
+  }
+
+  private tickMomentum(): void {
+    this.momentumRAF = undefined;
+    if (!this.terminal) { this.momentumVelocity = 0; return; }
+    const now = performance.now();
+    const dt = now - this.momentumLastFrameTime;
+    this.momentumLastFrameTime = now;
+    const { clamped } = this.applyPanDelta(this.momentumVelocity * dt, Infinity);
+    if (clamped) { this.momentumVelocity = 0; return; }
+    this.momentumVelocity = decayVelocity(this.momentumVelocity, dt, MOMENTUM_DECAY_RATE, MOMENTUM_FRAME_MS);
+    if (Math.abs(this.momentumVelocity) < MOMENTUM_EPSILON) { this.momentumVelocity = 0; return; }
+    this.momentumRAF = requestAnimationFrame(() => this.tickMomentum());
+  }
+
+  /** Cancels the RAF loop and returns the velocity at the moment of stop (for carried momentum). */
+  private stopMomentum(): number {
+    if (this.momentumRAF !== undefined) {
+      cancelAnimationFrame(this.momentumRAF);
+      this.momentumRAF = undefined;
     }
+    const v = this.momentumVelocity;
+    this.momentumVelocity = 0;
+    return v;
   }
 
   private getRowHeight(): number {
