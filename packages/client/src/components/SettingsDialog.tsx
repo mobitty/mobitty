@@ -9,7 +9,7 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Switch } from '@/components/ui/switch';
 import { SoftkeyEditor } from '@/components/SoftkeyEditor';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
-import { CircleHelp, ExternalLink } from 'lucide-react';
+import { CircleHelp, ExternalLink, X } from 'lucide-react';
 import { GestureEditor } from '@/components/GestureEditor';
 import { SoftkeySettingsEditor } from '@/components/SoftkeySettingsEditor';
 import type { Profile, ProfileTheme, SoftkeyConfig, GestureMapping, SoftkeyKeySettings, ProfileFieldErrors, ProfileFieldName } from '@/profiles';
@@ -492,8 +492,8 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <h2 className="text-lg font-semibold">Settings</h2>
-        <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)}>
-          &#215;
+        <Button variant="ghost" size="sm" onClick={() => onOpenChange(false)} aria-label="Close">
+          <X className="size-4" />
         </Button>
       </div>
 
@@ -955,8 +955,8 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
                       placeholder="value"
                       className="flex-1 h-7 text-xs"
                     />
-                    <Button variant="ghost" size="sm" className="h-7 px-1 text-xs text-destructive" onClick={() => setShellEditEnv(prev => prev.filter((_, j) => j !== i))}>
-                      &#215;
+                    <Button variant="ghost" size="sm" className="h-7 px-1 text-xs text-destructive" onClick={() => setShellEditEnv(prev => prev.filter((_, j) => j !== i))} aria-label="Remove">
+                      <X className="size-4" />
                     </Button>
                   </div>
                 ))}

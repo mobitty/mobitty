@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
@@ -87,7 +88,7 @@ function PageEditor({ pageIndex, keys, allKeyIds, customKeys, containers, onUpda
               onClick={() => removeKey(idx)}
               title="Remove"
             >
-              &#215;
+              <X className="size-4" />
             </button>
           </Badge>
         ))}
@@ -215,7 +216,7 @@ function CustomKeyEditor({ customKeys, onChange }: CustomKeyEditorProps) {
           <div className="ml-auto flex gap-1">
             <Button variant="ghost" size="xs" onClick={() => editKey(ck)}>Edit</Button>
             <Button variant="ghost" size="xs" className="text-destructive" onClick={() => removeKey(ck.id)}>
-              &#215;
+              <X className="size-4" />
             </Button>
           </div>
         </div>
@@ -353,7 +354,7 @@ function ContainerKeyEditor({ containers, allKeyIds, customKeys, onChange }: Con
             <div className="ml-auto flex gap-1">
               <Button variant="ghost" size="xs" onClick={() => editContainer(c)}>Edit</Button>
               <Button variant="ghost" size="xs" className="text-destructive" onClick={() => removeContainer(c.id)}>
-                &#215;
+                <X className="size-4" />
               </Button>
             </div>
           </div>
@@ -399,7 +400,7 @@ function ContainerKeyEditor({ containers, allKeyIds, customKeys, onChange }: Con
                 onClick={() => removeChildKey(idx)}
                 title="Remove"
               >
-                &#215;
+                <X className="size-4" />
               </button>
             </Badge>
           ))}

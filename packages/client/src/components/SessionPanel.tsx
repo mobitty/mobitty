@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { GripVertical, Settings, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -275,8 +276,8 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
           <Button variant="ghost" size="sm" onClick={() => setShowHelp(prev => !prev)}>
             ?
           </Button>
-          <Button variant="ghost" size="sm" onClick={onClose}>
-            &#215;
+          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close">
+            <X className="size-4" />
           </Button>
         </div>
       </div>
@@ -319,7 +320,7 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
             {shellsLoading ? 'Loading…' : 'New Session'}
           </Button>
           <Button variant="outline" size="sm" onClick={() => { onClose(); onSettingsOpen(); }}>
-            &#9881; Settings
+            <Settings className="size-4" /> Settings
           </Button>
           <div className="flex-1" />
           <Button
@@ -366,8 +367,9 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
                 <span
                   className="flex items-center justify-center w-6 h-6 shrink-0 text-muted-foreground cursor-grab active:cursor-grabbing touch-none"
                   {...listDragHandleProps(index)}
+                  aria-label="Drag to reorder"
                 >
-                  &#8801;
+                  <GripVertical className="size-4" />
                 </span>
               )}
 

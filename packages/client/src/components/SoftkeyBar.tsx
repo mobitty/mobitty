@@ -7,7 +7,7 @@ import {
 import type { ModifierSource } from '@/terminal-core';
 import { SoftkeyButton } from '@/components/SoftkeyButton';
 import { getBatchInputDraft, setBatchInputDraft } from '@/batch-input-storage';
-import { ArrowUp } from 'lucide-react';
+import { ArrowUp, Menu } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // --- SoftkeyBar handle ---
@@ -274,7 +274,7 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
             tabIndex={-1}
             aria-label="Sessions"
           >
-            <span className="text-base">&#9776;</span>
+            <Menu className="size-5" />
             {hasAlerts && (
               <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-destructive" />
             )}
