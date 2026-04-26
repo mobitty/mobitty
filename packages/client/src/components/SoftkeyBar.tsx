@@ -7,7 +7,8 @@ import {
 import type { ModifierSource } from '@/terminal-core';
 import { SoftkeyButton } from '@/components/SoftkeyButton';
 import { getBatchInputDraft, setBatchInputDraft } from '@/batch-input-storage';
-import { ArrowUp, Menu } from 'lucide-react';
+import { getNativeBridge, type KeyboardMode } from '@/native-bridge';
+import { ArrowUp, Keyboard, Menu } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 // --- SoftkeyBar handle ---
@@ -129,6 +130,7 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
     const containerRef = useRef<HTMLDivElement>(null);
     const [currentPage, setCurrentPage] = useState(0);
     const [modifiers, setModifiers] = useState<ModifierFlags>(emptyModifiers());
+    const [keyboardMode, setKeyboardMode] = useState<KeyboardMode>('system');
     const modifiersRef = useRef<ModifierFlags>(emptyModifiers());
     const onModifiersChangeRef = useRef(onModifiersChange);
     onModifiersChangeRef.current = onModifiersChange;
@@ -168,6 +170,31 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
       };
     }, []);
 
+
+    // Mirror the native keyboard mode locally so the keyboard-toggle softkey
+    // can decide which mode to request next. The bridge shim's
+    // onKeyboardModeChanged starts as a no-op; we override it here.
+    useEffect(() => {
+      const bridge = getNativeBridge();
+      if (!bridge) return;
+      bridge.onKeyboardModeChanged = (mode: KeyboardMode) => setKeyboardMode(mode);
+      return () => {
+        bridge.onKeyboardModeChanged = () => {};
+      };
+    }, []);
+
+    const handleKeyboardToggleTap = useCallback(() => {
+      const bridge = getNativeBridge();
+      if (!bridge) return;
+      const next: KeyboardMode = keyboardMode === 'terminal' ? 'system' : 'terminal';
+      bridge.requestKeyboardMode(next);
+    }, [keyboardMode]);
+
+    const handleKeyboardToggleLongPress = useCallback(() => {
+      const bridge = getNativeBridge();
+      if (!bridge) return;
+      bridge.requestKeyboardMode('dismissed');
+    }, []);
 
     const customKeyMap = useMemo(() => {
       const base = buildCustomKeyMap(customKeys);
@@ -243,9 +270,14 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
         return;
       }
 
+      if (keySpec.behavior.kind === 'keyboard-toggle') {
+        handleKeyboardToggleTap();
+        return;
+      }
+
       const mods = keySpec.consumesModifiers ? consumeModifiers() : emptyModifiers();
       onAction(keySpec.behavior, mods);
-    }, [consumeModifiers, handleToggleModifier, onAction, onPaste, onBatchInputToggle, onContainerToggle]);
+    }, [consumeModifiers, handleToggleModifier, handleKeyboardToggleTap, onAction, onPaste, onBatchInputToggle, onContainerToggle]);
 
     const nextPage = useCallback(() => {
       if (pages.length <= 1) return;
@@ -316,6 +348,20 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
                   size={softkeySize}
                   isContainerActive={batchInputOpen}
                   onPress={() => handleKeyPress(keySpec)}
+                />
+              );
+            }
+
+            if (keySpec.behavior.kind === 'keyboard-toggle') {
+              return (
+                <SoftkeyButton
+                  key={`${keyId}-${idx}`}
+                  keySpec={keySpec}
+                  size={softkeySize}
+                  isContainerActive={keyboardMode === 'terminal'}
+                  icon={<Keyboard className="size-5" />}
+                  onPress={handleKeyboardToggleTap}
+                  onLongPress={handleKeyboardToggleLongPress}
                 />
               );
             }

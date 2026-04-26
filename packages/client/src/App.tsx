@@ -20,6 +20,7 @@ import {
 import { DEFAULT_GESTURE_MAPPING } from '@/gesture-types';
 import type { GestureMapping } from '@/gesture-types';
 import { findFontOption, loadFont } from '@/fonts';
+import { isNativeApp } from '@/native-bridge';
 import { getLastSessionId, setLastSessionId, clearLastSessionId, fetchSessions } from '@/sessions';
 import { fetchShells, type ShellInfo } from '@/shells';
 import { ShellSelectionPanel } from '@/components/ShellSelectionPanel';
@@ -301,14 +302,24 @@ export function App() {
   // Derive softkey config from profile
   const softkeyConfig = useMemo((): { pages: string[][]; customKeys: SoftkeyCustomKeySpec[]; containers: SoftkeyContainerSpec[] } => {
     const sk = profile?.softkeys;
-    if (sk) {
-      return { pages: sk.pages, customKeys: sk.customKeys, containers: sk.containers ?? [] };
-    }
-    return {
-      pages: isMobile ? DEFAULT_MOBILE_PAGES : DEFAULT_DESKTOP_PAGES,
-      customKeys: isMobile ? DEFAULT_MOBILE_CUSTOM_KEYS : [],
-      containers: isMobile ? DEFAULT_MOBILE_CONTAINERS : [],
-    };
+    const base = sk
+      ? { pages: sk.pages, customKeys: sk.customKeys, containers: sk.containers ?? [] }
+      : {
+          pages: isMobile ? DEFAULT_MOBILE_PAGES : DEFAULT_DESKTOP_PAGES,
+          customKeys: isMobile ? DEFAULT_MOBILE_CUSTOM_KEYS : [],
+          containers: isMobile ? DEFAULT_MOBILE_CONTAINERS : [],
+        };
+    // In the iOS native shell, append a `keyboard_toggle` to the first page so
+    // the user always has a way to swap between the system iOS keyboard and
+    // the native terminal keyboard. Skip if the user already placed it
+    // somewhere via Settings. Computed-only — does not modify the saved profile.
+    if (!isNativeApp()) return base;
+    const alreadyPresent = base.pages.some(page => page.includes('keyboard_toggle'));
+    if (alreadyPresent) return base;
+    const newPages: string[][] = base.pages.length === 0
+      ? [['keyboard_toggle']]
+      : base.pages.map((page, i) => i === 0 ? [...page, 'keyboard_toggle'] : page);
+    return { ...base, pages: newPages };
   }, [profile?.softkeys, isMobile]);
 
   const softkeySize = profile?.softkeySize ?? 44;

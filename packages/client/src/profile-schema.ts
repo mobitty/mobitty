@@ -274,6 +274,7 @@ export const BUILTIN_KEY_IDS = new Set([
   'wheel_up', 'wheel_down', 'enter', 'space', 'ctrl', 'alt', 'shift',
   'batch_input', 'inline_input', 'paste', 'system_meter',
   'select_line', 'select_visible', 'select_all',
+  'keyboard_toggle',
 ]);
 
 export const VALID_GESTURE_IDS = new Set([

@@ -529,6 +529,7 @@ export class TerminalCore {
       case 'inline-input': break;
       case 'meter-toggle': break;
       case 'container-toggle': break;
+      case 'keyboard-toggle': break;
     }
   }
 
