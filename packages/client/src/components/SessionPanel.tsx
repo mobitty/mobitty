@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { GripVertical, Settings, X } from 'lucide-react';
+import { GripVertical, Server, Settings, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -12,6 +12,7 @@ import {
   type SessionInfo,
 } from '@/sessions';
 import { fetchShells, type ShellInfo } from '@/shells';
+import { isNativeApp } from '@/native-bridge';
 import { HotkeyHelpOverlay } from '@/components/HotkeyHelpOverlay';
 import { useListDrag } from '@/hooks/use-list-drag';
 
@@ -23,10 +24,11 @@ interface SessionPanelProps {
   onSwitchSession: (sessionId: string) => void;
   onCreateSession: (shell?: string) => void;
   onSettingsOpen: () => void;
+  onServersOpen: () => void;
   onNoSessionsLeft: () => void;
 }
 
-export function SessionPanel({ open, onClose, currentSessionId, alertedSessionIds, onSwitchSession, onCreateSession, onSettingsOpen, onNoSessionsLeft }: SessionPanelProps) {
+export function SessionPanel({ open, onClose, currentSessionId, alertedSessionIds, onSwitchSession, onCreateSession, onSettingsOpen, onServersOpen, onNoSessionsLeft }: SessionPanelProps) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -316,6 +318,11 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
         ) : (
           <>
         <div className="flex gap-2 items-center">
+          {isNativeApp() && (
+            <Button variant="outline" size="sm" onClick={() => { onClose(); onServersOpen(); }}>
+              <Server className="size-4" /> Servers
+            </Button>
+          )}
           <Button variant="outline" size="sm" onClick={handleCreate} disabled={shellsLoading}>
             {shellsLoading ? 'Loading…' : 'New Session'}
           </Button>
