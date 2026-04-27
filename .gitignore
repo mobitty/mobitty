@@ -2,14 +2,8 @@ node_modules/
 .pnpm-store/
 dist/
 *.tsbuildinfo
-/workspace
 /logs/
 /tmp/
-.devcontainer
-
-# Playwright test artifacts
-/.playwright-cli/
-/.playwright/
 
 # AI coding agent workspace files
 # Workspace setup is each developer's preference — this project does not
