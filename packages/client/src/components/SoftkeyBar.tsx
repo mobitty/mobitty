@@ -1,4 +1,4 @@
-import { useState, useCallback, useImperativeHandle, forwardRef, useMemo, useRef, useEffect } from 'react';
+import { useState, useCallback, useImperativeHandle, forwardRef, useMemo, useRef, useEffect, type ReactNode } from 'react';
 import {
   type KeyBehavior, type ModifierFlags, type KeySpec,
   emptyModifiers, getKeySpec, buildCustomKeyMap, buildContainerKeyMap, mergeKeyMaps,
@@ -28,6 +28,7 @@ interface SoftkeyBarProps {
   batchInputOpen?: boolean;
   softkeySize?: number;
   hasAlerts?: boolean;
+  isMobile?: boolean;
   onSessionsOpen: () => void;
   onMeterToggle: () => void;
   onAction: (action: KeyBehavior, modifiers: ModifierFlags) => void;
@@ -127,7 +128,7 @@ function InlineInput({ softkeySize, onSubmit, onKeepFocus }: InlineInputProps) {
 // --- SoftkeyBar ---
 
 export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
-  function SoftkeyBar({ pages, customKeys, containers, activeContainerId, batchInputOpen, softkeySize = 44, hasAlerts, onSessionsOpen, onMeterToggle, onAction, onPaste, onBatchInputToggle, onBatchSubmit, onContainerToggle, onKeepFocus, onModifiersChange }, ref) {
+  function SoftkeyBar({ pages, customKeys, containers, activeContainerId, batchInputOpen, softkeySize = 44, hasAlerts, isMobile, onSessionsOpen, onMeterToggle, onAction, onPaste, onBatchInputToggle, onBatchSubmit, onContainerToggle, onKeepFocus, onModifiersChange }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     useBackdropColorSync(containerRef);
     const [currentPage, setCurrentPage] = useState(0);
@@ -154,11 +155,25 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
     //   before it visually closes.
     // Uses native listeners with { passive: false } because React doesn't
     // guarantee non-passive touch listeners.
+    // Exception: the mobile horizontal scroll strip ([data-softkey-scroll]) skips
+    // Layer 1 on touchstart and touch-typed pointerdown — preventDefault on those
+    // would cancel the gesture and stall native horizontal scroll. Layer 2 still
+    // re-focuses the terminal.
     useEffect(() => {
       const el = containerRef.current;
       if (!el) return;
       const preventFocusSteal = (e: Event) => {
-        if ((e.target as HTMLElement).closest('[data-inline-input]')) return;
+        const target = e.target as HTMLElement;
+        if (target.closest('[data-inline-input]')) return;
+        if (target.closest('[data-softkey-scroll]')) {
+          const isTouchStart = e.type === 'touchstart';
+          const isTouchPointer = e.type === 'pointerdown'
+            && (e as PointerEvent).pointerType === 'touch';
+          if (isTouchStart || isTouchPointer) {
+            keepFocusRef.current?.();
+            return;
+          }
+        }
         e.preventDefault();
         keepFocusRef.current?.();
       };
@@ -286,6 +301,89 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
       setCurrentPage(prev => (prev + 1) % pages.length);
     }, [pages.length]);
 
+    const renderKey = (keyId: string, idx: number): ReactNode => {
+      const keySpec = getKeySpec(keyId, customKeyMap);
+
+      if (keySpec.behavior.kind === 'inline-input' && onBatchSubmit) {
+        return (
+          <InlineInput
+            key={`${keyId}-${idx}`}
+            softkeySize={softkeySize}
+            onSubmit={onBatchSubmit}
+            onKeepFocus={onKeepFocus}
+          />
+        );
+      }
+
+      if (keySpec.behavior.kind === 'toggle-modifier') {
+        const mod = keySpec.behavior.modifier;
+        return (
+          <SoftkeyButton
+            key={`${keyId}-${idx}`}
+            keySpec={keySpec}
+            size={softkeySize}
+            isModifierActive={modifiers[mod]}
+            onPress={() => handleToggleModifier(mod)}
+          />
+        );
+      }
+
+      if (keySpec.behavior.kind === 'batch-input-toggle') {
+        return (
+          <SoftkeyButton
+            key={`${keyId}-${idx}`}
+            keySpec={keySpec}
+            size={softkeySize}
+            isContainerActive={batchInputOpen}
+            onPress={() => handleKeyPress(keySpec)}
+          />
+        );
+      }
+
+      if (keySpec.behavior.kind === 'keyboard-toggle') {
+        return (
+          <SoftkeyButton
+            key={`${keyId}-${idx}`}
+            keySpec={keySpec}
+            size={softkeySize}
+            isContainerActive={keyboardMode === 'terminal'}
+            icon={<Keyboard className="size-5" />}
+            onPress={handleKeyboardToggleTap}
+            onLongPress={handleKeyboardToggleLongPress}
+          />
+        );
+      }
+
+      const isActiveContainer = keySpec.behavior.kind === 'container-toggle'
+        && activeContainerId === keySpec.behavior.containerId;
+
+      return (
+        <SoftkeyButton
+          key={`${keyId}-${idx}`}
+          keySpec={keySpec}
+          size={softkeySize}
+          isContainerActive={isActiveContainer}
+          onPress={() => handleKeyPress(keySpec)}
+        />
+      );
+    };
+
+    const sessionsButton = (
+      <button
+        type="button"
+        className="relative flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0 overflow-visible"
+        style={{ width: softkeySize, height: softkeySize }}
+        onPointerUp={onSessionsOpen}
+        tabIndex={-1}
+        aria-label="Sessions"
+      >
+        <Menu className="size-5" />
+        {hasAlerts && (
+          <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-destructive" />
+        )}
+      </button>
+    );
+
     return (
       <div
         ref={containerRef}
@@ -297,105 +395,38 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
         )}
         onContextMenu={(e) => e.preventDefault()}
       >
-        {/* All buttons in one flex-wrap container so wrapped rows start at the left edge */}
-        <div className="flex-1 flex flex-wrap items-end gap-1">
-          {/* Sessions button */}
-          <button
-            type="button"
-            className="relative flex items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0 overflow-visible"
-            style={{ width: softkeySize, height: softkeySize }}
-            onPointerUp={onSessionsOpen}
-            tabIndex={-1}
-            aria-label="Sessions"
-          >
-            <Menu className="size-5" />
-            {hasAlerts && (
-              <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-destructive" />
-            )}
-          </button>
+        {isMobile ? (
+          <>
+            {sessionsButton}
 
-          {/* Key buttons */}
-          {currentPageKeys.map((keyId, idx) => {
-            const keySpec = getKeySpec(keyId, customKeyMap);
-
-            if (keySpec.behavior.kind === 'inline-input' && onBatchSubmit) {
-              return (
-                <InlineInput
-                  key={`${keyId}-${idx}`}
-                  softkeySize={softkeySize}
-                  onSubmit={onBatchSubmit}
-                  onKeepFocus={onKeepFocus}
-                />
-              );
-            }
-
-            if (keySpec.behavior.kind === 'toggle-modifier') {
-              const mod = keySpec.behavior.modifier;
-              return (
-                <SoftkeyButton
-                  key={`${keyId}-${idx}`}
-                  keySpec={keySpec}
-                  size={softkeySize}
-                  isModifierActive={modifiers[mod]}
-                  onPress={() => handleToggleModifier(mod)}
-                />
-              );
-            }
-
-            if (keySpec.behavior.kind === 'batch-input-toggle') {
-              return (
-                <SoftkeyButton
-                  key={`${keyId}-${idx}`}
-                  keySpec={keySpec}
-                  size={softkeySize}
-                  isContainerActive={batchInputOpen}
-                  onPress={() => handleKeyPress(keySpec)}
-                />
-              );
-            }
-
-            if (keySpec.behavior.kind === 'keyboard-toggle') {
-              return (
-                <SoftkeyButton
-                  key={`${keyId}-${idx}`}
-                  keySpec={keySpec}
-                  size={softkeySize}
-                  isContainerActive={keyboardMode === 'terminal'}
-                  icon={<Keyboard className="size-5" />}
-                  onPress={handleKeyboardToggleTap}
-                  onLongPress={handleKeyboardToggleLongPress}
-                />
-              );
-            }
-
-            const isActiveContainer = keySpec.behavior.kind === 'container-toggle'
-              && activeContainerId === keySpec.behavior.containerId;
-
-            return (
-              <SoftkeyButton
-                key={`${keyId}-${idx}`}
-                keySpec={keySpec}
-                size={softkeySize}
-                isContainerActive={isActiveContainer}
-                onPress={() => handleKeyPress(keySpec)}
-              />
-            );
-          })}
-
-          {/* Page button */}
-          {pages.length > 1 && (
-            <button
-              type="button"
-              className="flex items-center justify-center px-1.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
-              style={{ minWidth: softkeySize, height: softkeySize }}
-              onPointerUp={nextPage}
-              tabIndex={-1}
-              aria-label={`Page ${safePage + 1} of ${pages.length}`}
+            {/* Horizontal scroll strip with all keys flat. */}
+            <div
+              data-softkey-scroll
+              className="flex-1 min-w-0 flex items-end gap-1 overflow-x-auto scrollbar-hide"
+              style={{ touchAction: 'pan-x', overscrollBehaviorX: 'contain' }}
             >
-              {safePage + 1}/{pages.length}
-            </button>
-          )}
-        </div>
+              {pages.flat().map((keyId, idx) => renderKey(keyId, idx))}
+            </div>
+          </>
+        ) : (
+          // Desktop: paged layout — all buttons in one flex-wrap container so wrapped rows start at the left edge
+          <div className="flex-1 flex flex-wrap items-end gap-1">
+            {sessionsButton}
+            {currentPageKeys.map((keyId, idx) => renderKey(keyId, idx))}
+            {pages.length > 1 && (
+              <button
+                type="button"
+                className="flex items-center justify-center px-1.5 rounded-md text-xs text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
+                style={{ minWidth: softkeySize, height: softkeySize }}
+                onPointerUp={nextPage}
+                tabIndex={-1}
+                aria-label={`Page ${safePage + 1} of ${pages.length}`}
+              >
+                {safePage + 1}/{pages.length}
+              </button>
+            )}
+          </div>
+        )}
       </div>
     );
   }

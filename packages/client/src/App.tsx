@@ -586,6 +586,7 @@ export function App() {
         batchInputOpen={batchInputOpen}
         softkeySize={softkeySize}
         hasAlerts={alertedSessionIds.size > 0}
+        isMobile={isMobile}
         onSessionsOpen={() => setSessionPanelOpen(true)}
         onMeterToggle={() => setMeterOpen(prev => !prev)}
         onAction={(action, mods) => terminalRef.current?.core?.handleSoftkeyAction(action, mods)}

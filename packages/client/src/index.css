@@ -146,3 +146,12 @@ html, body {
 .xterm * {
   touch-action: none;
 }
+
+/* Hide scrollbars on the mobile softkey bar's horizontal scroll strip
+   (and any other scroll container that opts in via this class). */
+.scrollbar-hide {
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
