@@ -7,10 +7,12 @@ import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { HotkeyHelpOverlay } from '@/components/HotkeyHelpOverlay';
 import { getNativeBridge, type SavedServer } from '@/native-bridge';
+import type { ClientLogger } from '@/client-logger';
 
 interface ServersPanelProps {
   open: boolean;
   onClose: () => void;
+  logger?: ClientLogger;
 }
 
 interface ServerDraft {
@@ -29,7 +31,19 @@ function urlIsValid(s: string): boolean {
   }
 }
 
-export function ServersPanel({ open, onClose }: ServersPanelProps) {
+// crypto.randomUUID() throws outside secure contexts; iOS WKWebView loading a
+// plain http:// origin (e.g. Tailscale .ts.net) is not secure. Build the v4
+// from crypto.getRandomValues, which is available everywhere.
+function generateId(): string {
+  const bytes = new Uint8Array(16);
+  crypto.getRandomValues(bytes);
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  const hex = Array.from(bytes, b => b.toString(16).padStart(2, '0')).join('');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
+}
+
+export function ServersPanel({ open, onClose, logger }: ServersPanelProps) {
   const [servers, setServers] = useState<SavedServer[]>([]);
   const [activeServerId, setActiveServerId] = useState<string | null>(null);
   const [draft, setDraft] = useState<ServerDraft | null>(null);
@@ -54,8 +68,13 @@ export function ServersPanel({ open, onClose }: ServersPanelProps) {
   useEffect(() => {
     if (!open) return;
     const bridge = getNativeBridge();
-    if (!bridge) return;
+    if (!bridge) {
+      logger?.warn('servers panel opened without native bridge; saves will not persist');
+      return;
+    }
+    logger?.info('servers panel opened, requesting state');
     bridge.onServersStateChanged = (s, a) => {
+      logger?.info('servers state received from native', { count: s.length, activeServerId: a });
       setServers(s);
       setActiveServerId(a);
       if (!initialFocusSetRef.current) {
@@ -70,7 +89,7 @@ export function ServersPanel({ open, onClose }: ServersPanelProps) {
       const b = getNativeBridge();
       if (b) b.onServersStateChanged = () => {};
     };
-  }, [open]);
+  }, [open, logger]);
 
   // Clamp focusedIndex when the list shrinks.
   useEffect(() => {
@@ -86,7 +105,13 @@ export function ServersPanel({ open, onClose }: ServersPanelProps) {
 
   const flush = (next: SavedServer[]) => {
     setServers(next);
-    getNativeBridge()?.requestSaveServers(next);
+    const bridge = getNativeBridge();
+    if (!bridge) {
+      logger?.warn('save servers: native bridge missing; change will not persist', { count: next.length });
+      return;
+    }
+    logger?.info('save servers requested', { count: next.length });
+    bridge.requestSaveServers(next);
   };
 
   const startAdd = () => {
@@ -109,15 +134,25 @@ export function ServersPanel({ open, onClose }: ServersPanelProps) {
     const name = draft.name.trim();
     const url = draft.url.trim();
     const notes = draft.notes.trim();
-    if (!name) { setError('Name is required'); return; }
-    if (!urlIsValid(url)) { setError('Enter a valid URL like https://your-server.example.com'); return; }
+    if (!name) {
+      logger?.warn('save server rejected: name empty', { url });
+      setError('Name is required');
+      return;
+    }
+    if (!urlIsValid(url)) {
+      logger?.warn('save server rejected: invalid url', { name, url });
+      setError('Enter a valid URL like https://your-server.example.com');
+      return;
+    }
     if (draft.id === null) {
       const entry: SavedServer = notes
-        ? { id: crypto.randomUUID(), name, url, notes }
-        : { id: crypto.randomUUID(), name, url };
+        ? { id: generateId(), name, url, notes }
+        : { id: generateId(), name, url };
+      logger?.info('add server', { id: entry.id, name, url });
       flush([...servers, entry]);
     } else {
       const id = draft.id;
+      logger?.info('edit server', { id, name, url });
       flush(servers.map(s => {
         if (s.id !== id) return s;
         return notes ? { ...s, name, url, notes } : { id: s.id, name, url };
@@ -129,7 +164,11 @@ export function ServersPanel({ open, onClose }: ServersPanelProps) {
 
   const handleSwitch = (id: string) => {
     const bridge = getNativeBridge();
-    if (!bridge) return;
+    if (!bridge) {
+      logger?.warn('switch server: native bridge missing', { id });
+      return;
+    }
+    logger?.info('switch server requested', { id });
     bridge.requestSaveServers(servers);
     bridge.requestSwitchServer(id);
   };
@@ -142,6 +181,7 @@ export function ServersPanel({ open, onClose }: ServersPanelProps) {
 
   const confirmDelete = () => {
     if (!confirmDeleteId) return;
+    logger?.info('delete server', { id: confirmDeleteId });
     flush(servers.filter(s => s.id !== confirmDeleteId));
     setConfirmDeleteId(null);
   };

@@ -187,6 +187,8 @@ export class TerminalCore {
   private logger: ClientLogger;
   callbacks: TerminalCoreCallbacks = {};
 
+  get clientLogger(): ClientLogger { return this.logger; }
+
   private currentSessionId?: string;
   private softkeySettings: Record<string, SoftkeyKeySettings> = {};
   private scrollback: number;

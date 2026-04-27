@@ -665,6 +665,7 @@ export function App() {
           <ServersPanel
             open={serversPanelOpen}
             onClose={() => { setServersPanelOpen(false); terminalRef.current?.core?.focus(); }}
+            logger={terminalRef.current?.core?.clientLogger}
           />
         </Suspense>
       )}
