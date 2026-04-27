@@ -8,6 +8,7 @@ import type { ModifierSource } from '@/terminal-core';
 import { SoftkeyButton } from '@/components/SoftkeyButton';
 import { getBatchInputDraft, setBatchInputDraft } from '@/batch-input-storage';
 import { getNativeBridge, type KeyboardMode } from '@/native-bridge';
+import { useBackdropColorSync } from '@/hooks/use-backdrop-color-sync';
 import { ArrowUp, Keyboard, Menu } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -128,6 +129,7 @@ function InlineInput({ softkeySize, onSubmit, onKeepFocus }: InlineInputProps) {
 export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
   function SoftkeyBar({ pages, customKeys, containers, activeContainerId, batchInputOpen, softkeySize = 44, hasAlerts, onSessionsOpen, onMeterToggle, onAction, onPaste, onBatchInputToggle, onBatchSubmit, onContainerToggle, onKeepFocus, onModifiersChange }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
+    useBackdropColorSync(containerRef);
     const [currentPage, setCurrentPage] = useState(0);
     const [modifiers, setModifiers] = useState<ModifierFlags>(emptyModifiers());
     const [keyboardMode, setKeyboardMode] = useState<KeyboardMode>('system');

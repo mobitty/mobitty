@@ -22,6 +22,9 @@ export interface MobittyNativeBridge {
 
   requestKeyboardMode: (mode: KeyboardMode) => void;
   setSoftkeyConfig: (config: unknown) => void;
+  // Optional: present only on iOS shells that ship the backdrop-color
+  // bridge. Callers must guard with `?.()` before invoking.
+  setBackdropColor?: (color: string) => void;
   registerForPush: (payload: unknown) => void;
 }
 
