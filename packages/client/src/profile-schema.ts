@@ -274,8 +274,12 @@ export const BUILTIN_KEY_IDS = new Set([
   'wheel_up', 'wheel_down', 'enter', 'space', 'ctrl', 'alt', 'shift',
   'batch_input', 'inline_input', 'paste', 'system_meter',
   'select_line', 'select_visible', 'select_all',
-  'keyboard_toggle',
 ]);
+
+// Removed key IDs that legacy saved profiles may still contain. Stripped
+// from softkey pages, container keys, and gesture targets before validation
+// so older caches/server profiles continue to load.
+const REMOVED_KEY_IDS = new Set(['keyboard_toggle']);
 
 export const VALID_GESTURE_IDS = new Set([
   'swipe-1-left', 'swipe-1-right',
@@ -498,9 +502,45 @@ function collectKeyIds(softkeys: unknown): { customKeyIds: Set<string>; containe
   return { customKeyIds, containerIds };
 }
 
+// Remove deprecated key IDs from a profile candidate in-place. Run before
+// validation so legacy saved profiles still load.
+function stripRemovedKeyIdsInPlace(record: Record<string, unknown>): void {
+  const softkeys = record['softkeys'];
+  if (typeof softkeys === 'object' && softkeys !== null) {
+    const sk = softkeys as Record<string, unknown>;
+    if (Array.isArray(sk['pages'])) {
+      const pages = sk['pages'] as unknown[];
+      sk['pages'] = pages.map(page => {
+        if (!Array.isArray(page)) return page;
+        return (page as unknown[]).filter(k => typeof k !== 'string' || !REMOVED_KEY_IDS.has(k));
+      });
+    }
+    if (Array.isArray(sk['containers'])) {
+      for (const container of sk['containers'] as unknown[]) {
+        if (typeof container !== 'object' || container === null) continue;
+        const c = container as Record<string, unknown>;
+        if (Array.isArray(c['keys'])) {
+          c['keys'] = (c['keys'] as unknown[]).filter(k => typeof k !== 'string' || !REMOVED_KEY_IDS.has(k));
+        }
+      }
+    }
+  }
+  const gestures = record['gestures'];
+  if (typeof gestures === 'object' && gestures !== null) {
+    const g = gestures as Record<string, unknown>;
+    for (const key of Object.keys(g)) {
+      const value = g[key];
+      if (typeof value === 'string' && REMOVED_KEY_IDS.has(value)) {
+        delete g[key];
+      }
+    }
+  }
+}
+
 export function isProfile(obj: unknown): obj is Profile {
   if (typeof obj !== 'object' || obj === null) return false;
   const record = obj as Record<string, unknown>;
+  stripRemovedKeyIdsInPlace(record);
   for (const [field, rule] of Object.entries(PROFILE_FIELD_RULES)) {
     const value = record[field];
     if ('optional' in rule && rule.optional && value === undefined) continue;

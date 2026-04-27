@@ -9,6 +9,7 @@ import { SoftkeyButton } from '@/components/SoftkeyButton';
 import { getBatchInputDraft, setBatchInputDraft } from '@/batch-input-storage';
 import { getNativeBridge, type KeyboardMode } from '@/native-bridge';
 import { useBackdropColorSync } from '@/hooks/use-backdrop-color-sync';
+import { usePressLongPress } from '@/hooks/use-press-long-press';
 import { ArrowUp, Keyboard, Menu } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
@@ -29,6 +30,7 @@ interface SoftkeyBarProps {
   softkeySize?: number;
   hasAlerts?: boolean;
   isMobile?: boolean;
+  isNativeApp?: boolean;
   onSessionsOpen: () => void;
   onMeterToggle: () => void;
   onAction: (action: KeyBehavior, modifiers: ModifierFlags) => void;
@@ -128,7 +130,7 @@ function InlineInput({ softkeySize, onSubmit, onKeepFocus }: InlineInputProps) {
 // --- SoftkeyBar ---
 
 export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
-  function SoftkeyBar({ pages, customKeys, containers, activeContainerId, batchInputOpen, softkeySize = 44, hasAlerts, isMobile, onSessionsOpen, onMeterToggle, onAction, onPaste, onBatchInputToggle, onBatchSubmit, onContainerToggle, onKeepFocus, onModifiersChange }, ref) {
+  function SoftkeyBar({ pages, customKeys, containers, activeContainerId, batchInputOpen, softkeySize = 44, hasAlerts, isMobile, isNativeApp, onSessionsOpen, onMeterToggle, onAction, onPaste, onBatchInputToggle, onBatchSubmit, onContainerToggle, onKeepFocus, onModifiersChange }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     useBackdropColorSync(containerRef);
     const [currentPage, setCurrentPage] = useState(0);
@@ -188,7 +190,7 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
     }, []);
 
 
-    // Mirror the native keyboard mode locally so the keyboard-toggle softkey
+    // Mirror the native keyboard mode locally so the pinned keyboard button
     // can decide which mode to request next. The bridge shim's
     // onKeyboardModeChanged starts as a no-op; we override it here.
     useEffect(() => {
@@ -287,14 +289,9 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
         return;
       }
 
-      if (keySpec.behavior.kind === 'keyboard-toggle') {
-        handleKeyboardToggleTap();
-        return;
-      }
-
       const mods = keySpec.consumesModifiers ? consumeModifiers() : emptyModifiers();
       onAction(keySpec.behavior, mods);
-    }, [consumeModifiers, handleToggleModifier, handleKeyboardToggleTap, onAction, onPaste, onBatchInputToggle, onContainerToggle]);
+    }, [consumeModifiers, handleToggleModifier, onAction, onPaste, onBatchInputToggle, onContainerToggle]);
 
     const nextPage = useCallback(() => {
       if (pages.length <= 1) return;
@@ -340,20 +337,6 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
         );
       }
 
-      if (keySpec.behavior.kind === 'keyboard-toggle') {
-        return (
-          <SoftkeyButton
-            key={`${keyId}-${idx}`}
-            keySpec={keySpec}
-            size={softkeySize}
-            isContainerActive={keyboardMode === 'terminal'}
-            icon={<Keyboard className="size-5" />}
-            onPress={handleKeyboardToggleTap}
-            onLongPress={handleKeyboardToggleLongPress}
-          />
-        );
-      }
-
       const isActiveContainer = keySpec.behavior.kind === 'container-toggle'
         && activeContainerId === keySpec.behavior.containerId;
 
@@ -384,6 +367,32 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
       </button>
     );
 
+    const keyboardLongPress = usePressLongPress({
+      onPress: handleKeyboardToggleTap,
+      onLongPress: handleKeyboardToggleLongPress,
+      delayMs: 500,
+    });
+    const { ref: keyboardRef, ...keyboardLongPressEvents } = keyboardLongPress;
+    const keyboardActive = keyboardMode === 'terminal';
+    const keyboardButton = isNativeApp ? (
+      <button
+        ref={keyboardRef}
+        type="button"
+        className={cn(
+          'flex items-center justify-center rounded-md transition-colors shrink-0',
+          keyboardActive
+            ? 'text-foreground bg-accent'
+            : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+        )}
+        style={{ width: softkeySize, height: softkeySize }}
+        tabIndex={-1}
+        aria-label="Keyboard"
+        {...keyboardLongPressEvents}
+      >
+        <Keyboard className="size-5" />
+      </button>
+    ) : null;
+
     return (
       <div
         ref={containerRef}
@@ -407,6 +416,8 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
             >
               {pages.flat().map((keyId, idx) => renderKey(keyId, idx))}
             </div>
+
+            {keyboardButton}
           </>
         ) : (
           // Desktop: paged layout — all buttons in one flex-wrap container so wrapped rows start at the left edge
@@ -425,6 +436,7 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
                 {safePage + 1}/{pages.length}
               </button>
             )}
+            {keyboardButton}
           </div>
         )}
       </div>

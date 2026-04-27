@@ -27,8 +27,7 @@ export type KeyBehavior =
   | { kind: 'container-toggle'; containerId: string }
   | { kind: 'select-line' }
   | { kind: 'select-visible-lines' }
-  | { kind: 'select-all' }
-  | { kind: 'keyboard-toggle' };
+  | { kind: 'select-all' };
 
 export interface KeySpec {
   id: string;
@@ -83,7 +82,6 @@ export const KEY_REGISTRY: Record<string, KeySpec> = {
   select_line: { id: 'select_line', label: 'Sel Line', behavior: { kind: 'select-line' }, repeat: { kind: 'none' }, consumesModifiers: false },
   select_visible: { id: 'select_visible', label: 'Sel Visible', behavior: { kind: 'select-visible-lines' }, repeat: { kind: 'none' }, consumesModifiers: false },
   select_all: { id: 'select_all', label: 'Sel All', behavior: { kind: 'select-all' }, repeat: { kind: 'none' }, consumesModifiers: false },
-  keyboard_toggle: { id: 'keyboard_toggle', label: 'Kbd', behavior: { kind: 'keyboard-toggle' }, repeat: { kind: 'none' }, consumesModifiers: false },
 };
 
 import { BUILTIN_KEY_IDS } from './profile-schema';
