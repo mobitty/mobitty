@@ -6,7 +6,7 @@ import {
 } from './profile-schema.ts';
 
 function validCandidate(): Record<string, unknown> {
-  return { name: 'test', fontSize: 14, fontFamily: 'monospace', themeLight: 'default-light', themeDark: 'default-dark', scrollback: 5000, padding: 4, sessionSwitcherHotkey: 'Ctrl+Shift+s', optionIsMeta: true, notificationMode: 'ghostty', remoteEditor: false, copyOnSelect: false };
+  return { name: 'test', fontSize: 14, fontFamily: 'monospace', themeLight: 'default-light', themeDark: 'default-dark', scrollback: 5000, padding: 4, sessionSwitcherHotkey: 'Ctrl+Shift+s', copyHotkey: 'default', pasteHotkey: 'default', optionIsMeta: true, notificationMode: 'ghostty', remoteEditor: false, copyOnSelect: false };
 }
 
 describe('validateProfileFields', () => {
@@ -225,6 +225,42 @@ describe('isProfile', () => {
 
   it('accepts sessionSwitcherHotkey with virtual key', () => {
     assert.ok(isProfile({ ...validCandidate(), sessionSwitcherHotkey: 'Ctrl+tab' }));
+  });
+
+  it('accepts copyHotkey/pasteHotkey "default" sentinel', () => {
+    assert.ok(isProfile({ ...validCandidate(), copyHotkey: 'default', pasteHotkey: 'default' }));
+  });
+
+  it('accepts copyHotkey/pasteHotkey empty (disabled)', () => {
+    assert.ok(isProfile({ ...validCandidate(), copyHotkey: '', pasteHotkey: '' }));
+  });
+
+  it('accepts copyHotkey/pasteHotkey with valid combo', () => {
+    assert.ok(isProfile({ ...validCandidate(), copyHotkey: 'Ctrl+Shift+z', pasteHotkey: 'Ctrl+Shift+x' }));
+  });
+
+  it('rejects profile missing copyHotkey', () => {
+    const c = validCandidate();
+    delete c['copyHotkey'];
+    assert.ok(!isProfile(c));
+  });
+
+  it('rejects profile missing pasteHotkey', () => {
+    const c = validCandidate();
+    delete c['pasteHotkey'];
+    assert.ok(!isProfile(c));
+  });
+
+  it('rejects copyHotkey with invalid combo (modifier-only)', () => {
+    assert.ok(!isProfile({ ...validCandidate(), copyHotkey: 'Ctrl+Shift' }));
+  });
+
+  it('rejects copyHotkey of wrong type', () => {
+    assert.ok(!isProfile({ ...validCandidate(), copyHotkey: 42 }));
+  });
+
+  it('rejects pasteHotkey with unknown modifier', () => {
+    assert.ok(!isProfile({ ...validCandidate(), pasteHotkey: 'Meta+v' }));
   });
 });
 
