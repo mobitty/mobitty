@@ -12,7 +12,7 @@ import {
   type SessionInfo,
 } from '@/sessions';
 import { fetchShells, type ShellInfo } from '@/shells';
-import { isNativeApp } from '@/native-bridge';
+import { isNativeApp, getNativeBridge } from '@/native-bridge';
 import { HotkeyHelpOverlay } from '@/components/HotkeyHelpOverlay';
 import { useListDrag } from '@/hooks/use-list-drag';
 
@@ -24,11 +24,10 @@ interface SessionPanelProps {
   onSwitchSession: (sessionId: string) => void;
   onCreateSession: (shell?: string) => void;
   onSettingsOpen: () => void;
-  onServersOpen: () => void;
   onNoSessionsLeft: () => void;
 }
 
-export function SessionPanel({ open, onClose, currentSessionId, alertedSessionIds, onSwitchSession, onCreateSession, onSettingsOpen, onServersOpen, onNoSessionsLeft }: SessionPanelProps) {
+export function SessionPanel({ open, onClose, currentSessionId, alertedSessionIds, onSwitchSession, onCreateSession, onSettingsOpen, onNoSessionsLeft }: SessionPanelProps) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -319,7 +318,10 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
           <>
         <div className="flex gap-2 items-center">
           {isNativeApp() && (
-            <Button variant="outline" size="sm" onClick={() => { onClose(); onServersOpen(); }}>
+            <Button variant="outline" size="sm" onClick={() => {
+              onClose();
+              getNativeBridge()?.requestOpenServersDialog();
+            }}>
               <Server className="size-4" /> Servers
             </Button>
           )}
