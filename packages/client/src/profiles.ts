@@ -42,6 +42,8 @@ export const DEFAULT_DESKTOP_PROFILE: Profile = {
   softkeys: { pages: DEFAULT_DESKTOP_PAGES.map(p => [...p]), customKeys: [], containers: [] },
   softkeySettings: { ...DEFAULT_SOFTKEY_SETTINGS },
   sessionSwitcherHotkey: 'Ctrl+Shift+s',
+  copyHotkey: 'default',
+  pasteHotkey: 'default',
   imagePasteDir: 'tmp',
   optionIsMeta: true,
   notificationMode: 'ghostty',
@@ -62,6 +64,8 @@ export const DEFAULT_MOBILE_PROFILE: Profile = {
   gestures: { ...DEFAULT_GESTURE_MAPPING },
   softkeySettings: { ...DEFAULT_SOFTKEY_SETTINGS },
   sessionSwitcherHotkey: 'Ctrl+Shift+s',
+  copyHotkey: 'default',
+  pasteHotkey: 'default',
   imagePasteDir: 'tmp',
   optionIsMeta: true,
   notificationMode: 'ghostty',
@@ -98,11 +102,19 @@ export function setSelectedProfileName(device: 'desktop' | 'mobile', name: strin
 
 const CACHE_KEY_PREFIX = 'mobitty-profile-cache:';
 
+function backfillHotkeys(data: unknown): void {
+  if (typeof data !== 'object' || data === null) return;
+  const r = data as Record<string, unknown>;
+  if (typeof r['copyHotkey'] !== 'string') r['copyHotkey'] = 'default';
+  if (typeof r['pasteHotkey'] !== 'string') r['pasteHotkey'] = 'default';
+}
+
 export function getCachedProfile(name: string): Profile | undefined {
   try {
     const raw = localStorage.getItem(CACHE_KEY_PREFIX + name);
     if (raw === null) return undefined;
     const data: unknown = JSON.parse(raw);
+    backfillHotkeys(data);
     if (isProfile(data)) return data;
     localStorage.removeItem(CACHE_KEY_PREFIX + name);
   } catch { /* localStorage unavailable */ }
@@ -144,6 +156,7 @@ export async function fetchProfile(name: string): Promise<Profile | undefined> {
   const resp = await fetch(buildApiUrl(`/api/profiles/${encodeURIComponent(name)}`));
   if (!resp.ok) return undefined;
   const data = await resp.json() as Record<string, unknown>;
+  backfillHotkeys(data);
   if (isProfile(data)) {
     cacheProfile(data);
     return data;

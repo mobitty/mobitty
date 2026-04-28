@@ -9,6 +9,8 @@ import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from '@
 import { Switch } from '@/components/ui/switch';
 import { SoftkeyEditor } from '@/components/SoftkeyEditor';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
+import { KeyCaptureInput } from '@/components/KeyCaptureInput';
+import { HOTKEY_DEFAULT, describeHotkey } from '@/platform-detect';
 import { CircleHelp, ExternalLink, X } from 'lucide-react';
 import { GestureEditor } from '@/components/GestureEditor';
 import { SoftkeySettingsEditor } from '@/components/SoftkeySettingsEditor';
@@ -119,6 +121,10 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
   const [gestures, setGestures] = useState<GestureMapping>({});
   const [softkeySettings, setSoftkeySettings] = useState<Record<string, SoftkeyKeySettings>>({ ...DEFAULT_SOFTKEY_SETTINGS });
   const [sessionSwitcherHotkey, setSessionSwitcherHotkey] = useState('');
+  const [copyHotkey, setCopyHotkey] = useState(HOTKEY_DEFAULT);
+  const [pasteHotkey, setPasteHotkey] = useState(HOTKEY_DEFAULT);
+  const [copyHotkeyError, setCopyHotkeyError] = useState<string | undefined>();
+  const [pasteHotkeyError, setPasteHotkeyError] = useState<string | undefined>();
   const [imagePasteDir, setImagePasteDir] = useState('tmp');
   const [optionIsMeta, setOptionIsMeta] = useState(true);
   const [notificationMode, setNotificationMode] = useState<'iterm' | 'kitty' | 'ghostty' | 'off'>('ghostty');
@@ -188,6 +194,10 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
     setGestures(profile.gestures ?? { ...DEFAULT_GESTURE_MAPPING });
     setSoftkeySettings(profile.softkeySettings ?? { ...DEFAULT_SOFTKEY_SETTINGS });
     setSessionSwitcherHotkey(profile.sessionSwitcherHotkey);
+    setCopyHotkey(profile.copyHotkey);
+    setPasteHotkey(profile.pasteHotkey);
+    setCopyHotkeyError(undefined);
+    setPasteHotkeyError(undefined);
     setImagePasteDir(profile.imagePasteDir ?? 'tmp');
     setOptionIsMeta(profile.optionIsMeta);
     setNotificationMode(profile.notificationMode);
@@ -264,6 +274,20 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
     }
     setHotkeyError(undefined);
     candidate['sessionSwitcherHotkey'] = hotkeyTrimmed;
+    const copyTrimmed = copyHotkey.trim();
+    if (copyTrimmed !== '' && copyTrimmed !== HOTKEY_DEFAULT) {
+      const err = validateHotkeyString(copyTrimmed);
+      if (err) { setCopyHotkeyError(err); return undefined; }
+    }
+    setCopyHotkeyError(undefined);
+    candidate['copyHotkey'] = copyTrimmed;
+    const pasteTrimmed = pasteHotkey.trim();
+    if (pasteTrimmed !== '' && pasteTrimmed !== HOTKEY_DEFAULT) {
+      const err = validateHotkeyString(pasteTrimmed);
+      if (err) { setPasteHotkeyError(err); return undefined; }
+    }
+    setPasteHotkeyError(undefined);
+    candidate['pasteHotkey'] = pasteTrimmed;
     const errors = validateProfileFields(candidate);
     if (errors.size > 0) {
       setFieldErrors(errors);
@@ -681,24 +705,46 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
             {editingDevice === 'desktop' && (
               <>
                 <div className="flex items-center gap-2">
-                  <Label className="min-w-[100px] text-xs text-muted-foreground">Hotkey</Label>
-                  <HelpTip>Keyboard shortcut to toggle the session panel. Format: Ctrl+Shift+s. Leave empty to disable.</HelpTip>
-                  <Input
+                  <Label className="min-w-[100px] text-xs text-muted-foreground">Session Hotkey</Label>
+                  <HelpTip>Keyboard shortcut to toggle the session panel. Press Set to capture a new combination; Default reverts to {DEFAULT_DESKTOP_PROFILE.sessionSwitcherHotkey}.</HelpTip>
+                  <KeyCaptureInput
                     value={sessionSwitcherHotkey}
-                    onChange={e => { setSessionSwitcherHotkey(e.target.value); setHotkeyError(undefined); }}
-                    placeholder="Ctrl+Shift+s"
-                    aria-invalid={!!hotkeyError || undefined}
+                    onChange={v => { setSessionSwitcherHotkey(v); setHotkeyError(undefined); }}
+                    ariaLabel="Session hotkey"
+                    resetButton={{ label: 'Default', value: DEFAULT_DESKTOP_PROFILE.sessionSwitcherHotkey }}
                   />
                 </div>
-                {hotkeyError && (
-                  <div className="flex items-start gap-2">
-                    <span className="min-w-[100px]" />
-                    <span className="w-4 shrink-0" />
-                    <p className="text-destructive text-xs">{hotkeyError}</p>
-                  </div>
-                )}
+                <FieldError error={hotkeyError} />
               </>
             )}
+
+            {/* Copy hotkey */}
+            <div className="flex items-center gap-2">
+              <Label className="min-w-[100px] text-xs text-muted-foreground">Copy Hotkey</Label>
+              <HelpTip>Keyboard shortcut to copy the terminal selection. Default binds Ctrl+Shift+Z on Windows; macOS/Linux rely on the native copy shortcut and copy-on-select.</HelpTip>
+              <KeyCaptureInput
+                value={copyHotkey}
+                onChange={v => { setCopyHotkey(v); setCopyHotkeyError(undefined); }}
+                formatValue={v => describeHotkey(v, 'copy')}
+                ariaLabel="Copy hotkey"
+                resetButton={{ label: 'Default', value: HOTKEY_DEFAULT }}
+              />
+            </div>
+            <FieldError error={copyHotkeyError} />
+
+            {/* Paste hotkey */}
+            <div className="flex items-center gap-2">
+              <Label className="min-w-[100px] text-xs text-muted-foreground">Paste Hotkey</Label>
+              <HelpTip>Keyboard shortcut to paste from clipboard. Default binds Ctrl+Shift+X on Windows (avoids browser-level conflicts); macOS/Linux rely on the native paste shortcut.</HelpTip>
+              <KeyCaptureInput
+                value={pasteHotkey}
+                onChange={v => { setPasteHotkey(v); setPasteHotkeyError(undefined); }}
+                formatValue={v => describeHotkey(v, 'paste')}
+                ariaLabel="Paste hotkey"
+                resetButton={{ label: 'Default', value: HOTKEY_DEFAULT }}
+              />
+            </div>
+            <FieldError error={pasteHotkeyError} />
 
             {/* Option as Meta (macOS) */}
             <div className="flex items-center gap-2">

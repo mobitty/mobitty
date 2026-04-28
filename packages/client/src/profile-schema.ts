@@ -61,6 +61,8 @@ export interface Profile {
   gestures?: GestureMapping;
   softkeySettings?: Record<string, SoftkeyKeySettings>;
   sessionSwitcherHotkey: string;
+  copyHotkey: string;
+  pasteHotkey: string;
   imagePasteDir?: string;
   optionIsMeta: boolean;
   notificationMode: 'iterm' | 'kitty' | 'ghostty' | 'off';
@@ -517,7 +519,15 @@ export function isProfile(obj: unknown): obj is Profile {
   if (record['softkeySettings'] !== undefined && !isSoftkeySettings(record['softkeySettings'])) return false;
   if (typeof record['sessionSwitcherHotkey'] !== 'string') return false;
   if (record['sessionSwitcherHotkey'] !== '' && validateHotkeyString(record['sessionSwitcherHotkey']) !== null) return false;
+  if (!isHotkeyFieldValue(record['copyHotkey'])) return false;
+  if (!isHotkeyFieldValue(record['pasteHotkey'])) return false;
   return true;
+}
+
+function isHotkeyFieldValue(value: unknown): boolean {
+  if (typeof value !== 'string') return false;
+  if (value === 'default' || value === '') return true;
+  return validateHotkeyString(value) === null;
 }
 
 export function isProfileName(name: unknown): name is string {

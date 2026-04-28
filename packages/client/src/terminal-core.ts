@@ -10,7 +10,8 @@ import { OverlayAddon } from './overlay';
 import { SelectionOverlayAddon } from './selection-overlay';
 import type { Profile, ProfileTheme, SoftkeyKeySettings } from './profiles';
 import type { KeyBehavior, ModifierFlags, VirtualKey, ComboStep, KeySpec } from './softkey-types';
-import { getKeySpec, emptyModifiers } from './softkey-types';
+import { getKeySpec, emptyModifiers, parseComboString, matchComboEvent } from './softkey-types';
+import { detectOS, resolveHotkey } from './platform-detect';
 import type { GestureId, GestureMapping } from './gesture-types';
 import { DEFAULT_GESTURE_MAPPING } from './gesture-types';
 import { GestureDetector } from './gesture-detector';
@@ -196,6 +197,8 @@ export class TerminalCore {
   private notificationMode: 'iterm' | 'kitty' | 'ghostty' | 'off' = 'ghostty';
   private remoteEditor = false;
   private copyOnSelect = false;
+  private copyCombo: ComboStep | null = null;
+  private pasteCombo: ComboStep | null = null;
   private themeForeground?: string;
   private themeBackground?: string;
   private preferredRendererType: RendererType = 'dom';
@@ -399,6 +402,7 @@ export class TerminalCore {
       this.terminal.options.theme = { ...this.terminal.options.theme, ...themeColors };
     }
     this.copyOnSelect = profile.copyOnSelect;
+    this.resolveHotkeysFromProfile(profile);
     this.syncPageBackground();
     this.fitAddon.fit();
     if (prevFontFamily !== profile.fontFamily) {
@@ -722,17 +726,24 @@ export class TerminalCore {
 
   // --- Keyboard shortcuts ---
 
+  private resolveHotkeysFromProfile(profile: Profile): void {
+    const os = detectOS();
+    const copyStr = resolveHotkey(profile.copyHotkey, 'copy', os);
+    const pasteStr = resolveHotkey(profile.pasteHotkey, 'paste', os);
+    this.copyCombo = copyStr === null ? null : parseComboString(copyStr);
+    this.pasteCombo = pasteStr === null ? null : parseComboString(pasteStr);
+  }
+
   private registerKeyInterceptor() {
     this.terminal.attachCustomKeyEventHandler((event) => {
-      if (event.type !== 'keydown' || !event.ctrlKey || !event.shiftKey
-          || event.altKey || event.metaKey) {
-        return true;
-      }
+      if (event.type !== 'keydown') return true;
+      // Cmd-bearing keystrokes always pass through to xterm/native handling.
+      if (event.metaKey) return true;
 
-      // Ctrl+Shift+C: copy selection to clipboard
-      if (event.key === 'C') {
+      if (this.copyCombo !== null && matchComboEvent(this.copyCombo, event)) {
         const selection = this.terminal.getSelection();
         if (selection !== '') {
+          event.preventDefault();
           void this.autoCopySelection(selection);
           this.terminal.clearSelection();
           return false;
@@ -740,8 +751,11 @@ export class TerminalCore {
         return true;
       }
 
-      // Ctrl+Shift+V: paste from clipboard
-      if (event.key === 'V') {
+      if (this.pasteCombo !== null && matchComboEvent(this.pasteCombo, event)) {
+        // preventDefault stops the browser from also synthesizing a native paste
+        // event for combos like Ctrl+Shift+V (which would double-fire via xterm's
+        // built-in paste handler).
+        event.preventDefault();
         void this.handlePaste();
         return false;
       }
