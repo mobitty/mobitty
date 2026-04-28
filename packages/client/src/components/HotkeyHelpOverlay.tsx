@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 
-type HelpContext = 'session-panel' | 'shell-selector' | 'servers-panel';
+type HelpContext = 'session-panel' | 'shell-selector';
 
 interface HotkeyHelpOverlayProps {
   open: boolean;
@@ -32,25 +32,13 @@ const SHELL_HOTKEYS: HotkeyEntry[] = [
   { key: '?', description: 'Toggle this help' },
 ];
 
-const SERVERS_HOTKEYS: HotkeyEntry[] = [
-  { key: '\u2191 / \u2193', description: 'Navigate servers' },
-  { key: 'Enter', description: 'Switch (or close if active)' },
-  { key: 'Escape', description: 'Close panel' },
-  { key: 'n', description: 'New server' },
-  { key: 'e', description: 'Edit server' },
-  { key: 'Delete', description: 'Delete server' },
-  { key: '?', description: 'Toggle this help' },
-];
-
 function helpTitle(context: HelpContext): string {
   if (context === 'session-panel') return 'Session Panel Hotkeys';
-  if (context === 'servers-panel') return 'Servers Panel Hotkeys';
   return 'Shell Selector Hotkeys';
 }
 
 function helpEntries(context: HelpContext): HotkeyEntry[] {
   if (context === 'session-panel') return SESSION_HOTKEYS;
-  if (context === 'servers-panel') return SERVERS_HOTKEYS;
   return SHELL_HOTKEYS;
 }
 

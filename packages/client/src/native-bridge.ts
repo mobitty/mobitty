@@ -9,13 +9,6 @@ import type { KeyBehavior, ModifierFlags } from './softkey-types';
 
 export type KeyboardMode = 'system' | 'terminal' | 'dismissed';
 
-export interface SavedServer {
-  id: string;
-  name: string;
-  url: string;
-  notes?: string;
-}
-
 export interface MobittyNativeBridge {
   readonly __installed: true;
   readonly version: number;
@@ -26,8 +19,6 @@ export interface MobittyNativeBridge {
   onKeyboardModeChanged: (mode: KeyboardMode) => void;
   onPushTokenRegistered: (token: string) => void;
   onSwitchSessionRequested: (sessionId: string) => void;
-  onServersStateChanged: (servers: SavedServer[], activeServerId: string | null) => void;
-  onOpenServersDialogRequested: () => void;
 
   requestKeyboardMode: (mode: KeyboardMode) => void;
   setSoftkeyConfig: (config: unknown) => void;
@@ -35,9 +26,10 @@ export interface MobittyNativeBridge {
   // bridge. Callers must guard with `?.()` before invoking.
   setBackdropColor?: (color: string) => void;
   registerForPush: (payload: unknown) => void;
-  requestServersState: () => void;
-  requestSaveServers: (servers: SavedServer[]) => void;
-  requestSwitchServer: (id: string) => void;
+  /// Ask the iOS shell to present its native server-management dialog.
+  /// The list, edit form, and connection retry/rollback all live on the
+  /// native side — the web client just fires this and waits.
+  requestOpenServersDialog: () => void;
 }
 
 declare global {

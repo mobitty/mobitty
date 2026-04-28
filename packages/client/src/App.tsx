@@ -20,7 +20,7 @@ import {
 import { DEFAULT_GESTURE_MAPPING } from '@/gesture-types';
 import type { GestureMapping } from '@/gesture-types';
 import { findFontOption, loadFont } from '@/fonts';
-import { isNativeApp, getNativeBridge } from '@/native-bridge';
+import { isNativeApp } from '@/native-bridge';
 import { getLastSessionId, setLastSessionId, clearLastSessionId, fetchSessions } from '@/sessions';
 import { fetchShells, type ShellInfo } from '@/shells';
 import { ShellSelectionPanel } from '@/components/ShellSelectionPanel';
@@ -31,8 +31,6 @@ import { Toaster } from '@/components/ui/sonner';
 const SettingsDialog = lazy(() => import('@/components/SettingsDialog').then(m => ({ default: m.SettingsDialog })));
 const ConnectionClosedDialog = lazy(() => import('@/components/ConnectionClosedDialog').then(m => ({ default: m.ConnectionClosedDialog })));
 const ImagePasteErrorDialog = lazy(() => import('@/components/ImagePasteErrorDialog').then(m => ({ default: m.ImagePasteErrorDialog })));
-const ServersPanel = lazy(() => import('@/components/ServersPanel').then(m => ({ default: m.ServersPanel })));
-
 const defaultTheme: ITheme = {
   foreground: '#d2d2d2',
   background: '#2b2b2b',
@@ -83,7 +81,6 @@ export function App() {
   const [connectionClosedReason, setConnectionClosedReason] = useState<ConnectionClosedReason | null>(null);
   const [batchInputOpen, setBatchInputOpen] = useState(false);
   const [sessionPanelOpen, setSessionPanelOpen] = useState(false);
-  const [serversPanelOpen, setServersPanelOpen] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | undefined>();
   const [isMobile] = useState(isTouchDevice);
   const [openContainerId, setOpenContainerId] = useState<string | null>(null);
@@ -128,7 +125,6 @@ export function App() {
       void import('@/components/SettingsDialog');
       void import('@/components/ConnectionClosedDialog');
       void import('@/components/ImagePasteErrorDialog');
-      if (isNativeApp()) void import('@/components/ServersPanel');
     };
     if (typeof window.requestIdleCallback === 'function') {
       window.requestIdleCallback(run);
@@ -136,17 +132,6 @@ export function App() {
       setTimeout(run, 500);
     }
   }, [currentSessionId]);
-
-  // iOS only: let the native 3-finger menu's "Manage Servers…" open the panel.
-  useEffect(() => {
-    const bridge = getNativeBridge();
-    if (!bridge) return;
-    bridge.onOpenServersDialogRequested = () => setServersPanelOpen(true);
-    return () => {
-      const b = getNativeBridge();
-      if (b) b.onOpenServersDialogRequested = () => {};
-    };
-  }, []);
 
   // On-demand diagnostic snapshot when the meter panel opens.
   useEffect(() => {
@@ -609,7 +594,6 @@ export function App() {
         onSwitchSession={handleSwitchSession}
         onCreateSession={handleCreateSession}
         onSettingsOpen={() => setSettingsOpen(true)}
-        onServersOpen={() => setServersPanelOpen(true)}
         onNoSessionsLeft={handleNoSessionsLeft}
       />
 
@@ -646,16 +630,6 @@ export function App() {
           <ConnectionClosedDialog
             reason={connectionClosedReason}
             onReconnect={handleReconnect}
-          />
-        </Suspense>
-      )}
-
-      {serversPanelOpen && (
-        <Suspense fallback={null}>
-          <ServersPanel
-            open={serversPanelOpen}
-            onClose={() => { setServersPanelOpen(false); terminalRef.current?.core?.focus(); }}
-            logger={terminalRef.current?.core?.clientLogger}
           />
         </Suspense>
       )}
