@@ -121,7 +121,7 @@ export function App() {
 
   // Preload lazy dialog chunks once the terminal handshake lands so that the
   // first open of Settings / Connection-Closed / Image-Paste-Error does not
-  // stall on a chunk download. See workspace/docs/design-prefetch.md.
+  // stall on a chunk download.
   useEffect(() => {
     if (!currentSessionId) return;
     const run = () => {
