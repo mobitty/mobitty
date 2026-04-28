@@ -1,6 +1,5 @@
 // Collects and exposes system performance metrics: RTT, FPS, data transfer.
 // Plain TypeScript — no React dependency.
-// See workspace/docs/design-system-metrics.md for architecture.
 
 interface WindowedStats {
   min1: number;

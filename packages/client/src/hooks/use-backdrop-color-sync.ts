@@ -4,8 +4,6 @@
 // composites the 0.92 alpha over the body background, and posts the
 // resulting solid color to `mobittyNative.setBackdropColor`. Re-posts on
 // `(prefers-color-scheme)` flips. No-ops outside the iOS shell.
-//
-// Protocol contract: `workspace/docs/feat-ios-backdrop-color.md`.
 
 import { useEffect, type RefObject } from 'react';
 import { getNativeBridge } from '@/native-bridge';

@@ -135,11 +135,9 @@ function addEventListener(target: EventTarget, type: string, listener: EventList
 
 export class TerminalCore {
   // Cleared on every reconnect (dispose()) — only socket-scoped listeners belong here.
-  // See: workspace/docs/design-listeners.md
   private socketDisposables: IDisposable[] = [];
 
   // Cleared only on full unmount (destroy()) — terminal-element-scoped resources belong here.
-  // See: workspace/docs/design-listeners.md
   private terminalDisposables: IDisposable[] = [];
   private textEncoder = new TextEncoder();
   private textDecoder = new TextDecoder();
@@ -1393,8 +1391,7 @@ export class TerminalCore {
     this.logger.debug('renderer-applied', this.getRenderDiagnostics(value));
   }
 
-  /** Capture renderer + font state for diagnosing font-rendering issues.
-   *  See: workspace/docs/todo-xterm6-font-rendering.md */
+  /** Capture renderer + font state for diagnosing font-rendering issues. */
   private getRenderDiagnostics(trigger: string): Record<string, unknown> {
     const el = this.terminal.element;
     const screenRaw = el?.querySelector('.xterm-screen');
