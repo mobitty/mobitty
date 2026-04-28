@@ -435,10 +435,14 @@ export function App() {
     };
   }, []);
 
-  const handleApplyProfile = useCallback((p: Profile, device: 'desktop' | 'mobile') => {
+  const handleApplyProfile = useCallback(async (p: Profile, device: 'desktop' | 'mobile') => {
     setSelectedProfileName(device, p.name);
     // Only update runtime if the applied profile is for the current device
-    if ((device === 'mobile') === isMobile) setProfile(p);
+    if ((device === 'mobile') === isMobile) {
+      const option = findFontOption(p.fontFamily);
+      if (option) await loadFont(option);
+      setProfile(p);
+    }
   }, [isMobile]);
 
 

@@ -37,5 +37,13 @@ export async function loadFont(option: FontOption): Promise<void> {
   link.dataset.font = option.cssFile;
   document.head.appendChild(link);
   try { localStorage.setItem('mobitty-font-css', option.cssFile); } catch { /* unavailable */ }
-  await document.fonts.ready;
+  // document.fonts.ready can resolve before a slow CDN face has actually
+  // been decoded. Wait for the specific face via document.fonts.load(),
+  // with a 5s ceiling so a broken CDN can't soft-lock the page.
+  const face = option.fontFamily.match(/"([^"]+)"|'([^']+)'|([^,]+)/)?.[0]?.replace(/["']/g, '').trim();
+  if (!face) { await document.fonts.ready; return; }
+  await Promise.race([
+    document.fonts.load(`16px "${face}"`).catch(() => undefined),
+    new Promise<void>(r => setTimeout(r, 5_000)),
+  ]);
 }

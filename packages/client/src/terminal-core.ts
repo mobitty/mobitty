@@ -150,6 +150,7 @@ export class TerminalCore {
   private selectionOverlay?: SelectionOverlayAddon;
   private webLinksAddon = new WebLinksAddon();
   private webglAddon?: WebglAddon;
+  private pendingAtlasSerial = 0;
 
   private socket?: WebSocket;
   private opened = false;
@@ -405,6 +406,7 @@ export class TerminalCore {
     this.fitAddon.fit();
     if (prevFontFamily !== profile.fontFamily) {
       this.logger.info('font-family-change', { from: prevFontFamily, ...this.getRenderDiagnostics('font-family-change') });
+      void this.scheduleAtlasClear();
     }
   }
 
@@ -1362,6 +1364,7 @@ export class TerminalCore {
             (terminal.options as Record<string, unknown>)[key] = value;
           }
           if (key.indexOf('font') === 0 || key === 'lineHeight' || key === 'letterSpacing') needsFit = true;
+          if (key === 'fontFamily') void this.scheduleAtlasClear();
           break;
       }
     }
@@ -1394,6 +1397,7 @@ export class TerminalCore {
             this.webglAddon = undefined;
           });
           terminal.loadAddon(this.webglAddon);
+          void this.scheduleAtlasClear();
         } catch { this.logger.warn('webgl renderer failed, falling back to DOM'); disposeWebgl(); }
         break;
       case 'dom':
@@ -1442,6 +1446,26 @@ export class TerminalCore {
       documentHidden: document.hidden,
       xtermClassList: el?.className ?? '',
     };
+  }
+
+  /**
+   * Invalidate the WebGL glyph atlas once the current font face is decoded.
+   * The gate in fonts.ts catches the initial-mount race; this backstop
+   * handles the timeout-fallback case and post-mount font swaps where the
+   * terminal cannot be unmounted (settings panel, server reconcile).
+   */
+  private async scheduleAtlasClear(): Promise<void> {
+    const serial = ++this.pendingAtlasSerial;
+    if (!this.webglAddon) return;
+    const opt = this.terminal.options;
+    const firstFontFace = (opt.fontFamily ?? '').match(/"([^"]+)"|'([^']+)'|([^,]+)/)?.[0]?.replace(/["']/g, '').trim() ?? '';
+    if (!firstFontFace) return;
+    try { await document.fonts.load(`${opt.fontSize ?? 14}px "${firstFontFace}"`); } catch { /* swallow */ }
+    if (this.terminalDisposables.length === 0) return;
+    if (this.pendingAtlasSerial !== serial) return;
+    if (!this.webglAddon) return;
+    this.webglAddon.clearTextureAtlas();
+    this.logger.info('webgl-atlas-rebaked', this.getRenderDiagnostics('atlas-rebake'));
   }
 
   // --- Modifier/key encoding ---
