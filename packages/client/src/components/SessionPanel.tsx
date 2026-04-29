@@ -107,7 +107,7 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
       } else if (e.key === 'ArrowDown') {
         e.preventDefault();
         e.stopPropagation();
-        setFocusedIndex(i => Math.min(i, sessions.length - 2) + 1);
+        setFocusedIndex(i => (i + 1) % sessions.length);
       } else if (e.key === 'ArrowUp' && e.shiftKey) {
         e.preventDefault();
         e.stopPropagation();
@@ -119,7 +119,7 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         e.stopPropagation();
-        setFocusedIndex(i => Math.max(i, 1) - 1);
+        setFocusedIndex(i => (i - 1 + sessions.length) % sessions.length);
       } else if (e.key === 'Enter') {
         e.preventDefault();
         e.stopPropagation();
@@ -165,11 +165,11 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         e.stopPropagation();
-        setShellFocusedIndex(i => Math.min(i, shells.length - 2) + 1);
+        setShellFocusedIndex(i => (i + 1) % shells.length);
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         e.stopPropagation();
-        setShellFocusedIndex(i => Math.max(i, 1) - 1);
+        setShellFocusedIndex(i => (i - 1 + shells.length) % shells.length);
       } else if (e.key === 'Enter') {
         e.preventDefault();
         e.stopPropagation();

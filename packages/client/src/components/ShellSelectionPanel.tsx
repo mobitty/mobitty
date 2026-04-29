@@ -20,11 +20,11 @@ export function ShellSelectionPanel({ shells, onSelect }: ShellSelectionPanelPro
       if (e.key === 'ArrowDown') {
         e.preventDefault();
         e.stopPropagation();
-        setFocusedIndex(i => Math.min(i, shells.length - 2) + 1);
+        setFocusedIndex(i => (i + 1) % shells.length);
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
         e.stopPropagation();
-        setFocusedIndex(i => Math.max(i, 1) - 1);
+        setFocusedIndex(i => (i - 1 + shells.length) % shells.length);
       } else if (e.key === 'Enter') {
         e.preventDefault();
         e.stopPropagation();
