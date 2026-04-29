@@ -104,6 +104,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         sessionName: session?.info.name ?? '',
         sessionTitle: session?.info.title ?? '',
         sessionShell: session?.info.shell ?? '',
+        sessionCwd: session?.info.cwd ?? '',
       }));
     }
   });

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { release } from 'node:os';
+import { release, homedir } from 'node:os';
 import type { PtyHandle, SessionInfo, EditorResult } from './types.ts';
 import { spawnPty, writePty, resizePty, killPty } from './pty.ts';
 import { generateUniqueSessionName } from './session-names.ts';
@@ -11,10 +11,15 @@ const { Terminal } = headlessPkg;
 import { trackCursorVisibility } from './cursor-visibility.ts';
 import type { CursorVisibilityTracker } from './cursor-visibility.ts';
 import { registerNotificationHandlers } from './osc-notifications.ts';
+import { registerCwdHandler } from './osc-cwd.ts';
 import { registerColorQueryHandlers } from './osc-color-query.ts';
 import type { OscColorQueryTracker, OscColorConfig } from './osc-color-query.ts';
 import { BUILTIN_THEMES } from './themes.ts';
 import { normalizeSgrColors } from './sgr-normalize.ts';
+import { getProcessCwd } from './clipboard.ts';
+
+const HOME = homedir();
+const CWD_FALLBACK_TTL_MS = 2000;
 
 interface SessionEntry {
   sessionId: string;
@@ -30,6 +35,10 @@ interface SessionEntry {
   colorTracker: OscColorQueryTracker | null;
   title: string;
   hasAlert: boolean;
+  /** Last-known absolute CWD reported via OSC 7. Empty until a shell reports it. */
+  reportedCwd: string;
+  /** Cached fallback (getProcessCwd) value with expiry, used when no OSC 7 yet. */
+  fallbackCwd: { value: string; expiresAt: number } | null;
   onExitCallbacks: Array<() => void>;
   onDetachCallbacks: Array<() => void>;
   onChangeCallbacks: Array<() => void>;
@@ -120,6 +129,8 @@ export class SessionRegistry {
         colorTracker: null,
         title: '',
         hasAlert: false,
+        reportedCwd: '',
+        fallbackCwd: null,
         onExitCallbacks: [],
         onDetachCallbacks: [],
         onChangeCallbacks: [],
@@ -214,6 +225,11 @@ export class SessionRegistry {
       for (const cb of this.notificationListeners) cb(sessionId, effectiveTitle, body);
       notifyChange();
     });
+    registerCwdHandler(headless, (cwd) => {
+      if (entry.reportedCwd === cwd) return;
+      entry.reportedCwd = cwd;
+      notifyChange();
+    });
 
     // OSC 10/11/12 color query handlers — respond with the session's theme
     // colors so programs (e.g. nvim) can detect dark/light background.
@@ -269,6 +285,8 @@ export class SessionRegistry {
       colorTracker,
       title,
       hasAlert: false,
+      reportedCwd: '',
+      fallbackCwd: null,
       onExitCallbacks,
       onDetachCallbacks,
       onChangeCallbacks,
@@ -525,6 +543,26 @@ export class SessionRegistry {
     }
   }
 
+  private resolveCwd(entry: SessionEntry): string {
+    let raw = entry.reportedCwd;
+    if (!raw) {
+      const cached = entry.fallbackCwd;
+      const now = Date.now();
+      if (cached && cached.expiresAt > now) {
+        raw = cached.value;
+      } else if (entry.alive) {
+        raw = getProcessCwd(entry.pid);
+        entry.fallbackCwd = { value: raw, expiresAt: now + CWD_FALLBACK_TTL_MS };
+      } else {
+        raw = cached?.value ?? '';
+      }
+    }
+    if (!raw) return '';
+    if (raw === HOME) return '~';
+    if (HOME && raw.startsWith(HOME + '/')) return '~' + raw.slice(HOME.length);
+    return raw;
+  }
+
   private toSessionInfo(entry: SessionEntry): SessionInfo {
     return {
       sessionId: entry.sessionId,
@@ -536,6 +574,7 @@ export class SessionRegistry {
       shell: entry.shell,
       title: entry.title,
       hasAlert: entry.hasAlert,
+      cwd: this.resolveCwd(entry),
     };
   }
 }

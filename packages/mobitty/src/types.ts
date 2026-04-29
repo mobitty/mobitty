@@ -105,6 +105,7 @@ export interface SessionInfo {
   shell: string;
   title: string;
   hasAlert: boolean;
+  cwd: string;
 }
 
 export interface ServerState {
