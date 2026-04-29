@@ -14,9 +14,9 @@ import { useEffect, useRef, useState, useCallback, type PointerEvent as ReactPoi
 
 const SCROLL_BAIL_PX = 8;          // vertical movement before we lose to the scroller
 const HORIZONTAL_LOCK_PX = 6;      // horizontal movement that locks us as a swipe
-const OPEN_THRESHOLD = 50;         // |dx| at release to snap revealed instead of closed
-const OPEN_OFFSET = 88;            // resting reveal width when "open"
-const INVOKE_THRESHOLD = 120;      // |dx| at release to auto-invoke the action
+const OPEN_THRESHOLD = 60;         // |dx| at release to snap revealed instead of closed
+const OPEN_OFFSET = 112;           // resting reveal width when "open" — fits "Rename"/"Delete" + icon + padding
+const INVOKE_THRESHOLD = 160;      // |dx| at release to auto-invoke the action
 const POST_SWIPE_CLICK_GUARD_MS = 300;
 
 export type SwipeOpenSide = 'left' | 'right' | null;
@@ -36,6 +36,8 @@ export interface UseSwipeActionsOptions {
 export interface UseSwipeActionsResult {
   /** Pixel offset to apply via transform: translateX(...). Positive = revealed-left. */
   deltaX: number;
+  /** 0..1 saturation, hits 1 at the resting open offset. Drives action color/opacity. */
+  progress: number;
   /** True while finger is down — caller should disable CSS transitions for 1:1 tracking. */
   isDragging: boolean;
   /** Returns true if a click occurred too soon after a swipe and should be suppressed. */
@@ -178,12 +180,13 @@ export function useSwipeActions({
     return Date.now() - lastSwipeEndRef.current < POST_SWIPE_CLICK_GUARD_MS;
   }, []);
 
+  const progress = Math.min(Math.abs(deltaX) / OPEN_OFFSET, 1);
+
   return {
     deltaX,
+    progress,
     isDragging,
     shouldSuppressClick,
     handlers: { onPointerDown, onPointerMove, onPointerUp, onPointerCancel },
   };
 }
-
-export const SWIPE_OPEN_OFFSET = OPEN_OFFSET;

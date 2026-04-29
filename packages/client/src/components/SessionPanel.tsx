@@ -15,7 +15,7 @@ import { fetchShells, type ShellInfo } from '@/shells';
 import { isNativeApp, getNativeBridge } from '@/native-bridge';
 import { HotkeyHelpOverlay } from '@/components/HotkeyHelpOverlay';
 import { useListDrag } from '@/hooks/use-list-drag';
-import { useSwipeActions, SWIPE_OPEN_OFFSET, type SwipeOpenSide } from '@/hooks/use-swipe-actions';
+import { useSwipeActions, type SwipeOpenSide } from '@/hooks/use-swipe-actions';
 
 interface SessionPanelProps {
   open: boolean;
@@ -460,7 +460,7 @@ function SessionRowItem({
 
   const rowBody = (
     <div
-      className={`group relative flex items-center gap-2 px-3 py-2 rounded-md border bg-background ${
+      className={`group relative flex items-center gap-2 px-3 py-2 rounded-md border ${
         isCurrent ? 'border-primary bg-primary/10' : 'border-border'
       } ${isFocused ? 'ring-2 ring-primary' : ''} ${!editMode && (session.alive || isCurrent) ? 'cursor-pointer' : ''} ${
         isRowDragging ? 'opacity-50' : ''
@@ -510,7 +510,7 @@ function SessionRowItem({
           <span className="text-sm font-medium truncate block">{session.name}</span>
         )}
         {cwd && (
-          <div className="text-xs text-muted-foreground truncate font-mono">{cwd}</div>
+          <div className="text-xs text-muted-foreground font-mono break-all">{cwd}</div>
         )}
         <div className="text-xs text-muted-foreground truncate">
           {session.shell} · pid {session.pid}
@@ -557,6 +557,11 @@ function SessionRowItem({
     );
   }
 
+  const leftActive = swipe.deltaX > 0;
+  const rightActive = swipe.deltaX < 0;
+  const leftWidth = leftActive ? swipe.deltaX : 0;
+  const rightWidth = rightActive ? -swipe.deltaX : 0;
+  const layerTransition = swipe.isDragging ? 'none' : 'width 150ms ease-out, opacity 150ms ease-out';
   const transformStyle = {
     transform: `translateX(${swipe.deltaX}px)`,
     transition: swipe.isDragging ? 'none' : 'transform 150ms ease-out',
@@ -569,37 +574,39 @@ function SessionRowItem({
       data-drag-item
       className="relative overflow-hidden rounded-md"
     >
-      {/* Left action layer — revealed when swiping right */}
-      <div
-        className="absolute inset-y-0 left-0 flex items-center justify-start pl-4 bg-primary text-primary-foreground rounded-md"
-        style={{ width: SWIPE_OPEN_OFFSET }}
-        aria-hidden={swipe.deltaX <= 0}
-      >
-        <button
-          type="button"
-          className="flex items-center gap-2 text-sm font-medium"
-          onClick={e => { e.stopPropagation(); onOpenChange(null); startRename(); }}
+      {/* Left action — grows from the left as the user swipes right */}
+      {leftActive && (
+        <div
+          className="absolute inset-y-0 left-0 overflow-hidden flex items-center justify-start pl-4 bg-primary text-primary-foreground rounded-md"
+          style={{ width: leftWidth, opacity: swipe.progress, transition: layerTransition }}
         >
-          <Pencil className="size-4" />
-          <span>Rename</span>
-        </button>
-      </div>
+          <button
+            type="button"
+            className="flex items-center gap-2 text-sm font-medium whitespace-nowrap"
+            onClick={e => { e.stopPropagation(); onOpenChange(null); startRename(); }}
+          >
+            <Pencil className="size-4 shrink-0" />
+            <span>Rename</span>
+          </button>
+        </div>
+      )}
 
-      {/* Right action layer — revealed when swiping left */}
-      <div
-        className="absolute inset-y-0 right-0 flex items-center justify-end pr-4 bg-destructive text-destructive-foreground rounded-md"
-        style={{ width: SWIPE_OPEN_OFFSET }}
-        aria-hidden={swipe.deltaX >= 0}
-      >
-        <button
-          type="button"
-          className="flex items-center gap-2 text-sm font-medium"
-          onClick={e => { e.stopPropagation(); onOpenChange(null); deleteRow(); }}
+      {/* Right action — grows from the right as the user swipes left */}
+      {rightActive && (
+        <div
+          className="absolute inset-y-0 right-0 overflow-hidden flex items-center justify-end pr-4 bg-destructive text-destructive-foreground rounded-md"
+          style={{ width: rightWidth, opacity: swipe.progress, transition: layerTransition }}
         >
-          <Trash2 className="size-4" />
-          <span>Delete</span>
-        </button>
-      </div>
+          <button
+            type="button"
+            className="flex items-center gap-2 text-sm font-medium whitespace-nowrap"
+            onClick={e => { e.stopPropagation(); onOpenChange(null); deleteRow(); }}
+          >
+            <Trash2 className="size-4 shrink-0" />
+            <span>Delete</span>
+          </button>
+        </div>
+      )}
 
       {/* Foreground content — translates with finger */}
       <div style={transformStyle} {...swipe.handlers}>
