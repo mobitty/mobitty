@@ -30,6 +30,15 @@ export interface MobittyNativeBridge {
   /// The list, edit form, and connection retry/rollback all live on the
   /// native side — the web client just fires this and waits.
   requestOpenServersDialog: () => void;
+  /// Short-press of the SoftkeyBar keyboard toggle. iOS owns the cycle
+  /// state machine: rotates through user-defined custom keyboard layouts,
+  /// falling through to the system keyboard after the last layout.
+  /// Optional so the web works against older iOS shells.
+  requestKeyboardCycle?: () => void;
+  /// Open the iOS keyboard customizer sheet. Triggered by the
+  /// "Customize iOS keyboard…" button in the web SettingsDialog softkeys
+  /// tab. Optional so the web works against older iOS shells.
+  requestOpenKeyboardSettings?: () => void;
 }
 
 declare global {

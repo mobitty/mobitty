@@ -205,8 +205,16 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
     const handleKeyboardToggleTap = useCallback(() => {
       const bridge = getNativeBridge();
       if (!bridge) return;
-      const next: KeyboardMode = keyboardMode === 'terminal' ? 'system' : 'terminal';
-      bridge.requestKeyboardMode(next);
+      // iOS shells that support multiple custom-keyboard layouts own the
+      // cycle state machine: tap rotates through layouts, falling through
+      // to the system keyboard after the last. Older shells without
+      // requestKeyboardCycle keep the simple system↔terminal toggle.
+      if (bridge.requestKeyboardCycle) {
+        bridge.requestKeyboardCycle();
+      } else {
+        const next: KeyboardMode = keyboardMode === 'terminal' ? 'system' : 'terminal';
+        bridge.requestKeyboardMode(next);
+      }
     }, [keyboardMode]);
 
     const handleKeyboardToggleLongPress = useCallback(() => {

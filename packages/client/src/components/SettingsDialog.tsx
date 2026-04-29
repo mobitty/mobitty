@@ -11,7 +11,8 @@ import { SoftkeyEditor } from '@/components/SoftkeyEditor';
 import { Popover, PopoverTrigger, PopoverContent } from '@/components/ui/popover';
 import { KeyCaptureInput } from '@/components/KeyCaptureInput';
 import { HOTKEY_DEFAULT, describeHotkey } from '@/platform-detect';
-import { CircleHelp, ExternalLink, X } from 'lucide-react';
+import { CircleHelp, ExternalLink, Keyboard, X } from 'lucide-react';
+import { isNativeApp, getNativeBridge } from '@/native-bridge';
 import { GestureEditor } from '@/components/GestureEditor';
 import { SoftkeySettingsEditor } from '@/components/SoftkeySettingsEditor';
 import type { Profile, ProfileTheme, SoftkeyConfig, GestureMapping, SoftkeyKeySettings, ProfileFieldErrors, ProfileFieldName } from '@/profiles';
@@ -807,6 +808,25 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
               softkeySettings={softkeySettings}
               onChange={setSoftkeySettings}
             />
+            {isNativeApp() && (
+              <>
+                <Separator />
+                <div className="space-y-2">
+                  <Label className="text-xs text-muted-foreground">iOS Native Keyboard</Label>
+                  <Button
+                    variant="outline"
+                    onClick={() => getNativeBridge()?.requestOpenKeyboardSettings?.()}
+                    className="w-full justify-start"
+                  >
+                    <Keyboard className="h-4 w-4 mr-2" />
+                    Customize iOS keyboard…
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    The iOS terminal keyboard uses its own customizable grid layouts, separate from the softkeys above.
+                  </p>
+                </div>
+              </>
+            )}
           </TabsContent>
 
           {editingDevice === 'mobile' && (
