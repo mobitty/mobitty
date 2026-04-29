@@ -8,6 +8,8 @@ import { generateUniqueSessionName } from './session-names.ts';
 import type { LoggerInterface } from './types.ts';
 import headlessPkg from '@xterm/headless';
 const { Terminal } = headlessPkg;
+import serializePkg from '@xterm/addon-serialize';
+const { SerializeAddon } = serializePkg;
 import { trackCursorVisibility } from './cursor-visibility.ts';
 import type { CursorVisibilityTracker } from './cursor-visibility.ts';
 import { registerNotificationHandlers } from './osc-notifications.ts';
@@ -26,6 +28,7 @@ interface SessionEntry {
   shell: string;
   handle: PtyHandle | null;
   headless: InstanceType<typeof Terminal> | null;
+  serializeAddon: InstanceType<typeof SerializeAddon> | null;
   cursorTracker: CursorVisibilityTracker | null;
   colorTracker: OscColorQueryTracker | null;
   title: string;
@@ -116,6 +119,7 @@ export class SessionRegistry {
         shell: s.shell,
         handle: null,
         headless: null,
+        serializeAddon: null,
         cursorTracker: null,
         colorTracker: null,
         title: '',
@@ -173,6 +177,10 @@ export class SessionRegistry {
       ? { backend: 'conpty' as const, buildNumber: parseInt(release().split('.')[2] ?? '0', 10) }
       : undefined;
     const headless = new Terminal({ cols: columns, rows, scrollback, allowProposedApi: true, windowsPty });
+    const serializeAddon = new SerializeAddon();
+    // SerializeAddon is typed against @xterm/xterm's Terminal but is structurally
+    // identical to @xterm/headless's; the runtime API is the same.
+    headless.loadAddon(serializeAddon as unknown as Parameters<typeof headless.loadAddon>[0]);
     let title = '';
 
     const onExitCallbacks: Array<() => void> = [];
@@ -265,6 +273,7 @@ export class SessionRegistry {
       shell: shellName,
       handle,
       headless,
+      serializeAddon,
       cursorTracker,
       colorTracker,
       title,
@@ -306,6 +315,10 @@ export class SessionRegistry {
 
   getHeadless(sessionId: string): InstanceType<typeof Terminal> | null {
     return this.sessions.get(sessionId)?.headless ?? null;
+  }
+
+  getSerializeAddon(sessionId: string): InstanceType<typeof SerializeAddon> | null {
+    return this.sessions.get(sessionId)?.serializeAddon ?? null;
   }
 
   getTitle(sessionId: string): string {
@@ -405,6 +418,10 @@ export class SessionRegistry {
       entry.colorTracker.dispose();
       entry.colorTracker = null;
     }
+    if (entry.serializeAddon) {
+      entry.serializeAddon.dispose();
+      entry.serializeAddon = null;
+    }
     if (entry.headless) {
       entry.headless.dispose();
       entry.headless = null;
@@ -430,6 +447,10 @@ export class SessionRegistry {
       if (entry.colorTracker) {
         entry.colorTracker.dispose();
         entry.colorTracker = null;
+      }
+      if (entry.serializeAddon) {
+        entry.serializeAddon.dispose();
+        entry.serializeAddon = null;
       }
       if (entry.headless) {
         entry.headless.dispose();

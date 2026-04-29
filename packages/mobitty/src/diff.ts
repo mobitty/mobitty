@@ -356,83 +356,24 @@ export function generateDiff(prev: FrameSnapshot, curr: FrameSnapshot): string |
   return out;
 }
 
-export function serializeFullState(terminal: Terminal, title: string, cursorHidden: boolean): string {
-  const buf = terminal.buffer.active;
-  const cols = terminal.cols;
-  const rows = terminal.rows;
-  const baseY = buf.baseY;
-  const totalLines = baseY + rows;
-
-  // Hide cursor, set buffer mode, reset SGR, clear screen, home cursor.
-  // Buffer switch MUST come before clear/home so they apply to the correct buffer.
-  // SGR reset MUST come before 2J because xterm.js uses BCE (Background Color Erase):
-  // \x1b[2J fills cells with the current SGR background, not default.
-  let out = '\x1b[?25l';
-  out += buf.type === 'alternate' ? '\x1b[?1049h' : '\x1b[?1049l';
-  out += '\x1b[0m\x1b[2J\x1b[H';
-
-  // Write all lines (scrollback + visible)
-  const cell = buf.getLine(0)?.getCell(0);
-  if (!cell) return out;
-
-  for (let y = 0; y < totalLines; y++) {
-    const line = buf.getLine(y);
-    if (!line) {
-      if (y < totalLines - 1) out += '\r\n';
-      continue;
-    }
-
-    // Trim trailing empty cells to avoid unnecessary whitespace
-    let lineEnd = cols;
-    while (lineEnd > 0) {
-      line.getCell(lineEnd - 1, cell);
-      const ch = cell.getChars();
-      if ((ch !== '' && ch !== ' ') || cell.getFgColorMode() !== 0 || cell.getBgColorMode() !== 0 || packAttrs(cell) !== 0) break;
-      lineEnd--;
-    }
-
-    for (let x = 0; x < lineEnd; x++) {
-      line.getCell(x, cell);
-      if (cell.getWidth() === 0) continue; // Skip continuation cells
-
-      out += sgrSequence({
-        char: '', width: 0,
-        fg: cell.getFgColor(), bg: cell.getBgColor(),
-        fgMode: cell.getFgColorMode(), bgMode: cell.getBgColorMode(),
-        attrs: packAttrs(cell),
-      });
-      out += cell.getChars() || ' ';
-    }
-
-    // Reset SGR before line break to prevent BCE (Background Color Erase).
-    // When \r\n causes scrolling, xterm.js fills the new blank row with
-    // the current SGR background. Without this reset, empty lines following
-    // colored content inherit the previous line's background color.
-    if (lineEnd > 0) out += '\x1b[0m';
-
-    if (y < totalLines - 1) out += '\r\n';
-  }
-
-  // Reset SGR before positioning cursor to avoid leaking color state to client
-  out += '\x1b[0m';
-
-  // Position cursor
-  out += `\x1b[${buf.cursorY + 1};${buf.cursorX + 1}H`;
-
-  // Mode-setting sequences
-  const modes = readModes(terminal);
-  const defaults = defaultModes();
-  out += emitModeChanges(defaults, modes);
-
-  // Title
-  if (title) {
-    out += `\x1b]2;${title}\x07`;
-  }
-
-  if (!cursorHidden) {
-    out += '\x1b[?25h';
-  }
-
+// Serializes via @xterm/addon-serialize, which preserves wrapped-line groups
+// (the `isWrapped` flag) so the client can reflow scrollback on resize. The
+// structural parameter type avoids dragging addon types into this module and
+// sidesteps the @xterm/xterm vs @xterm/headless type mismatch — the addon's
+// `activate(terminal)` signature targets @xterm/xterm's Terminal, but the
+// actual Terminal API surface used is identical.
+export function serializeFullState(serializer: { serialize(): string }, title: string, cursorHidden: boolean): string {
+  // Hide cursor for the duration of the client's write to prevent flicker.
+  // Reset SGR + clear screen + home cursor before the addon's payload so the
+  // client starts from a known-clean slate. SGR reset MUST precede \x1b[2J:
+  // xterm.js uses BCE (Background Color Erase) and fills cleared cells with
+  // the current SGR background, not the terminal default.
+  // Buffer-mode switching, terminal modes, and cursor restoration are all
+  // emitted by the addon.
+  let out = '\x1b[?25l\x1b[0m\x1b[2J\x1b[H';
+  out += serializer.serialize();
+  if (title) out += `\x1b]2;${title}\x07`;
+  if (!cursorHidden) out += '\x1b[?25h';
   return out;
 }
 
