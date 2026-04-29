@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { GripVertical, Server, Settings, X } from 'lucide-react';
+import { GripVertical, Pencil, Server, Settings, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -15,6 +15,7 @@ import { fetchShells, type ShellInfo } from '@/shells';
 import { isNativeApp, getNativeBridge } from '@/native-bridge';
 import { HotkeyHelpOverlay } from '@/components/HotkeyHelpOverlay';
 import { useListDrag } from '@/hooks/use-list-drag';
+import { useSwipeActions, SWIPE_OPEN_OFFSET, type SwipeOpenSide } from '@/hooks/use-swipe-actions';
 
 interface SessionPanelProps {
   open: boolean;
@@ -25,9 +26,10 @@ interface SessionPanelProps {
   onCreateSession: (shell?: string) => void;
   onSettingsOpen: () => void;
   onNoSessionsLeft: () => void;
+  isMobile: boolean;
 }
 
-export function SessionPanel({ open, onClose, currentSessionId, alertedSessionIds, onSwitchSession, onCreateSession, onSettingsOpen, onNoSessionsLeft }: SessionPanelProps) {
+export function SessionPanel({ open, onClose, currentSessionId, alertedSessionIds, onSwitchSession, onCreateSession, onSettingsOpen, onNoSessionsLeft, isMobile }: SessionPanelProps) {
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -41,6 +43,7 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
   const shellFocusedRef = useRef<HTMLDivElement>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [editMode, setEditMode] = useState(false);
+  const [openSwipe, setOpenSwipe] = useState<{ id: string; side: 'left' | 'right' } | null>(null);
 
   const showStatus = useCallback((msg: string) => {
     setStatus(msg);
@@ -67,6 +70,7 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
   useEffect(() => {
     if (!open) return;
     setEditMode(false);
+    setOpenSwipe(null);
     refresh().then(list => {
       const idx = list.findIndex(s => s.sessionId === currentSessionId);
       setFocusedIndex(idx >= 0 ? idx : 0);
@@ -75,9 +79,9 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
     fetchShells().then(setShells).catch(() => {});
   }, [open, refresh, currentSessionId]);
 
-  // Dismiss active rename when exiting edit mode
+  // Reset swipe state when entering edit mode (drag handle takes over)
   useEffect(() => {
-    if (!editMode) setEditingId(null);
+    if (editMode) setOpenSwipe(null);
   }, [editMode]);
 
   // Clamp focusedIndex when sessions list shrinks
@@ -352,109 +356,44 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
           const isEditing = editingId === session.sessionId;
           const isFocused = index === focusedIndex;
           const hasAlert = !isCurrent && (alertedSessionIds?.has(session.sessionId) || session.hasAlert);
-          const isDragging = dragIndex === index;
+          const isRowDragging = dragIndex === index;
           const isDropTarget = dropIndex === index && dragIndex !== null && dragIndex !== index;
+          const swipeOpenSide: SwipeOpenSide = openSwipe?.id === session.sessionId ? openSwipe.side : null;
 
           return (
-            <div
+            <SessionRowItem
               key={session.sessionId}
-              ref={isFocused ? focusedRef : undefined}
-              data-drag-item
-              className={`flex items-center gap-2 px-3 py-2 rounded-md border ${
-                isCurrent ? 'border-primary bg-primary/10' : 'border-border'
-              } ${isFocused ? 'ring-2 ring-primary' : ''} ${!editMode && (session.alive || isCurrent) ? 'cursor-pointer' : ''} ${
-                isDragging ? 'opacity-50' : ''
-              } ${isDropTarget ? 'border-t-2 border-t-primary' : ''}`}
-              onClick={() => {
+              session={session}
+              isCurrent={isCurrent}
+              isEditing={isEditing}
+              isFocused={isFocused}
+              hasAlert={hasAlert}
+              isRowDragging={isRowDragging}
+              isDropTarget={isDropTarget}
+              isMobile={isMobile}
+              editMode={editMode}
+              editName={editName}
+              setEditName={setEditName}
+              cancelRename={() => setEditingId(null)}
+              submitRename={() => handleRename(session.sessionId)}
+              startRename={() => { setEditingId(session.sessionId); setEditName(session.name); }}
+              deleteRow={() => handleDelete(session.sessionId)}
+              onActivate={() => {
                 if (editMode) return;
                 if (isCurrent) { onClose(); return; }
                 if (session.alive) handleSwitch(session.sessionId);
               }}
-            >
-              {/* Drag handle (edit mode only) */}
-              {editMode && !isEditing && (
-                <span
-                  className="flex items-center justify-center w-6 h-6 shrink-0 text-muted-foreground cursor-grab active:cursor-grabbing touch-none"
-                  {...listDragHandleProps(index)}
-                  aria-label="Drag to reorder"
-                >
-                  <GripVertical className="size-4" />
-                </span>
-              )}
-
-              {/* Alert dot */}
-              {hasAlert && (
-                <span className="w-2 h-2 rounded-full bg-destructive shrink-0" />
-              )}
-
-              {/* Name or edit input */}
-              <div className="flex-1 min-w-0">
-                {isEditing ? (
-                  <form
-                    onSubmit={e => { e.preventDefault(); handleRename(session.sessionId); }}
-                    onClick={e => e.stopPropagation()}
-                    className="flex gap-1"
-                  >
-                    <Input
-                      value={editName}
-                      onChange={e => setEditName(e.target.value)}
-                      className="h-7 text-sm"
-                      autoFocus
-                      onBlur={() => setEditingId(null)}
-                      onKeyDown={e => { if (e.key === 'Escape') setEditingId(null); }}
-                    />
-                  </form>
-                ) : session.title ? (
-                  <>
-                    <span className="text-sm font-medium truncate block">
-                      {session.title}
-                    </span>
-                    <div className="text-xs text-muted-foreground truncate">{session.name}</div>
-                  </>
-                ) : (
-                  <span className="text-sm font-medium truncate block">
-                    {session.name}
-                  </span>
-                )}
-                <div className="text-xs text-muted-foreground">
-                  {session.shell} &middot; PID {session.pid} &middot; {session.sessionId.slice(0, 8)}
-                </div>
-              </div>
-
-              {/* Status badge (died only) */}
-              {!session.alive && (
-                <Badge variant="destructive" className="shrink-0">died</Badge>
-              )}
-
-              {/* Current indicator */}
-              {isCurrent && (
-                <Badge variant="outline" className="shrink-0">current</Badge>
-              )}
-
-              {/* Rename button (edit mode only) */}
-              {editMode && !isEditing && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs shrink-0"
-                  onClick={e => { e.stopPropagation(); setEditingId(session.sessionId); setEditName(session.name); }}
-                >
-                  Rename
-                </Button>
-              )}
-
-              {/* Delete button (edit mode only) */}
-              {editMode && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs text-destructive shrink-0"
-                  onClick={e => { e.stopPropagation(); handleDelete(session.sessionId); }}
-                >
-                  Delete
-                </Button>
-              )}
-            </div>
+              focusedRef={isFocused ? focusedRef : undefined}
+              dragHandleProps={listDragHandleProps(index)}
+              openSide={swipeOpenSide}
+              onOpenChange={(side) => {
+                if (side === null) {
+                  setOpenSwipe(prev => prev?.id === session.sessionId ? null : prev);
+                } else {
+                  setOpenSwipe({ id: session.sessionId, side });
+                }
+              }}
+            />
           );
         })}
           </>
@@ -474,6 +413,198 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
         onClose={() => setShowHelp(false)}
         context={showShellPicker ? 'shell-selector' : 'session-panel'}
       />
+    </div>
+  );
+}
+
+interface SessionRowItemProps {
+  session: SessionInfo;
+  isCurrent: boolean;
+  isEditing: boolean;
+  isFocused: boolean;
+  hasAlert: boolean;
+  isRowDragging: boolean;
+  isDropTarget: boolean;
+  isMobile: boolean;
+  editMode: boolean;
+  editName: string;
+  setEditName: (name: string) => void;
+  cancelRename: () => void;
+  submitRename: () => void;
+  startRename: () => void;
+  deleteRow: () => void;
+  onActivate: () => void;
+  focusedRef?: React.RefObject<HTMLDivElement | null> | undefined;
+  dragHandleProps: { onPointerDown: (e: React.PointerEvent) => void };
+  openSide: SwipeOpenSide;
+  onOpenChange: (side: SwipeOpenSide) => void;
+}
+
+function SessionRowItem({
+  session, isCurrent, isEditing, isFocused, hasAlert,
+  isRowDragging, isDropTarget, isMobile, editMode,
+  editName, setEditName, cancelRename, submitRename, startRename, deleteRow, onActivate,
+  focusedRef, dragHandleProps, openSide, onOpenChange,
+}: SessionRowItemProps) {
+  const swipeEnabled = isMobile && !editMode && !isEditing;
+  const swipe = useSwipeActions({
+    disabled: !swipeEnabled,
+    onRightAction: () => { onOpenChange(null); startRename(); },
+    onLeftAction: () => { onOpenChange(null); deleteRow(); },
+    openSide,
+    onOpenChange,
+  });
+
+  const showStackedActions = !isMobile && !isEditing;
+  const cwd = session.cwd;
+
+  const rowBody = (
+    <div
+      className={`group relative flex items-center gap-2 px-3 py-2 rounded-md border bg-background ${
+        isCurrent ? 'border-primary bg-primary/10' : 'border-border'
+      } ${isFocused ? 'ring-2 ring-primary' : ''} ${!editMode && (session.alive || isCurrent) ? 'cursor-pointer' : ''} ${
+        isRowDragging ? 'opacity-50' : ''
+      } ${isDropTarget ? 'border-t-2 border-t-primary' : ''}`}
+      onClick={() => {
+        if (swipe.shouldSuppressClick()) return;
+        if (openSide !== null) { onOpenChange(null); return; }
+        onActivate();
+      }}
+    >
+      {editMode && !isEditing && (
+        <span
+          className="flex items-center justify-center w-6 h-6 shrink-0 text-muted-foreground cursor-grab active:cursor-grabbing touch-none"
+          {...dragHandleProps}
+          aria-label="Drag to reorder"
+        >
+          <GripVertical className="size-4" />
+        </span>
+      )}
+
+      {hasAlert && (
+        <span className="w-2 h-2 rounded-full bg-destructive shrink-0" />
+      )}
+
+      <div className="flex-1 min-w-0">
+        {isEditing ? (
+          <form
+            onSubmit={e => { e.preventDefault(); submitRename(); }}
+            onClick={e => e.stopPropagation()}
+            className="flex gap-1"
+          >
+            <Input
+              value={editName}
+              onChange={e => setEditName(e.target.value)}
+              className="h-7 text-sm"
+              autoFocus
+              onBlur={cancelRename}
+              onKeyDown={e => { if (e.key === 'Escape') cancelRename(); }}
+            />
+          </form>
+        ) : session.title ? (
+          <>
+            <span className="text-sm font-medium truncate block">{session.title}</span>
+            <div className="text-xs text-muted-foreground truncate">{session.name}</div>
+          </>
+        ) : (
+          <span className="text-sm font-medium truncate block">{session.name}</span>
+        )}
+        {cwd && (
+          <div className="text-xs text-muted-foreground truncate font-mono">{cwd}</div>
+        )}
+        <div className="text-xs text-muted-foreground truncate">
+          {session.shell} · pid {session.pid}
+        </div>
+      </div>
+
+      {!session.alive && (
+        <Badge variant="destructive" className="shrink-0">died</Badge>
+      )}
+
+      {isCurrent && (
+        <Badge variant="outline" className="shrink-0">current</Badge>
+      )}
+
+      {showStackedActions && (
+        <div className="flex flex-col gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            aria-label="Rename"
+            onClick={e => { e.stopPropagation(); startRename(); }}
+          >
+            <Pencil />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon-xs"
+            className="text-destructive hover:text-destructive"
+            aria-label="Delete"
+            onClick={e => { e.stopPropagation(); deleteRow(); }}
+          >
+            <Trash2 />
+          </Button>
+        </div>
+      )}
+    </div>
+  );
+
+  if (!swipeEnabled) {
+    return (
+      <div ref={focusedRef} data-drag-item>
+        {rowBody}
+      </div>
+    );
+  }
+
+  const transformStyle = {
+    transform: `translateX(${swipe.deltaX}px)`,
+    transition: swipe.isDragging ? 'none' : 'transform 150ms ease-out',
+    touchAction: 'pan-y' as const,
+  };
+
+  return (
+    <div
+      ref={focusedRef}
+      data-drag-item
+      className="relative overflow-hidden rounded-md"
+    >
+      {/* Left action layer — revealed when swiping right */}
+      <div
+        className="absolute inset-y-0 left-0 flex items-center justify-start pl-4 bg-primary text-primary-foreground rounded-md"
+        style={{ width: SWIPE_OPEN_OFFSET }}
+        aria-hidden={swipe.deltaX <= 0}
+      >
+        <button
+          type="button"
+          className="flex items-center gap-2 text-sm font-medium"
+          onClick={e => { e.stopPropagation(); onOpenChange(null); startRename(); }}
+        >
+          <Pencil className="size-4" />
+          <span>Rename</span>
+        </button>
+      </div>
+
+      {/* Right action layer — revealed when swiping left */}
+      <div
+        className="absolute inset-y-0 right-0 flex items-center justify-end pr-4 bg-destructive text-destructive-foreground rounded-md"
+        style={{ width: SWIPE_OPEN_OFFSET }}
+        aria-hidden={swipe.deltaX >= 0}
+      >
+        <button
+          type="button"
+          className="flex items-center gap-2 text-sm font-medium"
+          onClick={e => { e.stopPropagation(); onOpenChange(null); deleteRow(); }}
+        >
+          <Trash2 className="size-4" />
+          <span>Delete</span>
+        </button>
+      </div>
+
+      {/* Foreground content — translates with finger */}
+      <div style={transformStyle} {...swipe.handlers}>
+        {rowBody}
+      </div>
     </div>
   );
 }

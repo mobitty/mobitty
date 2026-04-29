@@ -364,12 +364,13 @@ export function App() {
         return next;
       });
     },
-    onSessionNotification: (notifSessionId: string, title: string, body: string, sessionName: string, sessionTitle: string) => {
+    onSessionNotification: (notifSessionId: string, title: string, body: string, sessionName: string, sessionTitle: string, sessionCwd: string) => {
       if (notifSessionId === currentSessionIdRef.current) return;
       const sessionLabel = sessionTitle || sessionName;
       const toastTitle = sessionLabel ? `[${sessionLabel}] ${title}` : title;
+      const description = [body, sessionCwd].filter(Boolean).join('\n') || undefined;
       toast(toastTitle, {
-        description: body || undefined,
+        description,
         duration: 5000,
         action: {
           label: 'Switch',
@@ -599,6 +600,7 @@ export function App() {
         onCreateSession={handleCreateSession}
         onSettingsOpen={() => setSettingsOpen(true)}
         onNoSessionsLeft={handleNoSessionsLeft}
+        isMobile={isMobile}
       />
 
       <SystemMeterPanel

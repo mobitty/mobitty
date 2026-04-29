@@ -8,6 +8,7 @@ export interface SessionInfo {
   shell: string;
   title: string;
   hasAlert: boolean;
+  cwd: string;
 }
 
 const STORAGE_KEY = 'mobitty-session-id';
