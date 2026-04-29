@@ -139,6 +139,8 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
     const modifiersRef = useRef<ModifierFlags>(emptyModifiers());
     const onModifiersChangeRef = useRef(onModifiersChange);
     onModifiersChangeRef.current = onModifiersChange;
+    const onActionRef = useRef(onAction);
+    onActionRef.current = onAction;
 
     const updateModifiers = useCallback((next: ModifierFlags) => {
       modifiersRef.current = next;
@@ -199,6 +201,21 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
       bridge.onKeyboardModeChanged = (mode: KeyboardMode) => setKeyboardMode(mode);
       return () => {
         bridge.onKeyboardModeChanged = () => {};
+      };
+    }, []);
+
+    // Forward iOS native-keyboard taps into the same TerminalCore dispatch
+    // path the web softkey bar uses. The bridge shim's onKeyAction starts as
+    // a no-op; without this override every tap on the iOS terminal keyboard
+    // is silently dropped on the web side.
+    useEffect(() => {
+      const bridge = getNativeBridge();
+      if (!bridge) return;
+      bridge.onKeyAction = (action, mods) => {
+        onActionRef.current(action, mods ?? emptyModifiers());
+      };
+      return () => {
+        bridge.onKeyAction = () => {};
       };
     }, []);
 
