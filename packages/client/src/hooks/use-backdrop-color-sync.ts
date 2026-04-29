@@ -2,8 +2,11 @@
 // keyboard's rounded top corners blend with the softkey bar instead of
 // showing two black notches. Reads the bar's rendered background color,
 // composites the 0.92 alpha over the body background, and posts the
-// resulting solid color to `mobittyNative.setBackdropColor`. Re-posts on
-// `(prefers-color-scheme)` flips. No-ops outside the iOS shell.
+// resulting solid color to `mobittyNative.setBackdropColor`. Also posts the
+// raw body background to `mobittyNative.setBodyBgColor`, which the shell
+// paints into the top safe-area strip so the status-bar background blends
+// with the terminal area below it. Re-posts on `(prefers-color-scheme)`
+// flips. No-ops outside the iOS shell.
 
 import { useEffect, type RefObject } from 'react';
 import { getNativeBridge } from '@/native-bridge';
@@ -60,11 +63,17 @@ export function useBackdropColorSync(ref: RefObject<HTMLElement | null>): void {
       if (!el) return;
       const bar = parseRgb(getComputedStyle(el).backgroundColor);
       if (!bar) return;
+      const bodyRaw = getComputedStyle(document.body).backgroundColor;
+      const body = parseRgb(bodyRaw);
+      if (body) {
+        // Body bg drives the iOS top safe-area paint. Send opaque so the
+        // shell doesn't have to composite.
+        bridge.setBodyBgColor?.(formatRgb({ ...body, a: 1 }));
+      }
       if (bar.a >= 1) {
         bridge.setBackdropColor(formatRgb(bar));
         return;
       }
-      const body = parseRgb(getComputedStyle(document.body).backgroundColor);
       if (!body) {
         // Body bg unparseable (e.g. unresolved oklch on an old engine) —
         // send the bar verbatim. iOS will composite over UIWindow black,
