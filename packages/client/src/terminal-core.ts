@@ -115,7 +115,7 @@ export interface TerminalCoreCallbacks {
   onBytesReceived?: (bytes: number) => void;
   onTargetFps?: (fps: number) => void;
   onSessionAlert?: (sessionId: string) => void;
-  onSessionNotification?: (sessionId: string, title: string, body: string, sessionName: string, sessionTitle: string) => void;
+  onSessionNotification?: (sessionId: string, title: string, body: string, sessionName: string, sessionTitle: string, sessionCwd: string) => void;
   onImagePasteError?: (error: ImagePasteErrorInfo) => void;
   onEditorOpen?: (filePath: string, content: string, contentType?: string) => void;
   onDownloadStart?: (fileName: string, fileSize: number, token: string) => void;
@@ -1172,6 +1172,7 @@ export class TerminalCore {
               typeof r['body'] === 'string' ? r['body'] : '',
               sName || sShell,
               typeof r['sessionTitle'] === 'string' ? r['sessionTitle'] : '',
+              typeof r['sessionCwd'] === 'string' ? r['sessionCwd'] : '',
             );
           }
         }
