@@ -1466,6 +1466,11 @@ export class TerminalCore {
     if (this.pendingAtlasSerial !== serial) return;
     if (!this.webglAddon) return;
     this.webglAddon.clearTextureAtlas();
+    // clearTextureAtlas() only wipes the cache; existing canvas pixels
+    // were rasterized from the old (fallback) atlas and won't change
+    // until cells redraw. Force a full refresh so every visible cell
+    // re-bakes its glyph from the now-empty atlas using the loaded font.
+    this.terminal.refresh(0, this.terminal.rows - 1);
     this.logger.info('webgl-atlas-rebaked', this.getRenderDiagnostics('atlas-rebake'));
   }
 
