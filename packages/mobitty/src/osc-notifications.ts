@@ -1,5 +1,5 @@
 // OSC notification parsers for terminal notification protocols.
-// See docs/design-terminal-env.md for protocol details.
+// See docs/done-design-terminal-env.md for protocol details.
 
 import type { Terminal } from '@xterm/headless';
 

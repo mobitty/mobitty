@@ -21,7 +21,7 @@ export function spawnPty(options: SpawnOptions, callbacks: PtyCallbacks): PtyHan
 
   // Strip terminal-multiplexer vars that cause programs (e.g. Claude Code) to
   // misdetect the terminal, wrap OSC in DCS passthrough, or cap color support.
-  // See docs/design-terminal-env.md for rationale.
+  // See docs/done-design-terminal-env.md for rationale.
   const parentEnv = { ...process.env };
   delete parentEnv['TMUX'];
   delete parentEnv['TMUX_PANE'];
