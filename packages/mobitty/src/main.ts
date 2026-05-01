@@ -23,6 +23,7 @@ const { values } = parseArgs({
     'tls-cert': { type: 'string' },
     'tls-key': { type: 'string' },
     'tls-ca': { type: 'string' },
+    'no-tls': { type: 'boolean', default: false },
     'max-payload': { type: 'string' },
     'max-connections': { type: 'string' },
     'max-sessions': { type: 'string' },
@@ -51,6 +52,7 @@ OPTIONS:
         --tls-cert          Path to TLS certificate file (PEM)
         --tls-key           Path to TLS private key file (PEM)
         --tls-ca            Path to TLS CA chain file (PEM, optional)
+        --no-tls            Disable TLS even if cert/key are set in settings.ini
         --max-payload       Maximum WebSocket payload in MB (default: 50)
         --max-connections   Maximum concurrent WebSocket connections (default: 100, 0 = unlimited)
         --max-sessions      Maximum concurrent terminal sessions (default: 50, 0 = unlimited)
@@ -84,6 +86,7 @@ try {
     'tls-cert': values['tls-cert'],
     'tls-key': values['tls-key'],
     'tls-ca': values['tls-ca'],
+    'no-tls': values['no-tls'],
     'max-payload': values['max-payload'],
     'max-connections': values['max-connections'],
     'max-sessions': values['max-sessions'],

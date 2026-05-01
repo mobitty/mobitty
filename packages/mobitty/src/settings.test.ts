@@ -304,6 +304,29 @@ describe('loadConfig', () => {
     assert.equal(config.tls?.ca, 'CA');
   });
 
+  it('--no-tls disables TLS even when INI has cert/key', () => {
+    writeFileSync(join(tmpDir, 'cert.pem'), 'CERT');
+    writeFileSync(join(tmpDir, 'key.pem'), 'KEY');
+    writeFileSync(join(tmpDir, 'settings.ini'), '[tls]\ncert = cert.pem\nkey = key.pem\n');
+
+    const config = loadConfig(tmpDir, { 'no-tls': true });
+    assert.equal(config.tls, undefined);
+  });
+
+  it('--no-tls skips reading TLS files (no failure on missing INI paths)', () => {
+    writeFileSync(join(tmpDir, 'settings.ini'), '[tls]\ncert = nonexistent.pem\nkey = nonexistent.pem\n');
+
+    const config = loadConfig(tmpDir, { 'no-tls': true });
+    assert.equal(config.tls, undefined);
+  });
+
+  it('throws when --no-tls is combined with --tls-cert', () => {
+    assert.throws(
+      () => loadConfig(tmpDir, { 'no-tls': true, 'tls-cert': '/tmp/cert.pem' }),
+      (err: unknown) => err instanceof ConfigError && /cannot be combined/.test(err.message),
+    );
+  });
+
   it('treats empty INI values as absent', () => {
     writeFileSync(join(tmpDir, 'settings.ini'), '[server]\nport =\ninterface =\n');
     const config = loadConfig(tmpDir, noCli);

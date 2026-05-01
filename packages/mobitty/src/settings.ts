@@ -96,6 +96,7 @@ export interface CliArgs {
   'tls-cert'?: string;
   'tls-key'?: string;
   'tls-ca'?: string;
+  'no-tls'?: boolean;
   'max-payload'?: string;
   'max-connections'?: string;
   'max-sessions'?: string;
@@ -198,13 +199,18 @@ export function loadConfig(dataFolder: string, cli: CliArgs): ResolvedConfig {
 
   // ── TLS ──
   // INI paths resolve relative to dataFolder; CLI paths resolve relative to cwd.
+  // --no-tls overrides any INI [tls] config, forcing plain HTTP.
+
+  if (cli['no-tls'] && (cli['tls-cert'] !== undefined || cli['tls-key'] !== undefined || cli['tls-ca'] !== undefined)) {
+    throw new ConfigError('--no-tls cannot be combined with --tls-cert/--tls-key/--tls-ca');
+  }
 
   const tlsCertPath = cli['tls-cert'] ?? nonEmpty(tls['cert']);
   const tlsKeyPath = cli['tls-key'] ?? nonEmpty(tls['key']);
   const tlsCaPath = cli['tls-ca'] ?? nonEmpty(tls['ca']);
 
   let tlsConfig: TlsConfig | undefined;
-  if (tlsCertPath !== undefined || tlsKeyPath !== undefined) {
+  if (!cli['no-tls'] && (tlsCertPath !== undefined || tlsKeyPath !== undefined)) {
     if (tlsCertPath === undefined || tlsKeyPath === undefined) {
       throw new ConfigError('tls-cert and tls-key must both be provided');
     }
