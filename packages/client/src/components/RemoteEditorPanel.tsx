@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Save, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useShakeToUndoOnFocus } from '@/hooks/use-shake-to-undo-on-focus';
+import { getRemoteEditorDraft, setRemoteEditorDraft, clearRemoteEditorDraft } from '@/remote-editor-storage';
 
 interface RemoteEditorPanelProps {
   open: boolean;
@@ -30,25 +31,32 @@ export function RemoteEditorPanel({ open, filePath, content, contentType, onSave
     return `data:${contentType};base64,${content}`;
   }, [isImage, content, contentType]);
 
-  // Reset draft when opened with new content
+  // localStorage draft wins over server content so in-progress edits
+  // survive session switch / reconnect.
   useEffect(() => {
     if (open && !isImage) {
-      setDraft(content);
+      setDraft(getRemoteEditorDraft(filePath) ?? content);
       setTimeout(() => {
         textareaRef.current?.focus({ preventScroll: true });
       }, 0);
     }
-  }, [open, content, isImage]);
+  }, [open, content, isImage, filePath]);
 
   const handleSave = useCallback(() => {
+    clearRemoteEditorDraft(filePath);
     onSave(draft);
-  }, [draft, onSave]);
+  }, [draft, filePath, onSave]);
 
-  // Ctrl+S / Cmd+S to save (text mode only)
+  const handleCancel = useCallback(() => {
+    if (!isImage) clearRemoteEditorDraft(filePath);
+    onCancel();
+  }, [isImage, filePath, onCancel]);
+
+  // Ctrl/Cmd + S or Enter to save (text mode only)
   useEffect(() => {
     if (!open || isImage) return;
     const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+      if ((e.ctrlKey || e.metaKey) && (e.key === 's' || e.key === 'Enter')) {
         e.preventDefault();
         handleSave();
       }
@@ -72,7 +80,7 @@ export function RemoteEditorPanel({ open, filePath, content, contentType, onSave
           variant="ghost"
           size="sm"
           className="gap-1 text-muted-foreground hover:text-foreground"
-          onClick={onCancel}
+          onClick={handleCancel}
         >
           <X className="h-4 w-4" />
           {isImage ? 'Close' : 'Cancel'}
@@ -108,7 +116,11 @@ export function RemoteEditorPanel({ open, filePath, content, contentType, onSave
           ref={textareaRef}
           className="flex-1 min-h-0 w-full bg-background text-foreground font-mono text-sm resize-none outline-none p-3"
           value={draft}
-          onChange={(e) => setDraft(e.target.value)}
+          onChange={(e) => {
+            const val = e.target.value;
+            setDraft(val);
+            setRemoteEditorDraft(filePath, val);
+          }}
           spellCheck={false}
           autoCapitalize="off"
           autoCorrect="off"

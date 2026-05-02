@@ -116,6 +116,14 @@ export function App() {
     }
   }, [currentSessionId]);
 
+  // Hide the remote editor on session switch. Server replays EDITOR_OPEN on
+  // attach if the new session has a pending edit (protocol.ts: registerEditorSender).
+  // Do NOT call sendEditorDone — server-side pending state must survive so
+  // switching back replays the editor with the localStorage draft restored.
+  useEffect(() => {
+    setEditorOpen(false);
+  }, [currentSessionId]);
+
   // Preload lazy dialog chunks once the terminal handshake lands so that the
   // first open of Settings / Connection-Closed / Image-Paste-Error does not
   // stall on a chunk download.
