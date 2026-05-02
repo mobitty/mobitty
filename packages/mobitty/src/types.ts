@@ -89,6 +89,7 @@ export interface ServerConfig {
   terminalType: string;
   prefsJson: string;
   dataFolder: string;
+  startDir: string;
   maxPayloadBytes: number;
   maxConnections: number;
   maxSessions: number;

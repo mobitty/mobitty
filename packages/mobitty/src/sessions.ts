@@ -75,12 +75,14 @@ export class SessionRegistry {
   private alertListeners = new Set<(sessionId: string) => void>();
   private notificationListeners = new Set<(sessionId: string, title: string, body: string) => void>();
   private maxSessions: number;
+  private startDir: string;
 
-  constructor(dataFolder: string, logger: LoggerInterface, maxSessions = 0) {
+  constructor(dataFolder: string, logger: LoggerInterface, maxSessions = 0, startDir = '') {
     this.dataFolder = dataFolder;
     this.logger = logger;
     this.filePath = join(dataFolder, 'sessions.json');
     this.maxSessions = maxSessions;
+    this.startDir = startDir;
   }
 
   init(): void {
@@ -260,6 +262,7 @@ export class SessionRegistry {
         columns,
         rows,
         env: { ...env, MOBITTY_SESSION_ID: sessionId },
+        cwd: this.startDir || undefined,
       },
       {
         onData: (data: string) => {

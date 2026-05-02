@@ -2,7 +2,7 @@
 import { parseArgs } from 'node:util';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import type { ServerConfig } from './types.ts';
 import { startServer } from './server.ts';
@@ -27,6 +27,7 @@ const { values } = parseArgs({
     'max-payload': { type: 'string' },
     'max-connections': { type: 'string' },
     'max-sessions': { type: 'string' },
+    'start-dir': { type: 'string' },
     help: { type: 'boolean', short: 'h', default: false },
     version: { type: 'boolean', short: 'v', default: false },
   },
@@ -56,6 +57,7 @@ OPTIONS:
         --max-payload       Maximum WebSocket payload in MB (default: 50)
         --max-connections   Maximum concurrent WebSocket connections (default: 100, 0 = unlimited)
         --max-sessions      Maximum concurrent terminal sessions (default: 50, 0 = unlimited)
+        --start-dir         Default starting directory for new shells (default: server cwd)
     -v, --version           Print version and exit
     -h, --help              Print this help and exit
 
@@ -90,6 +92,7 @@ try {
     'max-payload': values['max-payload'],
     'max-connections': values['max-connections'],
     'max-sessions': values['max-sessions'],
+    'start-dir': values['start-dir'],
   });
 } catch (err) {
   if (err instanceof ConfigError) {
@@ -109,12 +112,29 @@ const logger = createLogger({
 
 const isWindows = process.platform === 'win32';
 
+let effectiveStartDir = resolved.startDir;
+if (effectiveStartDir !== process.cwd()) {
+  try {
+    if (!existsSync(effectiveStartDir) || !statSync(effectiveStartDir).isDirectory()) {
+      logger.warn('configured start-dir is not a directory; falling back to server cwd', { startDir: resolved.startDir });
+      effectiveStartDir = process.cwd();
+    }
+  } catch (err) {
+    logger.warn('cannot stat configured start-dir; falling back to server cwd', {
+      startDir: resolved.startDir,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    effectiveStartDir = process.cwd();
+  }
+}
+
 const config: ServerConfig = {
   port: resolved.port,
   host: resolved.host,
   terminalType: 'xterm-256color',
   prefsJson: JSON.stringify(isWindows ? { isWindows: true } : {}),
   dataFolder,
+  startDir: effectiveStartDir,
   maxPayloadBytes: resolved.maxPayloadBytes,
   maxConnections: resolved.maxConnections,
   maxSessions: resolved.maxSessions,

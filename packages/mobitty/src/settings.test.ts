@@ -1,8 +1,8 @@
 import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, existsSync, writeFileSync, mkdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { homedir, tmpdir } from 'node:os';
 import { parseIni, generateDefaultIni, loadConfig, parseDuration, ConfigError } from './settings.ts';
 import type { CliArgs } from './settings.ts';
 
@@ -227,6 +227,38 @@ describe('loadConfig', () => {
       () => loadConfig(tmpDir, { 'max-sessions': 'abc' }),
       (err: unknown) => err instanceof ConfigError && /invalid max-sessions/.test(err.message),
     );
+  });
+
+  it('defaults start-dir to server cwd when unset', () => {
+    const config = loadConfig(tmpDir, noCli);
+    assert.equal(config.startDir, process.cwd());
+  });
+
+  it('reads start-dir from INI', () => {
+    writeFileSync(join(tmpDir, 'settings.ini'), '[server]\nstart-dir = /tmp\n');
+    const config = loadConfig(tmpDir, noCli);
+    assert.equal(config.startDir, '/tmp');
+  });
+
+  it('CLI overrides start-dir from INI', () => {
+    writeFileSync(join(tmpDir, 'settings.ini'), '[server]\nstart-dir = /tmp\n');
+    const config = loadConfig(tmpDir, { 'start-dir': '/var/log' });
+    assert.equal(config.startDir, '/var/log');
+  });
+
+  it('expands ~ in start-dir to homedir', () => {
+    const config = loadConfig(tmpDir, { 'start-dir': '~' });
+    assert.equal(config.startDir, homedir());
+  });
+
+  it('expands ~/ prefix in start-dir', () => {
+    const config = loadConfig(tmpDir, { 'start-dir': '~/sub' });
+    assert.equal(config.startDir, join(homedir(), 'sub'));
+  });
+
+  it('resolves relative start-dir against cwd', () => {
+    const config = loadConfig(tmpDir, { 'start-dir': './rel' });
+    assert.equal(config.startDir, resolve('./rel'));
   });
 
   it('throws on invalid console log level', () => {

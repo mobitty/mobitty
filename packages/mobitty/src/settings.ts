@@ -1,4 +1,5 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { LogLevel, TlsConfig } from './types.ts';
 import { isLogLevel } from './types.ts';
@@ -57,6 +58,9 @@ max-connections = 100
 # Maximum concurrent terminal sessions (0 = unlimited)
 max-sessions = 50
 
+# Default starting directory for new shells (supports ~). Unset = server's launch cwd.
+# start-dir = ~/projects
+
 [logging]
 # Console log level: debug | info | warn | error
 console-level = warn
@@ -100,6 +104,7 @@ export interface CliArgs {
   'max-payload'?: string;
   'max-connections'?: string;
   'max-sessions'?: string;
+  'start-dir'?: string;
 }
 
 /** Fully validated, ready-to-use configuration. */
@@ -114,6 +119,7 @@ export interface ResolvedConfig {
   maxConnections: number;
   maxSessions: number;
   dataFolder: string;
+  startDir: string;
   tls?: TlsConfig;
 }
 
@@ -197,6 +203,24 @@ export function loadConfig(dataFolder: string, cli: CliArgs): ResolvedConfig {
     throw new ConfigError(`invalid max-sessions: ${maxSessionsStr} (must be a non-negative integer, 0 = unlimited)`);
   }
 
+  // ── Start dir ──
+  // Expand leading ~ via homedir(), then resolve so the result is always absolute.
+  // Relative paths anchor to launch cwd (consistent with CLI TLS path behavior).
+  // fs existence/isDirectory check happens in main.ts after the logger is built.
+
+  const startDirRaw = cli['start-dir'] ?? nonEmpty(server['start-dir']);
+  let startDir: string;
+  if (startDirRaw === undefined) {
+    startDir = process.cwd();
+  } else {
+    const expanded = startDirRaw === '~'
+      ? homedir()
+      : startDirRaw.startsWith('~/')
+        ? join(homedir(), startDirRaw.slice(2))
+        : startDirRaw;
+    startDir = resolve(expanded);
+  }
+
   // ── TLS ──
   // INI paths resolve relative to dataFolder; CLI paths resolve relative to cwd.
   // --no-tls overrides any INI [tls] config, forcing plain HTTP.
@@ -245,7 +269,7 @@ export function loadConfig(dataFolder: string, cli: CliArgs): ResolvedConfig {
     tlsConfig = { cert, key, ca };
   }
 
-  return { port, host, consoleLogLevel, fileLogLevel, logRotationMs, logRetentionMs, maxPayloadBytes, maxConnections, maxSessions, dataFolder, tls: tlsConfig };
+  return { port, host, consoleLogLevel, fileLogLevel, logRotationMs, logRetentionMs, maxPayloadBytes, maxConnections, maxSessions, dataFolder, startDir, tls: tlsConfig };
 }
 
 // ── Helpers ──────────────────────────────────────────────────────────────────

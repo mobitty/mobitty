@@ -7,6 +7,7 @@ interface SpawnOptions {
   columns: number;
   rows: number;
   env?: Record<string, string>;
+  cwd?: string;
 }
 
 interface PtyCallbacks {
@@ -40,7 +41,7 @@ export function spawnPty(options: SpawnOptions, callbacks: PtyCallbacks): PtyHan
     name: options.terminalType,
     cols: options.columns,
     rows: options.rows,
-    cwd: process.cwd(),
+    cwd: options.cwd ?? process.cwd(),
     env,
   });
 
