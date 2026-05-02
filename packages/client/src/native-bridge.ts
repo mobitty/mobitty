@@ -43,6 +43,13 @@ export interface MobittyNativeBridge {
   /// "Customize iOS keyboard…" button in the web SettingsDialog softkeys
   /// tab. Optional so the web works against older iOS shells.
   requestOpenKeyboardSettings?: () => void;
+  /// Toggle iOS shake-to-undo. Default is off — call with `true` while an
+  /// undoable textarea (remote editor, batch input panel) is focused, and
+  /// `false` on blur or unmount. Native independently resets to false on
+  /// page navigation and app backgrounding, so callers shouldn't assume
+  /// their last value persists. Optional so the web works against older
+  /// iOS shells.
+  setShakeToUndo?: (enabled: boolean) => void;
 }
 
 declare global {

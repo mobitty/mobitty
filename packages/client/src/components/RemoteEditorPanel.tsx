@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Save, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useShakeToUndoOnFocus } from '@/hooks/use-shake-to-undo-on-focus';
 
 interface RemoteEditorPanelProps {
   open: boolean;
@@ -21,6 +22,8 @@ export function RemoteEditorPanel({ open, filePath, content, contentType, onSave
   const [draft, setDraft] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isImage = contentType?.startsWith('image/') ?? false;
+
+  useShakeToUndoOnFocus(textareaRef);
 
   const imageDataUrl = useMemo(() => {
     if (!isImage || !content) return '';

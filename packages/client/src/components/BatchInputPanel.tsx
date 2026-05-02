@@ -3,6 +3,7 @@ import { Button } from '@/components/ui/button';
 import { X, ArrowUp } from 'lucide-react';
 import { getBatchInputDraft, setBatchInputDraft, clearBatchInputDraft } from '@/batch-input-storage';
 import { cn } from '@/lib/utils';
+import { useShakeToUndoOnFocus } from '@/hooks/use-shake-to-undo-on-focus';
 
 interface BatchInputPanelProps {
   open: boolean;
@@ -24,6 +25,8 @@ export function BatchInputPanel({ open, onSubmit, onClose }: BatchInputPanelProp
   const [draft, setDraft] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+
+  useShakeToUndoOnFocus(textareaRef);
 
   // Load from localStorage when opened
   useEffect(() => {
