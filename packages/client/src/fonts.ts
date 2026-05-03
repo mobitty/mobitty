@@ -30,20 +30,41 @@ export function findFontOption(fontFamily: string): FontOption | undefined {
 
 export async function loadFont(option: FontOption): Promise<void> {
   if (!option.cssFile) return;
-  if (document.head.querySelector(`link[data-font="${option.cssFile}"]`)) return;
-  const link = document.createElement("link");
-  link.rel = "stylesheet";
-  link.href = `${CDN_BASE}${option.cssFile}`;
-  link.dataset.font = option.cssFile;
-  document.head.appendChild(link);
-  try { localStorage.setItem('mobitty-font-css', option.cssFile); } catch { /* unavailable */ }
-  // document.fonts.ready can resolve before a slow CDN face has actually
-  // been decoded. Wait for the specific face via document.fonts.load(),
-  // with a 5s ceiling so a broken CDN can't soft-lock the page.
+
+  // Re-use an existing <link> if a previous loadFont() already added it
+  // (concurrent or repeat call); otherwise create one. We must NOT
+  // early-return when the link exists — the second caller still has to
+  // await its load if the stylesheet isn't parsed yet.
+  let link = document.head.querySelector(
+    `link[data-font="${option.cssFile}"]`,
+  ) as HTMLLinkElement | null;
+  if (!link) {
+    link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = `${CDN_BASE}${option.cssFile}`;
+    link.dataset.font = option.cssFile;
+    document.head.appendChild(link);
+    try { localStorage.setItem('mobitty-font-css', option.cssFile); } catch { /* unavailable */ }
+  }
+
   const face = option.fontFamily.match(/"([^"]+)"|'([^']+)'|([^,]+)/)?.[0]?.replace(/["']/g, '').trim();
-  if (!face) { await document.fonts.ready; return; }
-  await Promise.race([
-    document.fonts.load(`16px "${face}"`).catch(() => undefined),
-    new Promise<void>(r => setTimeout(r, 5_000)),
-  ]);
+
+  // Single 5s deadline covering BOTH the stylesheet parse and the font
+  // face decode. Awaiting link.onload first is required: document.fonts
+  // .load(face) only matches @font-face rules already registered in
+  // document.fonts. Calling it immediately after appendChild() resolves
+  // with zero matches (the rule isn't parsed yet), so the gate silently
+  // passes through and the terminal mounts with the monospace fallback —
+  // which the WebGL atlas then bakes ("crisp but wrong" symptom).
+  const deadline = new Promise<void>(r => setTimeout(r, 5_000));
+  const ready = (async () => {
+    if (!link!.sheet) {
+      await new Promise<void>(resolve => {
+        link!.addEventListener('load', () => resolve(), { once: true });
+        link!.addEventListener('error', () => resolve(), { once: true });
+      });
+    }
+    if (face) await document.fonts.load(`16px "${face}"`).catch(() => undefined);
+  })();
+  await Promise.race([ready, deadline]);
 }
