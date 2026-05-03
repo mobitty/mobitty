@@ -10,6 +10,7 @@ const noopLogger = {
   info() {},
   warn() {},
   error() {},
+  isEnabled() { return false; },
 };
 
 const testShellArgv = process.platform === 'win32' ? ['cmd.exe'] : ['/bin/sh'];

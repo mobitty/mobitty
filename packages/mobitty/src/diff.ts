@@ -356,6 +356,76 @@ export function generateDiff(prev: FrameSnapshot, curr: FrameSnapshot): string |
   return out;
 }
 
+export interface BufferStats {
+  cols: number;
+  rows: number;
+  bufferLen: number;
+  baseY: number;
+  cursorX: number;
+  cursorY: number;
+  wrappedLines: number;
+  fullWidthNonWrappedLines: number;
+}
+
+// Counts wrapped vs non-wrapped rows in the buffer. fullWidthNonWrappedLines is
+// the diagnostic for the "TUI emitted CRLF after filling the line" pattern that
+// foils grow-reflow — those rows look full but xterm.js can't merge them later.
+export function bufferStats(terminal: Terminal): BufferStats {
+  const buf = terminal.buffer.active;
+  let wrapped = 0;
+  let fullNonWrapped = 0;
+  for (let y = 0; y < buf.length; y++) {
+    const line = buf.getLine(y);
+    if (!line) continue;
+    if (line.isWrapped) {
+      wrapped++;
+    } else if (line.translateToString(true).length === terminal.cols) {
+      fullNonWrapped++;
+    }
+  }
+  return {
+    cols: terminal.cols,
+    rows: terminal.rows,
+    bufferLen: buf.length,
+    baseY: buf.baseY,
+    cursorX: buf.cursorX,
+    cursorY: buf.cursorY,
+    wrappedLines: wrapped,
+    fullWidthNonWrappedLines: fullNonWrapped,
+  };
+}
+
+export interface BytesSummary {
+  len: number;
+  sample: string;
+  crlfCount: number;
+  bareLfCount: number;
+  escCount: number;
+}
+
+// Summarize a chunk of VT bytes for safe logging. `sample` is the first
+// `maxLen` chars with control bytes escaped so the JSONL stays single-line.
+export function summarizeBytes(data: string | Uint8Array, maxLen = 120): BytesSummary {
+  const str = typeof data === 'string' ? data : new TextDecoder('utf-8', { fatal: false }).decode(data);
+  let crlf = 0;
+  let bareLf = 0;
+  let esc = 0;
+  for (let i = 0; i < str.length; i++) {
+    const c = str.charCodeAt(i);
+    if (c === 0x1b) esc++;
+    else if (c === 0x0a) {
+      if (i > 0 && str.charCodeAt(i - 1) === 0x0d) crlf++;
+      else bareLf++;
+    }
+  }
+  const sample = str.slice(0, maxLen)
+    .replace(/\x1b/g, '\\e')
+    .replace(/\r/g, '\\r')
+    .replace(/\n/g, '\\n')
+    .replace(/[\x00-\x1f]/g, c => `\\x${c.charCodeAt(0).toString(16).padStart(2, '0')}`);
+  return { len: str.length, sample, crlfCount: crlf, bareLfCount: bareLf, escCount: esc };
+}
+
 // Serializes via @xterm/addon-serialize, which preserves wrapped-line groups
 // (the `isWrapped` flag) so the client can reflow scrollback on resize. The
 // structural parameter type avoids dragging addon types into this module and

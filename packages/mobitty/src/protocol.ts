@@ -18,7 +18,7 @@ import { writeImageToSystemClipboard, writeImageToFile, getProcessCwd } from './
 import type { SessionRegistry } from './sessions.ts';
 import type { ShellStore } from './shells.ts';
 import type { Logger } from './logger.ts';
-import { captureSnapshot, generateDiff, serializeFullState, compareSnapshots } from './diff.ts';
+import { captureSnapshot, generateDiff, serializeFullState, compareSnapshots, bufferStats, summarizeBytes } from './diff.ts';
 import type { FrameSnapshot } from './diff.ts';
 import { resolveCliBin, ensureCliBinShim } from './cli-bin.ts';
 
@@ -118,6 +118,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
     const title = registry.getTitle(sid);
     const cursorHidden = registry.getCursorHidden(sid);
     const vtFull = serializeFullState(serializer, title, cursorHidden);
+    socketLogger.info('state-full sent', { stats: bufferStats(headless), payload: summarizeBytes(vtFull, 200) });
     ws.send(Buffer.from(String.fromCharCode(STATE_FULL) + vtFull));
     lastSnapshot = captureSnapshot(headless, title, cursorHidden, registry.getScrollCount(sid));
 
@@ -213,9 +214,16 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       lastSnapshot = curr;
 
       // Frame statistics
-      if (socketLogger && vtPayload !== '') {
+      if (socketLogger.isEnabled('debug') && vtPayload !== '') {
         const scrollDelta = prevSnapshot ? curr.scrollCount - prevSnapshot.scrollCount : 0;
-        socketLogger.debug('frame', { wasFull, scrollDelta, baseY: curr.baseY, diffBytes: vtPayload.length });
+        socketLogger.debug('frame', {
+          wasFull,
+          scrollDelta,
+          baseY: curr.baseY,
+          diffBytes: vtPayload.length,
+          stats: bufferStats(h),
+          payload: summarizeBytes(vtPayload, 200),
+        });
       }
 
 
@@ -407,6 +415,12 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
             sessionId = requestedSessionId;
             socketLogger.set('session', sessionId);
             registry.clearAlert(sessionId);
+            const headlessBeforeResize = registry.getHeadless(sessionId);
+            socketLogger.info('reconnect: pre-resize', {
+              clientCols: columns,
+              clientRows: rows,
+              before: headlessBeforeResize ? bufferStats(headlessBeforeResize) : null,
+            });
             registry.resizeSession(sessionId, columns, rows);
             registry.updateSessionScrollback(sessionId, scrollback);
             if (themeForeground && themeBackground) {
@@ -543,6 +557,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         return;
       }
       if (isResizeMessage(parsed)) {
+        socketLogger.info('client resize', { cols: parsed.columns, rows: parsed.rows });
         registry.resizeSession(sessionId, parsed.columns, parsed.rows);
         onSyncResize?.(parsed.columns, parsed.rows);
         // Force STATE_FULL on next tick after headless resizes

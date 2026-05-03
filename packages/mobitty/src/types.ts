@@ -52,6 +52,7 @@ export interface LoggerInterface {
   info(msg: string, data?: Record<string, unknown>): void;
   warn(msg: string, data?: Record<string, unknown>): void;
   error(msg: string, data?: Record<string, unknown>): void;
+  isEnabled(level: LogLevel): boolean;
 }
 
 const VALID_LOG_LEVELS = new Set<string>(['debug', 'info', 'warn', 'error']);

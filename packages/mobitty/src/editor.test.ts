@@ -4,7 +4,7 @@ import { SessionRegistry } from './sessions.ts';
 
 // Minimal logger for tests
 const noop = () => {};
-const logger = { debug: noop, info: noop, warn: noop, error: noop };
+const logger = { debug: noop, info: noop, warn: noop, error: noop, isEnabled: () => false };
 
 // We can't easily create real sessions (requires node-pty), so we test
 // the editor methods by constructing a registry and manually verifying

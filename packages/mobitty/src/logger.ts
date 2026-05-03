@@ -134,6 +134,12 @@ export class Logger implements LoggerInterface {
   warn(msg: string, data?: Record<string, unknown>): void { this.write('warn', 'server', msg, data); }
   error(msg: string, data?: Record<string, unknown>): void { this.write('error', 'server', msg, data); }
 
+  /** Whether either sink (console or file) would emit at this level. Use to
+   *  guard expensive log-data construction. */
+  isEnabled(level: LogLevel): boolean {
+    return shouldLog(this.consoleLevel, level) || shouldLog(this.fileLevel, level);
+  }
+
   /** Write a client-sourced log entry (from CLIENT_LOG messages). */
   clientLog(level: LogLevel, msg: string, clientSeq: number, data?: Record<string, unknown>, ts?: string): void {
     this.write(level, 'client', msg, data, clientSeq, ts);

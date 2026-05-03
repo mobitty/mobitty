@@ -18,6 +18,7 @@ import { registerColorQueryHandlers } from './osc-color-query.ts';
 import type { OscColorQueryTracker, OscColorConfig } from './osc-color-query.ts';
 import { BUILTIN_THEMES } from './themes.ts';
 import { normalizeSgrColors } from './sgr-normalize.ts';
+import { bufferStats, summarizeBytes } from './diff.ts';
 import { getProcessCwd } from './clipboard.ts';
 
 const HOME = homedir();
@@ -266,6 +267,9 @@ export class SessionRegistry {
       },
       {
         onData: (data: string) => {
+          if (this.logger.isEnabled('debug')) {
+            this.logger.debug('pty data', { sessionId, ...summarizeBytes(data) });
+          }
           headless.write(normalizeSgrColors(data)); notifyChange();
         },
         onExit: () => {
@@ -485,10 +489,13 @@ export class SessionRegistry {
   resizeSession(sessionId: string, columns: number, rows: number): void {
     const entry = this.sessions.get(sessionId);
     if (!entry?.handle) return;
+    const before = entry.headless ? bufferStats(entry.headless) : null;
     resizePty(entry.handle, columns, rows);
     if (entry.headless) {
       entry.headless.resize(columns, rows);
     }
+    const after = entry.headless ? bufferStats(entry.headless) : null;
+    this.logger.info('resize session', { sessionId, toCols: columns, toRows: rows, before, after });
   }
 
   updateSessionScrollback(sessionId: string, scrollback: number): void {
