@@ -713,6 +713,26 @@ export class TerminalCore {
     return { first, last };
   }
 
+  // Count wrapped vs full-width-non-wrapped rows. fullWidthNonWrappedLines is
+  // the diagnostic for content that grow-reflow can't merge — see
+  // todo-bug-claude-code-line-wrap.md.
+  private bufferWrapStats(): { bufferLen: number; cols: number; wrappedLines: number; fullWidthNonWrappedLines: number } {
+    const buf = this.terminal.buffer.active;
+    const cols = this.terminal.cols;
+    let wrapped = 0;
+    let fullNonWrapped = 0;
+    for (let y = 0; y < buf.length; y++) {
+      const line = buf.getLine(y);
+      if (!line) continue;
+      if (line.isWrapped) {
+        wrapped++;
+      } else if (line.translateToString(true).length === cols) {
+        fullNonWrapped++;
+      }
+    }
+    return { bufferLen: buf.length, cols, wrappedLines: wrapped, fullWidthNonWrappedLines: fullNonWrapped };
+  }
+
   private selectVisibleViewportLines() {
     const terminal = this.terminal;
     if (!terminal) return;
@@ -895,6 +915,8 @@ export class TerminalCore {
     this.registerSocket(terminal.onData(data => this.sendData(data)));
     this.registerSocket(terminal.onBinary(data => this.sendData(Uint8Array.from(data, v => v.charCodeAt(0)))));
     this.registerSocket(terminal.onResize(({ cols, rows }) => {
+      const stats = this.bufferWrapStats();
+      this.logger.info('terminal resize', { cols, rows, bufferLen: stats.bufferLen, wrappedLines: stats.wrappedLines, fullWidthNonWrappedLines: stats.fullWidthNonWrappedLines });
       const msg = JSON.stringify({ columns: cols, rows });
       this.socket?.send(this.textEncoder.encode(Command.RESIZE_TERMINAL + msg));
       if (this.resizeOverlay) overlayAddon.showOverlay(`${cols}x${rows}`, 300);
@@ -1297,12 +1319,14 @@ export class TerminalCore {
               rows: this.terminal.rows,
               preLines,
               postLines,
+              wrapStats: this.bufferWrapStats(),
             });
           });
         });
         break;
       }
       case Command.STATE_UPDATE:
+        this.logger.debug('state-update', { len: payload.length });
         this.terminal.write(payload);
         break;
       case Command.SET_WINDOW_TITLE:
