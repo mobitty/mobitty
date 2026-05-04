@@ -395,6 +395,81 @@ export function bufferStats(terminal: Terminal): BufferStats {
   };
 }
 
+export interface LineSample {
+  first: string[];
+  last: string[];
+}
+
+// Sample first and last `n` lines of the buffer. Each line is rstripped and
+// truncated to `maxChars`. Use for compact log snapshots.
+export function sampleBufferLines(terminal: Terminal, n: number, maxChars = 60): LineSample {
+  const buf = terminal.buffer.active;
+  const total = buf.length;
+  const first: string[] = [];
+  const last: string[] = [];
+  const take = Math.min(n, total);
+  for (let i = 0; i < take; i++) {
+    const line = buf.getLine(i);
+    first.push(line ? line.translateToString(true).slice(0, maxChars) : '');
+  }
+  const lastStart = Math.max(take, total - n);
+  for (let i = lastStart; i < total; i++) {
+    const line = buf.getLine(i);
+    last.push(line ? line.translateToString(true).slice(0, maxChars) : '');
+  }
+  return { first, last };
+}
+
+export interface RepetitionStats {
+  scannedRows: number;
+  consideredRows: number;
+  duplicateRows: number;
+  topGroups: Array<{ sample: string; count: number }>;
+}
+
+// Scan the entire buffer for repeated, content-rich lines — the
+// signal we expect when the headless buffer accumulates multiple
+// copies of paragraph-sized content (todo-bug-resize-induced-
+// terminal-corruption.md). Filters out blanks, borders, and other
+// low-entropy lines (length < 10 or distinct-char count < 5) so
+// the score doesn't fire on legitimate decoration.
+//
+// Only call from low-frequency events — the scan is O(rows × cols)
+// and a long-lived session's buffer can be thousands of rows deep.
+export function detectLineRepetition(terminal: Terminal): RepetitionStats {
+  const buf = terminal.buffer.active;
+  const total = buf.length;
+  const counts = new Map<string, { count: number; sample: string }>();
+  let considered = 0;
+  for (let y = 0; y < total; y++) {
+    const line = buf.getLine(y);
+    if (!line) continue;
+    const text = line.translateToString(true);
+    if (text.length < 10) continue;
+    const distinct = new Set<string>();
+    for (let i = 0; i < text.length; i++) distinct.add(text[i]!);
+    if (distinct.size < 5) continue;
+    considered++;
+    const entry = counts.get(text);
+    if (entry) entry.count++;
+    else counts.set(text, { count: 1, sample: text.slice(0, 60) });
+  }
+  let duplicateRows = 0;
+  const groups: Array<{ sample: string; count: number }> = [];
+  for (const { count, sample } of counts.values()) {
+    if (count < 2) continue;
+    duplicateRows += count - 1;
+    groups.push({ sample, count });
+  }
+  groups.sort((a, b) => b.count - a.count);
+  return {
+    scannedRows: total,
+    consideredRows: considered,
+    duplicateRows,
+    topGroups: groups.slice(0, 5),
+  };
+}
+
 export interface BytesSummary {
   len: number;
   sample: string;

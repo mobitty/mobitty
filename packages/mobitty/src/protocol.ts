@@ -18,7 +18,7 @@ import { writeImageToSystemClipboard, writeImageToFile, getProcessCwd } from './
 import type { SessionRegistry } from './sessions.ts';
 import type { ShellStore } from './shells.ts';
 import type { Logger } from './logger.ts';
-import { captureSnapshot, generateDiff, serializeFullState, compareSnapshots, bufferStats, summarizeBytes } from './diff.ts';
+import { captureSnapshot, generateDiff, serializeFullState, compareSnapshots, bufferStats, summarizeBytes, sampleBufferLines, detectLineRepetition } from './diff.ts';
 import type { FrameSnapshot } from './diff.ts';
 import { resolveCliBin, ensureCliBinShim } from './cli-bin.ts';
 
@@ -119,7 +119,12 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
     const title = registry.getTitle(sid);
     const cursorHidden = registry.getCursorHidden(sid);
     const vtFull = serializeFullState(serializer, title, cursorHidden);
-    socketLogger.info('state-full sent', { stats: bufferStats(headless), payload: summarizeBytes(vtFull, 200) });
+    socketLogger.info('state-full sent', {
+      stats: bufferStats(headless),
+      samples: sampleBufferLines(headless, 4, 60),
+      repeat: detectLineRepetition(headless),
+      payload: summarizeBytes(vtFull, 200),
+    });
     ws.send(Buffer.from(String.fromCharCode(STATE_FULL) + vtFull));
     lastSnapshot = captureSnapshot(headless, title, cursorHidden, registry.getScrollCount(sid));
 
@@ -425,6 +430,8 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
               clientCols: columns,
               clientRows: rows,
               before: headlessBeforeResize ? bufferStats(headlessBeforeResize) : null,
+              samples: headlessBeforeResize ? sampleBufferLines(headlessBeforeResize, 4, 60) : null,
+              repeat: headlessBeforeResize ? detectLineRepetition(headlessBeforeResize) : null,
             });
             registry.resizeSession(sessionId, columns, rows);
             registry.updateSessionScrollback(sessionId, scrollback);
