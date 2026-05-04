@@ -20,7 +20,7 @@ import {
 import { DEFAULT_GESTURE_MAPPING } from '@/gesture-types';
 import type { GestureMapping } from '@/gesture-types';
 import { findFontOption, loadFont } from '@/fonts';
-import { isNativeApp } from '@/native-bridge';
+import { isNativeApp, getNativeBridge } from '@/native-bridge';
 import { getLastSessionId, setLastSessionId, clearLastSessionId, fetchSessions } from '@/sessions';
 import { fetchShells, type ShellInfo } from '@/shells';
 import { ShellSelectionPanel } from '@/components/ShellSelectionPanel';
@@ -182,6 +182,16 @@ export function App() {
       })
       .catch(() => { /* on error, fall through to shell selection */ })
       .finally(() => { setInitialCheckComplete(true); });
+  }, []);
+
+  // iOS shell can ask us to open the session panel from a native gesture
+  // (left-edge swipe, when enabled in iOS Settings). The shim's default is a
+  // noop; we override it for the lifetime of this component.
+  useEffect(() => {
+    const bridge = getNativeBridge();
+    if (!bridge) return;
+    bridge.onOpenSessionListRequested = () => setSessionPanelOpen(true);
+    return () => { bridge.onOpenSessionListRequested = () => {}; };
   }, []);
 
   // Fetch shells for new-user selection (waits for initial session check to avoid racing)

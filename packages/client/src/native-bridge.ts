@@ -19,6 +19,10 @@ export interface MobittyNativeBridge {
   onKeyboardModeChanged: (mode: KeyboardMode) => void;
   onPushTokenRegistered: (token: string) => void;
   onSwitchSessionRequested: (sessionId: string) => void;
+  /// Native-shell asks the web client to open its session list. Triggered
+  /// from a native gesture (left-edge swipe, when enabled in iOS Settings).
+  /// The web override should flip the `SessionPanel` open.
+  onOpenSessionListRequested: () => void;
 
   requestKeyboardMode: (mode: KeyboardMode) => void;
   setSoftkeyConfig: (config: unknown) => void;
