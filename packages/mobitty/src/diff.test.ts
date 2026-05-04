@@ -317,8 +317,11 @@ describe('serializeFullState', () => {
   });
 
   it('does not enter alternate buffer for normal mode source', async () => {
-    // The client's STATE_FULL handler prepends \x1b[?1049l\x1b[3J before
-    // applying the payload (terminal-core.ts), so serializeFullState only
+    // The client's STATE_FULL handler prepends a reset prefix that includes
+    // \x1b[?1049l (exit alt buffer), DECRSTs for sticky modes the addon
+    // doesn't unset (mouse 9/1000/1002/1003, focus 1004, mouse encoding
+    // 1005/1006/1015/1016, paste 2004), and \x1b[3J (clear scrollback).
+    // See terminal-core.ts STATE_FULL handler. So serializeFullState only
     // needs to emit \x1b[?1049h when the source is in alt mode.
     const src = new Terminal({ cols: 40, rows: 10, allowProposedApi: true });
     const ser = makeSerializer(src);
@@ -354,6 +357,38 @@ describe('serializeFullState', () => {
     const dstSnap = takeSnapshot(dst);
     const mismatches = compareSnapshots(srcSnap, dstSnap, 20);
     assert.equal(mismatches.length, 0, `mismatches: ${JSON.stringify(mismatches)}`);
+
+    src.dispose();
+    dst.dispose();
+  });
+
+  it('clears stuck mouse tracking and bracketed paste from prior session', async () => {
+    // Mirrors the client STATE_FULL prefix in terminal-core.ts. The order
+    // matches the production code (1049l first, 3J last); the rest are no-ops
+    // when the mode is already off, so order between them doesn't matter.
+    const FULL_PREFIX =
+      '\x1b[?1049l' +
+      '\x1b[?9l\x1b[?1000l\x1b[?1002l\x1b[?1003l' +
+      '\x1b[?1004l' +
+      '\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?1016l' +
+      '\x1b[?2004l' +
+      '\x1b[3J';
+    const src = new Terminal({ cols: 40, rows: 5, allowProposedApi: true });
+    const ser = makeSerializer(src);
+    await writeAndWait(src, 'fresh session');
+    const vt = serializeFullState(ser, '', false);
+
+    // Destination simulates the leak: prior session left mouse tracking +
+    // bracketed paste enabled in the shared client xterm.
+    const dst = new Terminal({ cols: 40, rows: 5, allowProposedApi: true });
+    await writeAndWait(dst, '\x1b[?1000h\x1b[?1006h\x1b[?2004h');
+    assert.equal(dst.modes.mouseTrackingMode, 'vt200', 'precondition: mouse tracking on');
+    assert.equal(dst.modes.bracketedPasteMode, true, 'precondition: bracketed paste on');
+
+    await writeAndWait(dst, FULL_PREFIX + vt);
+
+    assert.equal(dst.modes.mouseTrackingMode, 'none', 'mouse tracking should be cleared');
+    assert.equal(dst.modes.bracketedPasteMode, false, 'bracketed paste should be cleared');
 
     src.dispose();
     dst.dispose();

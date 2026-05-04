@@ -1308,15 +1308,37 @@ export class TerminalCore {
           // corruption diagnosis (text only, truncated to 40 chars).
           const preLines = this.sampleBufferLines(3);
 
-          // Exit alternate buffer (no-op if already normal) before clearing scrollback,
-          // so \x1b[3J operates on the normal buffer where scrollback lives.
-          // The payload re-enters alternate mode if needed via \x1b[?1049h.
-          const exitAlt = new Uint8Array([0x1b, 0x5b, 0x3f, 0x31, 0x30, 0x34, 0x39, 0x6c]); // \x1b[?1049l
-          const clearScrollback = new Uint8Array([0x1b, 0x5b, 0x33, 0x4a]); // \x1b[3J
-          const combined = new Uint8Array(exitAlt.length + clearScrollback.length + payload.length);
-          combined.set(exitAlt);
-          combined.set(clearScrollback, exitAlt.length);
-          combined.set(payload, exitAlt.length + clearScrollback.length);
+          const modesBefore = {
+            mouse: this.terminal.modes.mouseTrackingMode,
+            paste: this.terminal.modes.bracketedPasteMode,
+            focus: this.terminal.modes.sendFocusMode,
+          };
+
+          // Reset sticky DECSET modes that @xterm/addon-serialize never RESETs
+          // (it only emits SET sequences for non-default modes). Without this,
+          // a mode set by a previous session's TUI — github copilot enables
+          // \x1b[?1000h mouse tracking, for example — survives session switches
+          // because this Terminal instance is shared across sessions. The
+          // snapshot's own SET sequences follow and re-enable whatever the new
+          // session needs.
+          //   1049 — alt buffer (must be first so \x1b[3J targets normal buffer)
+          //   9, 1000, 1002, 1003 — mouse tracking protocols
+          //   1004 — focus event reporting
+          //   1005, 1006, 1015, 1016 — mouse coordinate encodings
+          //   2004 — bracketed paste
+          //   \x1b[3J — clear scrollback (last, on the normal buffer)
+          // See docs/done-bug-mouse-mode-leak-on-session-switch.md.
+          const prefix = this.textEncoder.encode(
+            '\x1b[?1049l' +
+            '\x1b[?9l\x1b[?1000l\x1b[?1002l\x1b[?1003l' +
+            '\x1b[?1004l' +
+            '\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?1016l' +
+            '\x1b[?2004l' +
+            '\x1b[3J'
+          );
+          const combined = new Uint8Array(prefix.length + payload.length);
+          combined.set(prefix);
+          combined.set(payload, prefix.length);
           this.terminal.write(combined, () => {
             const postBaseY = this.terminal.buffer.active.baseY;
             const target = postBaseY - distFromBottom;
@@ -1326,6 +1348,11 @@ export class TerminalCore {
             // Sample first and last 3 lines of the post-write buffer.
             const postLines = this.sampleBufferLines(3);
 
+            const modesAfter = {
+              mouse: this.terminal.modes.mouseTrackingMode,
+              paste: this.terminal.modes.bracketedPasteMode,
+              focus: this.terminal.modes.sendFocusMode,
+            };
             this.logger.debug('state-full-applied', {
               preBaseY,
               preViewportY,
@@ -1343,6 +1370,8 @@ export class TerminalCore {
               bufferType: this.terminal.buffer.active.type,
               bufferTypeBefore,
               payloadSize: payload.length,
+              modesBefore,
+              modesAfter,
               scrollbackOption: this.terminal.options.scrollback,
               rows: this.terminal.rows,
               preLines,
