@@ -64,6 +64,17 @@ if (!serverPort) {
   serverArgs.push('-p', serverPort);
 }
 
+// Default the backend to HTTP in dev. The mobitty server otherwise enables
+// HTTPS with an auto-generated self-signed cert, but vite's proxy in
+// vite.config.ts hardcodes an `http://localhost:<backendPort>` target — so
+// every `/api` and `/ws` request fails with "socket hang up" on the
+// HTTP→HTTPS mismatch. Skipped if the caller passed `--tls-cert` (their
+// intent is end-to-end HTTPS, currently still requires vite.config.ts edits
+// to make the proxy use HTTPS — not addressed here).
+if (tlsCert === undefined && !serverArgs.includes('--no-tls')) {
+  serverArgs.push('--no-tls');
+}
+
 mkdirSync(resolve(rootDir, 'logs'), { recursive: true });
 const logFile = createWriteStream(resolve(rootDir, 'logs', 'dev-server.txt'));
 const tee = new Writable({
