@@ -1,37 +1,40 @@
-// Resolves the command string for invoking `mobitty-cli`.
+// Resolves the command string for invoking a mobitty CLI bin.
 //
 // Strategy:
 // 1. Look for an installed bin shim by walking up from this file:
-//    a. node_modules/.bin/mobitty-cli[.cmd] — local/npx installs
-//    b. (Windows) mobitty-cli.cmd directly in parent — global installs
+//    a. node_modules/.bin/<binName>[.cmd] — local/npx installs
+//    b. (Windows) <binName>.cmd directly in parent — global installs
 //       where npm places shims in the prefix dir, not node_modules/.bin/
 // 2. Fall back to "<node> <source-path>" for dev mode.
 //
-// The returned string is set as $EDITOR / $VISUAL (with " edit" appended).
-// Both shells and tools like Claude Code word-split this before exec, so
-// the value MUST be a single token or space-free multi-token string.
+// For `mobitty-cli-edit`, the returned string is set as $EDITOR / $VISUAL
+// directly. It MUST be a single path with no arguments — some consumers
+// (e.g. GitHub Copilot's terminal) don't word-split the env var and exec
+// the whole value as one binary path.
+//
 // When the fallback path contains spaces (e.g. "C:\Program Files\..."),
-// use ensureCliBinShim() to create a wrapper script.
+// use ensureCliBinShim() to create a wrapper script that resolves to a
+// single token without embedded spaces.
 
 import { existsSync, mkdirSync, writeFileSync, chmodSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const IS_WIN32 = process.platform === 'win32';
-const BIN_NAME = IS_WIN32 ? 'mobitty-cli.cmd' : 'mobitty-cli';
 
-export function resolveCliBin(): string | null {
+export function resolveCliBin(binName: string): string | null {
   const thisDir = dirname(fileURLToPath(import.meta.url));
+  const shimName = IS_WIN32 ? `${binName}.cmd` : binName;
 
   // 1. Look for installed shim
   let dir = thisDir;
   for (let i = 0; i < 10; i++) {
-    const candidate = join(dir, 'node_modules', '.bin', BIN_NAME);
+    const candidate = join(dir, 'node_modules', '.bin', shimName);
     if (existsSync(candidate)) return candidate;
     // Windows global installs: npm places shims directly in the prefix
     // dir (e.g. C:\.npm-global\mobitty-cli.cmd), not node_modules/.bin/.
     if (IS_WIN32) {
-      const globalCandidate = join(dir, BIN_NAME);
+      const globalCandidate = join(dir, shimName);
       if (existsSync(globalCandidate)) return globalCandidate;
     }
     const parent = dirname(dir);
@@ -40,13 +43,13 @@ export function resolveCliBin(): string | null {
   }
 
   // 2. Fall back to source file invocation (dev mode)
-  const sourceFile = join(thisDir, 'mobitty-cli.ts');
+  const sourceFile = join(thisDir, `${binName}.ts`);
   if (existsSync(sourceFile)) {
     return `${process.execPath} ${sourceFile}`;
   }
 
   // 3. Try compiled .js (release output)
-  const compiledFile = join(thisDir, 'mobitty-cli.js');
+  const compiledFile = join(thisDir, `${binName}.js`);
   if (existsSync(compiledFile)) {
     return `${process.execPath} ${compiledFile}`;
   }
@@ -57,11 +60,11 @@ export function resolveCliBin(): string | null {
 /** If cliBinPath contains spaces (e.g. fallback with "C:\Program Files\..."
  *  in process.execPath), create a wrapper shim in dataFolder/bin/ and return
  *  the wrapper path. Otherwise return cliBinPath unchanged. */
-export function ensureCliBinShim(cliBinPath: string, dataFolder: string): string {
+export function ensureCliBinShim(cliBinPath: string, dataFolder: string, binName: string): string {
   if (!cliBinPath.includes(' ')) return cliBinPath;
 
   const binDir = join(dataFolder, 'bin');
-  const shimName = IS_WIN32 ? 'mobitty-cli.cmd' : 'mobitty-cli';
+  const shimName = IS_WIN32 ? `${binName}.cmd` : binName;
   const shimPath = join(binDir, shimName);
   if (existsSync(shimPath)) return shimPath;
 

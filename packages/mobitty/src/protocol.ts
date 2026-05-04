@@ -26,7 +26,8 @@ import headlessPkg from '@xterm/headless';
 const { Terminal: HeadlessTerminal } = headlessPkg;
 
 const VERIFY_DIFF = process.env['MOBITTY_VERIFY_DIFF'] === '1';
-const CLI_BIN_PATH = resolveCliBin();
+const CLI_BIN_PATH = resolveCliBin('mobitty-cli');
+const CLI_EDIT_BIN_PATH = resolveCliBin('mobitty-cli-edit');
 
 /** Update EMA-smoothed RTT and decide sync interval.
  *  < 20ms → 60fps (16ms), 20–50ms → dead zone, 50–100ms → 30fps (33ms),
@@ -384,7 +385,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       // CLI env vars (shared by editor, download, view subcommands)
       const cliEnv: Record<string, string> = {};
       const cliBinPath = CLI_BIN_PATH
-        ? ensureCliBinShim(CLI_BIN_PATH, state.config.dataFolder)
+        ? ensureCliBinShim(CLI_BIN_PATH, state.config.dataFolder, 'mobitty-cli')
         : null;
       if (cliBinPath) {
         cliEnv['MOBITTY_CLI_PORT'] = String(state.config.port);
@@ -392,9 +393,13 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         if (state.config.tls) {
           cliEnv['MOBITTY_CLI_TLS'] = '1';
         }
-        if (remoteEditor) {
-          cliEnv['EDITOR'] = `${cliBinPath} edit`;
-          cliEnv['VISUAL'] = `${cliBinPath} edit`;
+        if (remoteEditor && CLI_EDIT_BIN_PATH) {
+          // Use the dedicated mobitty-cli-edit bin (no " edit" suffix) so
+          // consumers that don't word-split $EDITOR — e.g. GitHub Copilot's
+          // terminal — can exec the value as a single binary path.
+          const cliEditBinPath = ensureCliBinShim(CLI_EDIT_BIN_PATH, state.config.dataFolder, 'mobitty-cli-edit');
+          cliEnv['EDITOR'] = cliEditBinPath;
+          cliEnv['VISUAL'] = cliEditBinPath;
         }
       }
 
