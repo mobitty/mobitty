@@ -190,6 +190,8 @@ export class TerminalCore {
   get clientLogger(): ClientLogger { return this.logger; }
 
   private currentSessionId?: string;
+  private scrollPositions = new Map<string, number>();   // sessionId → distFromBottom at last switch-out
+  private lastConnectedSessionId: string | null = null;  // sessionId whose content the buffer currently holds
   private softkeySettings: Record<string, SoftkeyKeySettings> = {};
   private scrollback: number;
   private imagePasteDir?: string;
@@ -463,6 +465,13 @@ export class TerminalCore {
 
   switchSession(sessionId: string, shellName?: string) {
     this.logger.info('switching session', { sessionId: sessionId || null, shell: shellName ?? null });
+    const outgoing = this.options.sessionId;
+    if (outgoing && this.terminal) {
+      const buf = this.terminal.buffer.active;
+      const dist = buf.baseY - buf.viewportY;
+      this.scrollPositions.set(outgoing, dist);
+      this.logger.debug('scroll-saved', { sessionId: outgoing, dist });
+    }
     this.logger.setSession(sessionId || null);
     this.options.sessionId = sessionId;
     this.options.shellName = shellName;
@@ -1276,7 +1285,24 @@ export class TerminalCore {
           const hadPendingWrites = drainedBaseY !== preBaseY
             || drainedViewportY !== preViewportY
             || drainedLength !== preLength;
-          const distFromBottom = drainedBaseY - drainedViewportY;
+          // Cross-session switch must NOT read distFromBottom from the live buffer —
+          // it still holds the outgoing session's content.  Use saved scroll for the
+          // incoming session, fall back to buffer only on same-session reconnect.
+          const incoming = this.options.sessionId;
+          const saved = incoming ? this.scrollPositions.get(incoming) : undefined;
+          const sameSessionReconnect = !!incoming && incoming === this.lastConnectedSessionId;
+          let distFromBottom: number;
+          let scrollSource: 'saved' | 'buffer' | 'default';
+          if (saved !== undefined) {
+            distFromBottom = saved;
+            scrollSource = 'saved';
+          } else if (sameSessionReconnect) {
+            distFromBottom = drainedBaseY - drainedViewportY;
+            scrollSource = 'buffer';
+          } else {
+            distFromBottom = 0;
+            scrollSource = 'default';
+          }
 
           // Sample first and last 3 lines of the pre-clear buffer for post-hoc
           // corruption diagnosis (text only, truncated to 40 chars).
@@ -1295,6 +1321,7 @@ export class TerminalCore {
             const postBaseY = this.terminal.buffer.active.baseY;
             const target = postBaseY - distFromBottom;
             this.terminal.scrollToLine(Math.max(0, target));
+            this.lastConnectedSessionId = incoming || null;
 
             // Sample first and last 3 lines of the post-write buffer.
             const postLines = this.sampleBufferLines(3);
@@ -1308,6 +1335,7 @@ export class TerminalCore {
               drainedLength,
               hadPendingWrites,
               distFromBottom,
+              scrollSource,
               postBaseY,
               target,
               viewportY: this.terminal.buffer.active.viewportY,
