@@ -743,6 +743,39 @@ export class TerminalCore {
     return { bufferLen: buf.length, cols, wrappedLines: wrapped, fullWidthNonWrappedLines: fullNonWrapped };
   }
 
+  // Mirror of server-side detectLineRepetition (diff.ts). Scans the
+  // entire buffer for repeated content-rich lines — corruption can
+  // sit deep in scrollback (todo-bug-resize-induced-terminal-corruption.md).
+  // Only call from low-frequency events.
+  private bufferRepetitionStats(): { scannedRows: number; consideredRows: number; duplicateRows: number; topGroups: Array<{ sample: string; count: number }> } {
+    const buf = this.terminal.buffer.active;
+    const total = buf.length;
+    const counts = new Map<string, { count: number; sample: string }>();
+    let considered = 0;
+    for (let y = 0; y < total; y++) {
+      const line = buf.getLine(y);
+      if (!line) continue;
+      const text = line.translateToString(true);
+      if (text.length < 10) continue;
+      const distinct = new Set<string>();
+      for (let i = 0; i < text.length; i++) distinct.add(text[i]!);
+      if (distinct.size < 5) continue;
+      considered++;
+      const entry = counts.get(text);
+      if (entry) entry.count++;
+      else counts.set(text, { count: 1, sample: text.slice(0, 60) });
+    }
+    let duplicateRows = 0;
+    const groups: Array<{ sample: string; count: number }> = [];
+    for (const { count, sample } of counts.values()) {
+      if (count < 2) continue;
+      duplicateRows += count - 1;
+      groups.push({ sample, count });
+    }
+    groups.sort((a, b) => b.count - a.count);
+    return { scannedRows: total, consideredRows: considered, duplicateRows, topGroups: groups.slice(0, 5) };
+  }
+
   private selectVisibleViewportLines() {
     const terminal = this.terminal;
     if (!terminal) return;
@@ -926,7 +959,14 @@ export class TerminalCore {
     this.registerSocket(terminal.onBinary(data => this.sendData(Uint8Array.from(data, v => v.charCodeAt(0)))));
     this.registerSocket(terminal.onResize(({ cols, rows }) => {
       const stats = this.bufferWrapStats();
-      this.logger.info('terminal resize', { cols, rows, bufferLen: stats.bufferLen, wrappedLines: stats.wrappedLines, fullWidthNonWrappedLines: stats.fullWidthNonWrappedLines });
+      this.logger.info('terminal resize', {
+        cols, rows,
+        bufferLen: stats.bufferLen,
+        wrappedLines: stats.wrappedLines,
+        fullWidthNonWrappedLines: stats.fullWidthNonWrappedLines,
+        samples: this.sampleBufferLines(4),
+        repeat: this.bufferRepetitionStats(),
+      });
       const msg = JSON.stringify({ columns: cols, rows });
       this.socket?.send(this.textEncoder.encode(Command.RESIZE_TERMINAL + msg));
       if (this.resizeOverlay) overlayAddon.showOverlay(`${cols}x${rows}`, 300);
@@ -1378,6 +1418,7 @@ export class TerminalCore {
               preLines,
               postLines,
               wrapStats: this.bufferWrapStats(),
+              repeat: this.bufferRepetitionStats(),
             });
           });
         });
