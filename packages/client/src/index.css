@@ -147,6 +147,17 @@ html, body {
   touch-action: none;
 }
 
+/* Disable WebKit's callout UILongPressGestureRecognizer on iOS. Without this,
+   WKWebView fires pointercancel partway through a still-finger touch when its
+   system text-selection callout (Copy / Look Up / …) begins, which kills the
+   500ms long-press timer in gesture-detector.ts before onLongPressDefault can
+   fire. xterm.css's `-webkit-user-select: none` suppresses the loupe and the
+   final selection routine but not this recognizer. Orthogonal to the iOS
+   `inputmode='none'` keyboard suppression, which lives on the helper textarea. */
+.xterm {
+  -webkit-touch-callout: none;
+}
+
 /* Hide scrollbars on the mobile softkey bar's horizontal scroll strip
    (and any other scroll container that opts in via this class). */
 .scrollbar-hide {
