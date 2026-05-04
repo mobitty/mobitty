@@ -4,7 +4,10 @@ interface FontOption {
   cssFile?: string;
 }
 
-const CDN_BASE = "https://cdn.jsdelivr.net/gh/mshaugh/nerdfont-webfonts@latest/build/";
+// Same-origin path served by the mobitty server (Vite copies
+// public/fonts/ → dist/fonts/ at build; server serves dist/* under /).
+// Vendored by scripts/vendor-fonts.sh.
+const CDN_BASE = "/fonts/";
 
 export const FONT_OPTIONS: FontOption[] = [
   { label: "System Default", fontFamily: "Consolas, Liberation Mono, Menlo, Courier, monospace" },
@@ -19,7 +22,7 @@ export const FONT_OPTIONS: FontOption[] = [
   { label: "Meslo LG S Nerd Font", fontFamily: '"MesloLGS Nerd Font Mono", monospace', cssFile: "meslo.css" },
   { label: "Source Code Pro Nerd Font", fontFamily: '"SauceCodePro NFM", monospace', cssFile: "sourcecodepro.css" },
   { label: "Ubuntu Mono Nerd Font", fontFamily: '"UbuntuMono Nerd Font Mono", monospace', cssFile: "ubuntumono.css" },
-  { label: "Victor Mono Nerd Font", fontFamily: '"VictorMono Nerd Font Mono", monospace', cssFile: "victormono.css" },
+  { label: "Victor Mono Nerd Font", fontFamily: '"VictorMono NFM", monospace', cssFile: "victormono.css" },
 ];
 
 export const CUSTOM_FONT_VALUE = "__custom__";
@@ -47,24 +50,22 @@ export async function loadFont(option: FontOption): Promise<void> {
     try { localStorage.setItem('mobitty-font-css', option.cssFile); } catch { /* unavailable */ }
   }
 
+  // Wait for the stylesheet to parse so the @font-face rule is registered
+  // in document.fonts; only then await the woff2 decode. Without this
+  // ordering, document.fonts.load() resolves immediately with zero matches
+  // and the gate silently passes — the terminal mounts with monospace
+  // fallback and the WebGL atlas bakes the wrong glyphs.
+  //
+  // No artificial timeout: fonts are served from the same origin as the
+  // JS bundle, so if the bundle loaded the font will too. link.onerror
+  // handles unreachable/4xx; the browser's network stack handles the
+  // pathological "neither resolves" case via its own connection timeouts.
+  if (!link.sheet) {
+    await new Promise<void>(resolve => {
+      link!.addEventListener('load', () => resolve(), { once: true });
+      link!.addEventListener('error', () => resolve(), { once: true });
+    });
+  }
   const face = option.fontFamily.match(/"([^"]+)"|'([^']+)'|([^,]+)/)?.[0]?.replace(/["']/g, '').trim();
-
-  // Single 5s deadline covering BOTH the stylesheet parse and the font
-  // face decode. Awaiting link.onload first is required: document.fonts
-  // .load(face) only matches @font-face rules already registered in
-  // document.fonts. Calling it immediately after appendChild() resolves
-  // with zero matches (the rule isn't parsed yet), so the gate silently
-  // passes through and the terminal mounts with the monospace fallback —
-  // which the WebGL atlas then bakes ("crisp but wrong" symptom).
-  const deadline = new Promise<void>(r => setTimeout(r, 5_000));
-  const ready = (async () => {
-    if (!link!.sheet) {
-      await new Promise<void>(resolve => {
-        link!.addEventListener('load', () => resolve(), { once: true });
-        link!.addEventListener('error', () => resolve(), { once: true });
-      });
-    }
-    if (face) await document.fonts.load(`16px "${face}"`).catch(() => undefined);
-  })();
-  await Promise.race([ready, deadline]);
+  if (face) await document.fonts.load(`16px "${face}"`).catch(() => undefined);
 }

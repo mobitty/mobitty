@@ -21,6 +21,7 @@ import {
 } from './scroll-momentum';
 import { ClientLogger } from './client-logger';
 import type { SessionInfo } from './sessions';
+import { findFontOption, loadFont } from './fonts';
 
 const CMD_CLIPBOARD_IMAGE = 0x36;
 const CMD_CLIPBOARD_IMAGE_ACK = 0x36;
@@ -1532,17 +1533,30 @@ export class TerminalCore {
 
   /**
    * Invalidate the WebGL glyph atlas once the current font face is decoded.
-   * The gate in fonts.ts catches the initial-mount race; this backstop
-   * handles the timeout-fallback case and post-mount font swaps where the
-   * terminal cannot be unmounted (settings panel, server reconcile).
+   * Handles post-mount font swaps (settings panel, server reconcile) and
+   * WebGL recreate after context loss / visibility cycles.
    */
   private async scheduleAtlasClear(): Promise<void> {
     const serial = ++this.pendingAtlasSerial;
     if (!this.webglAddon) return;
     const opt = this.terminal.options;
-    const firstFontFace = (opt.fontFamily ?? '').match(/"([^"]+)"|'([^']+)'|([^,]+)/)?.[0]?.replace(/["']/g, '').trim() ?? '';
+    const fontFamily = opt.fontFamily ?? '';
+    const firstFontFace = fontFamily.match(/"([^"]+)"|'([^']+)'|([^,]+)/)?.[0]?.replace(/["']/g, '').trim() ?? '';
     if (!firstFontFace) return;
-    try { await document.fonts.load(`${opt.fontSize ?? 14}px "${firstFontFace}"`); } catch { /* swallow */ }
+
+    // Route known fonts through loadFont() — it awaits link.onload before
+    // document.fonts.load(face). Calling document.fonts.load(face) directly
+    // is the antipattern the gate fix removed: it resolves immediately with
+    // zero matches when the @font-face rule isn't yet registered, misfiring
+    // the atlas clear before the font is ready. loadFont() is idempotent —
+    // reuses an existing <link> if one was already added.
+    const fontOption = findFontOption(fontFamily);
+    if (fontOption?.cssFile) {
+      await loadFont(fontOption);
+    } else {
+      try { await document.fonts.load(`${opt.fontSize ?? 14}px "${firstFontFace}"`); } catch { /* swallow */ }
+    }
+
     if (this.terminalDisposables.length === 0) return;
     if (this.pendingAtlasSerial !== serial) return;
     if (!this.webglAddon) return;
