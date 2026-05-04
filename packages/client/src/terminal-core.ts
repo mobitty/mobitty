@@ -1624,6 +1624,16 @@ export class TerminalCore {
    */
   private applyPanDelta(deltaY: number, resetGapMs: number): { rowsApplied: number; clamped: boolean } {
     if (!this.terminal) return { rowsApplied: 0, clamped: false };
+    // Alt buffer (vim, neovim, less, htop, …) has no scrollback — viewport
+    // scroll is a no-op. Dispatch a WheelEvent so xterm.js can translate it
+    // to mouse-button-4/5 (when the app enabled mouse tracking) or arrow-key
+    // sequences (xterm's built-in fallback at !buffer.hasScrollback).
+    // Both pan-drag and momentum-RAF paths funnel through here, so iOS-style
+    // flick decay produces a tapering stream of wheel events naturally.
+    if (this.terminal.buffer.active.type === 'alternate') {
+      this.sendWheelDelta(deltaY);
+      return { rowsApplied: 0, clamped: false };
+    }
     const rowHeight = this.getRowHeight();
     if (!rowHeight) return { rowsApplied: 0, clamped: false };
     const now = performance.now();
