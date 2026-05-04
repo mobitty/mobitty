@@ -20,7 +20,7 @@ mobitty-cli <command> <path>
 
 ### edit
 
-Opens a file in a full-screen browser editor. This is the same command that runs when programs like `git commit` or `crontab -e` need an editor — Mobitty sets `$EDITOR` and `$VISUAL` to `mobitty-cli edit` when the [Remote Editor](/docs/reference/remote-editor) setting is enabled.
+Opens a file in a full-screen browser editor. This is the same command that runs when programs like `git commit` or `crontab -e` need an editor — Mobitty sets `$EDITOR` and `$VISUAL` to a dedicated `mobitty-cli-edit` binary (which behaves identically to `mobitty-cli edit`) when the [Remote Editor](/docs/reference/remote-editor) setting is enabled.
 
 You can also invoke it directly:
 

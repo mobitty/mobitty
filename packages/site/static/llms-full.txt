@@ -226,7 +226,7 @@ When a program needs a text editor ($EDITOR), Mobitty opens a full-screen editor
 
 Mobitty provides shell commands inside terminal sessions:
 
-- `mobitty-cli edit <path>` — open a file in the browser editor (same as $EDITOR)
+- `mobitty-cli edit <path>` — open a file in the browser editor (the dedicated `mobitty-cli-edit` bin is what $EDITOR points to)
 - `mobitty-cli view <path>` — view an image in the browser
 - `mobitty-cli download <path>` — download a file from the server to your browser
 
