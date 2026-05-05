@@ -25,6 +25,7 @@ import {
 import {
   DEFAULT_MOBILE_PAGES, DEFAULT_MOBILE_CUSTOM_KEYS,
   DEFAULT_DESKTOP_PAGES, type SoftkeyCustomKeySpec,
+  parseComboString,
 } from '@/softkey-types';
 import { DEFAULT_GESTURE_MAPPING } from '@/gesture-types';
 import { fetchThemeList, fetchTheme, saveTheme, deleteTheme, isBuiltinTheme, getThemeCredit } from '@/themes';
@@ -272,6 +273,11 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
     if (hotkeyTrimmed !== '') {
       const err = validateHotkeyString(hotkeyTrimmed);
       if (err) { setHotkeyError(err); return undefined; }
+      const combo = parseComboString(hotkeyTrimmed);
+      if (combo && !combo.modifiers.ctrl && !combo.modifiers.alt && !combo.modifiers.shift) {
+        setHotkeyError('Hotkey must include at least one modifier (Ctrl/Alt/Shift)');
+        return undefined;
+      }
     }
     setHotkeyError(undefined);
     candidate['sessionSwitcherHotkey'] = hotkeyTrimmed;
@@ -702,22 +708,18 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
             </div>
             <FieldError error={fieldErrors.get('imagePasteDir')} />
 
-            {/* Session switcher hotkey (desktop only) */}
-            {editingDevice === 'desktop' && (
-              <>
-                <div className="flex items-center gap-2">
-                  <Label className="min-w-[100px] text-xs text-muted-foreground">Session Hotkey</Label>
-                  <HelpTip>Keyboard shortcut to toggle the session panel. Press Set to capture a new combination; Default reverts to {DEFAULT_DESKTOP_PROFILE.sessionSwitcherHotkey}.</HelpTip>
-                  <KeyCaptureInput
-                    value={sessionSwitcherHotkey}
-                    onChange={v => { setSessionSwitcherHotkey(v); setHotkeyError(undefined); }}
-                    ariaLabel="Session hotkey"
-                    resetButton={{ label: 'Default', value: DEFAULT_DESKTOP_PROFILE.sessionSwitcherHotkey }}
-                  />
-                </div>
-                <FieldError error={hotkeyError} />
-              </>
-            )}
+            {/* Session switcher hotkey */}
+            <div className="flex items-center gap-2">
+              <Label className="min-w-[100px] text-xs text-muted-foreground">Session Hotkey</Label>
+              <HelpTip>Keyboard shortcut to toggle the session panel. Press Set to capture a new combination; Default reverts to {(editingDevice === 'mobile' ? DEFAULT_MOBILE_PROFILE : DEFAULT_DESKTOP_PROFILE).sessionSwitcherHotkey}. Requires at least one modifier (Ctrl/Alt/Shift) so soft keyboards can't trigger it.</HelpTip>
+              <KeyCaptureInput
+                value={sessionSwitcherHotkey}
+                onChange={v => { setSessionSwitcherHotkey(v); setHotkeyError(undefined); }}
+                ariaLabel="Session hotkey"
+                resetButton={{ label: 'Default', value: (editingDevice === 'mobile' ? DEFAULT_MOBILE_PROFILE : DEFAULT_DESKTOP_PROFILE).sessionSwitcherHotkey }}
+              />
+            </div>
+            <FieldError error={hotkeyError} />
 
             {/* Copy hotkey */}
             <div className="flex items-center gap-2">

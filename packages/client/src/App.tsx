@@ -274,13 +274,14 @@ export function App() {
     root.style.paddingRight = px;
   }, [profile?.padding]);
 
-  // Desktop-only hotkey to toggle session panel
+  // Session-panel hotkey: cross-platform; the modifier requirement below is what
+  // keeps soft keyboards (which can't emit Ctrl/Alt/Shift) from triggering it.
   useEffect(() => {
-    if (isMobile) return;
     const hotkeyStr = profile?.sessionSwitcherHotkey ?? '';
     if (hotkeyStr === '') return;
     const combo = parseComboString(hotkeyStr);
     if (!combo) return;
+    if (!combo.modifiers.ctrl && !combo.modifiers.alt && !combo.modifiers.shift) return;
     const handler = (e: KeyboardEvent) => {
       if (matchComboEvent(combo, e)) {
         e.preventDefault();
@@ -293,7 +294,7 @@ export function App() {
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [isMobile, profile?.sessionSwitcherHotkey]);
+  }, [profile?.sessionSwitcherHotkey]);
 
   // Build terminal options (stable reference)
   const termOptions = useMemo((): TerminalCoreOptions => {
