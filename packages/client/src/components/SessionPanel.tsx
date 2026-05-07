@@ -5,7 +5,6 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import {
-  fetchSessions,
   renameSession,
   reorderSession,
   deleteSession,
@@ -20,6 +19,8 @@ import { useSwipeActions, type SwipeOpenSide } from '@/hooks/use-swipe-actions';
 interface SessionPanelProps {
   open: boolean;
   onClose: () => void;
+  sessions: SessionInfo[];
+  onRefreshSessions: () => Promise<SessionInfo[]>;
   currentSessionId?: string;
   alertedSessionIds?: Set<string>;
   onSwitchSession: (sessionId: string) => void;
@@ -29,8 +30,7 @@ interface SessionPanelProps {
   isMobile: boolean;
 }
 
-export function SessionPanel({ open, onClose, currentSessionId, alertedSessionIds, onSwitchSession, onCreateSession, onSettingsOpen, onNoSessionsLeft, isMobile }: SessionPanelProps) {
-  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+export function SessionPanel({ open, onClose, sessions, onRefreshSessions, currentSessionId, alertedSessionIds, onSwitchSession, onCreateSession, onSettingsOpen, onNoSessionsLeft, isMobile }: SessionPanelProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [status, setStatus] = useState('');
@@ -50,12 +50,6 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
     if (msg) setTimeout(() => setStatus(prev => prev === msg ? '' : prev), 3000);
   }, []);
 
-  const refresh = useCallback(async () => {
-    const list = await fetchSessions();
-    setSessions(list);
-    return list;
-  }, []);
-
   const handleSwitch = useCallback((sessionId: string) => {
     onSwitchSession(sessionId);
     onClose();
@@ -71,13 +65,18 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
     if (!open) return;
     setEditMode(false);
     setOpenSwipe(null);
-    refresh().then(list => {
-      const idx = list.findIndex(s => s.sessionId === currentSessionId);
-      setFocusedIndex(idx >= 0 ? idx : 0);
-    });
+    // Seed focus synchronously from the prop list so a fast user keypress
+    // can never be overwritten by an async setter racing in after the fetch.
+    const idx = sessions.findIndex(s => s.sessionId === currentSessionId);
+    setFocusedIndex(idx >= 0 ? idx : 0);
+    onRefreshSessions().catch(() => {});
     // Prefetch shells so "New Session" is instant on slow networks.
     fetchShells().then(setShells).catch(() => {});
-  }, [open, refresh, currentSessionId]);
+    // Deps intentionally only [open]: re-running on `sessions` change would
+    // snap focus back to the current session whenever the background refresh
+    // resolves, undoing the user's arrow-key navigation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // Reset swipe state when entering edit mode (drag handle takes over)
   useEffect(() => {
@@ -102,7 +101,7 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
         const session = sessions[focusedIndex];
         if (!session || focusedIndex >= sessions.length - 1) return;
         reorderSession(session.sessionId, focusedIndex + 1).then(ok => {
-          if (ok) refresh().then(() => setFocusedIndex(focusedIndex + 1));
+          if (ok) onRefreshSessions().then(() => setFocusedIndex(focusedIndex + 1));
         });
       } else if (e.key === 'ArrowDown') {
         e.preventDefault();
@@ -114,7 +113,7 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
         const session = sessions[focusedIndex];
         if (!session || focusedIndex <= 0) return;
         reorderSession(session.sessionId, focusedIndex - 1).then(ok => {
-          if (ok) refresh().then(() => setFocusedIndex(focusedIndex - 1));
+          if (ok) onRefreshSessions().then(() => setFocusedIndex(focusedIndex - 1));
         });
       } else if (e.key === 'ArrowUp') {
         e.preventDefault();
@@ -156,7 +155,7 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [open, sessions, editingId, focusedIndex, currentSessionId, onClose, handleSwitch, showShellPicker, showHelp]);
+  }, [open, sessions, editingId, focusedIndex, currentSessionId, onClose, handleSwitch, showShellPicker, showHelp, onRefreshSessions]);
 
   // Keyboard navigation for inline shell picker
   useEffect(() => {
@@ -208,7 +207,7 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
     const ok = await renameSession(sessionId, trimmed);
     if (ok) {
       setEditingId(null);
-      await refresh();
+      await onRefreshSessions();
       showStatus('Renamed');
     } else {
       showStatus('Rename failed');
@@ -225,7 +224,7 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
       return;
     }
 
-    const updated = await refresh();
+    const updated = await onRefreshSessions();
     showStatus('Deleted');
 
     if (isCurrent) {
@@ -265,7 +264,7 @@ export function SessionPanel({ open, onClose, currentSessionId, alertedSessionId
       const session = sessions[from];
       if (!session) return;
       reorderSession(session.sessionId, to).then(ok => {
-        if (ok) refresh().then(() => setFocusedIndex(to));
+        if (ok) onRefreshSessions().then(() => setFocusedIndex(to));
       });
     },
   });

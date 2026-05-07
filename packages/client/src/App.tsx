@@ -21,7 +21,7 @@ import { DEFAULT_GESTURE_MAPPING } from '@/gesture-types';
 import type { GestureMapping } from '@/gesture-types';
 import { findFontOption, loadFont } from '@/fonts';
 import { isNativeApp, getNativeBridge } from '@/native-bridge';
-import { getLastSessionId, setLastSessionId, clearLastSessionId, fetchSessions } from '@/sessions';
+import { getLastSessionId, setLastSessionId, clearLastSessionId, fetchSessions, type SessionInfo } from '@/sessions';
 import { fetchShells, type ShellInfo } from '@/shells';
 import { ShellSelectionPanel } from '@/components/ShellSelectionPanel';
 import { RemoteEditorPanel } from '@/components/RemoteEditorPanel';
@@ -97,6 +97,13 @@ export function App() {
   const [editorFilePath, setEditorFilePath] = useState('');
   const [editorContent, setEditorContent] = useState('');
   const [editorContentType, setEditorContentType] = useState<string | undefined>();
+  const [sessions, setSessions] = useState<SessionInfo[]>([]);
+
+  const refreshSessions = useCallback(async () => {
+    const list = await fetchSessions();
+    setSessions(list);
+    return list;
+  }, []);
 
   const terminalRef = useRef<XtermTerminalHandle>(null);
   const currentSessionIdRef = useRef<string | undefined>(undefined);
@@ -169,20 +176,20 @@ export function App() {
     };
   }, []);
 
-  // On mount with no stored session ID, check for alive sessions before showing shell selection.
-  // If alive sessions exist, open the session panel instead.
+  // Pre-fetch sessions on mount so the panel renders instantly when opened.
+  // When there's no stored session ID, also use the result to decide between
+  // shell selection vs. opening the session panel.
   useEffect(() => {
-    if (getLastSessionId() !== null) return;
-    fetchSessions()
-      .then(sessions => {
-        if (sessions.some(s => s.alive)) {
+    refreshSessions()
+      .then(list => {
+        if (getLastSessionId() === null && list.some(s => s.alive)) {
           setPendingShellSelection(false);
           setSessionPanelOpen(true);
         }
       })
       .catch(() => { /* on error, fall through to shell selection */ })
       .finally(() => { setInitialCheckComplete(true); });
-  }, []);
+  }, [refreshSessions]);
 
   // iOS shell can ask us to open the session panel from a native gesture
   // (left-edge swipe, when enabled in iOS Settings). The shim's default is a
@@ -349,16 +356,17 @@ export function App() {
     onSessionInfo: (info) => {
       setCurrentSessionId(info.sessionId);
       setLastSessionId(info.sessionId);
+      refreshSessions().catch(() => {});
     },
     onSessionDied: (_sessionId) => {
-      // Session died — user can open session panel to see it
+      refreshSessions().catch(() => {});
     },
     onSessionNotFound: () => {
       clearLastSessionId();
       setCurrentSessionId(undefined);
-      fetchSessions()
-        .then((sessions) => {
-          if (sessions.length > 0) {
+      refreshSessions()
+        .then((list) => {
+          if (list.length > 0) {
             setSessionPanelOpen(true);
           } else {
             setInitialShellName(undefined);
@@ -428,7 +436,7 @@ export function App() {
       a.click();
       setTimeout(() => a.remove(), 100);
     },
-  }), []);
+  }), [refreshSessions]);
 
   // Modifier source for the terminal
   const modifierSource = useMemo(() => {
@@ -613,6 +621,8 @@ export function App() {
       <SessionPanel
         open={sessionPanelOpen}
         onClose={() => { setSessionPanelOpen(false); terminalRef.current?.core?.focus(); }}
+        sessions={sessions}
+        onRefreshSessions={refreshSessions}
         currentSessionId={currentSessionId}
         alertedSessionIds={alertedSessionIds}
         onSwitchSession={handleSwitchSession}
