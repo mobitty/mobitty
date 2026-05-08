@@ -19,7 +19,7 @@ const SESSION_HOTKEYS: HotkeyEntry[] = [
   { key: 'Escape', description: 'Close panel' },
   { key: 'n', description: 'New session' },
   { key: 'r', description: 'Rename session' },
-  { key: 'Delete', description: 'Delete session' },
+  { key: 'Delete / Backspace', description: 'Delete session' },
   { key: 'Shift+\u2191', description: 'Move session up' },
   { key: 'Shift+\u2193', description: 'Move session down' },
   { key: '?', description: 'Toggle this help' },

@@ -130,7 +130,7 @@ export function SessionPanel({ open, onClose, sessions, onRefreshSessions, curre
         e.preventDefault();
         e.stopPropagation();
         onClose();
-      } else if (e.key === 'Delete') {
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
         e.preventDefault();
         e.stopPropagation();
         const session = sessions[focusedIndex];
