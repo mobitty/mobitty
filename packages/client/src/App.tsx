@@ -59,6 +59,13 @@ const defaultTermOptions: ITerminalOptions = {
   theme: defaultTheme,
   scrollback: DEFAULT_SCROLLBACK,
   allowProposedApi: true,
+  linkHandler: {
+    activate(_event, text) {
+      if (/^https?:\/\//i.test(text)) {
+        window.open(text, '_blank', 'noopener,noreferrer');
+      }
+    },
+  },
 };
 
 function isTouchDevice(): boolean {

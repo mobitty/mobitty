@@ -149,7 +149,11 @@ export class TerminalCore {
   private fitAddon = new FitAddon();
   private overlayAddon = new OverlayAddon();
   private selectionOverlay?: SelectionOverlayAddon;
-  private webLinksAddon = new WebLinksAddon();
+  private webLinksAddon = new WebLinksAddon((_event, uri) => {
+    if (/^https?:\/\//i.test(uri)) {
+      window.open(uri, '_blank', 'noopener,noreferrer');
+    }
+  });
   private webglAddon?: WebglAddon;
   private pendingAtlasSerial = 0;
 
