@@ -1,11 +1,25 @@
 import { existsSync, readFileSync } from 'node:fs';
-import { basename } from 'node:path';
+import { basename, dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 
 export interface DiscoveredShell {
   name: string;
   argv: string[];
 }
+
+const PWSH_CWD_HOOK = join(
+  dirname(fileURLToPath(import.meta.url)),
+  'shell-init',
+  'pwsh-cwd-hook.ps1',
+);
+
+const PWSH_ARGS = [
+  '-NoLogo',
+  '-NoExit',
+  '-ExecutionPolicy', 'Bypass',
+  '-File', PWSH_CWD_HOOK,
+];
 
 const UNIX_FALLBACK_PATHS = [
   '/bin/bash',
@@ -41,6 +55,9 @@ function parseEtcShells(): string[] {
 function shellArgsForUnix(name: string, path: string): string[] {
   if (UNIX_LOGIN_SHELLS.has(name)) {
     return [path, '-i', '-l'];
+  }
+  if (name === 'pwsh') {
+    return [path, ...PWSH_ARGS];
   }
   return [path];
 }
@@ -80,12 +97,12 @@ interface WindowsCandidate {
 }
 
 const WINDOWS_CANDIDATES: WindowsCandidate[] = [
-  { name: 'powershell', cmd: 'powershell.exe', absolutePaths: [], args: [] },
+  { name: 'powershell', cmd: 'powershell.exe', absolutePaths: [], args: PWSH_ARGS },
   {
     name: 'pwsh',
     cmd: 'pwsh.exe',
     absolutePaths: ['C:\\Program Files\\PowerShell\\7\\pwsh.exe'],
-    args: [],
+    args: PWSH_ARGS,
   },
   { name: 'cmd', cmd: 'cmd.exe', absolutePaths: [], args: [] },
   {

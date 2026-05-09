@@ -139,6 +139,9 @@ export async function writeImageToSystemClipboard(imageData: Buffer, mimeType: s
   }
 }
 
+// Returns the cwd of `pid`, or '' if it cannot be determined on this platform.
+// Callers (sessions.ts:resolveCwd) translate '' into "hide the cwd" — we never
+// fall back to the server's own cwd, which would be a confident lie.
 export function getProcessCwd(pid: number): string {
   try {
     if (process.platform === 'linux') {
@@ -152,7 +155,7 @@ export function getProcessCwd(pid: number): string {
       }
     }
   } catch { /* fall through */ }
-  return process.cwd();
+  return '';
 }
 
 export async function writeImageToFile(
