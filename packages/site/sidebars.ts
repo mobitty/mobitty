@@ -10,6 +10,7 @@ const sidebars: SidebarsConfig = {
         'guides/installation',
         'guides/remote-access',
         'guides/known-limitations',
+        'guides/troubleshooting',
       ],
     },
     {
