@@ -28,7 +28,12 @@ if (!existsSync(resolve(clientDist, 'index.html'))) {
 console.log('Compiling server...');
 execSync('pnpm tsc -p tsconfig.build.json', { cwd: serverDir, stdio: 'inherit' });
 
-// 4. Copy package.json (rewrite .ts → .js references) and .npmignore
+// 4. Copy non-TS source assets (shell-init hooks etc.) — tsc doesn't emit these
+cpSync(resolve(serverDir, 'src', 'shell-init'), resolve(distDir, 'src', 'shell-init'), {
+  recursive: true,
+});
+
+// 5. Copy package.json (rewrite .ts → .js references) and .npmignore
 const pkg = JSON.parse(readFileSync(resolve(serverDir, 'package.json'), 'utf-8')) as Record<string, unknown>;
 const bin = pkg['bin'] as Record<string, string> | undefined;
 if (bin) {
@@ -49,10 +54,10 @@ if (existsSync(npmignore)) {
 }
 cpSync(resolve(rootDir, 'README.md'), resolve(distDir, 'README.md'));
 
-// 5. Place built client assets
+// 6. Place built client assets
 cpSync(clientDist, resolve(distDir, 'client'), { recursive: true });
 
-// 6. Summary
+// 7. Summary
 console.log('');
 console.log('Release build complete: dist/');
 function printTree(dir: string, prefix: string): void {
