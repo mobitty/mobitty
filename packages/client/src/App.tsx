@@ -23,6 +23,7 @@ import { findFontOption, loadFont } from '@/fonts';
 import { isNativeApp, getNativeBridge } from '@/native-bridge';
 import { getLastSessionId, setLastSessionId, clearLastSessionId, fetchSessions, type SessionInfo } from '@/sessions';
 import { fetchShells, type ShellInfo } from '@/shells';
+import { openExternalUrl } from '@/open-external-url';
 import { ShellSelectionPanel } from '@/components/ShellSelectionPanel';
 import { RemoteEditorPanel } from '@/components/RemoteEditorPanel';
 import { toast } from 'sonner';
@@ -61,9 +62,7 @@ const defaultTermOptions: ITerminalOptions = {
   allowProposedApi: true,
   linkHandler: {
     activate(_event, text) {
-      if (/^https?:\/\//i.test(text)) {
-        window.open(text, '_blank', 'noopener,noreferrer');
-      }
+      openExternalUrl(text);
     },
   },
 };

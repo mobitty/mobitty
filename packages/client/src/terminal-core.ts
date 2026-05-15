@@ -22,6 +22,7 @@ import {
 import { ClientLogger } from './client-logger';
 import type { SessionInfo } from './sessions';
 import { findFontOption, loadFont } from './fonts';
+import { openExternalUrl } from './open-external-url';
 
 const CMD_CLIPBOARD_IMAGE = 0x36;
 const CMD_CLIPBOARD_IMAGE_ACK = 0x36;
@@ -150,9 +151,7 @@ export class TerminalCore {
   private overlayAddon = new OverlayAddon();
   private selectionOverlay?: SelectionOverlayAddon;
   private webLinksAddon = new WebLinksAddon((_event, uri) => {
-    if (/^https?:\/\//i.test(uri)) {
-      window.open(uri, '_blank', 'noopener,noreferrer');
-    }
+    openExternalUrl(uri);
   });
   private webglAddon?: WebglAddon;
   private pendingAtlasSerial = 0;
