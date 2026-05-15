@@ -112,13 +112,12 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
 
   function startSync(sid: string): void {
     const headless = registry.getHeadless(sid);
-    const serializer = registry.getSerializeAddon(sid);
-    if (!headless || !serializer) return;
+    if (!headless) return;
 
     // Send STATE_FULL immediately on attach
     const title = registry.getTitle(sid);
     const cursorHidden = registry.getCursorHidden(sid);
-    const vtFull = serializeFullState(serializer, title, cursorHidden);
+    const vtFull = serializeFullState(headless, title, cursorHidden);
     socketLogger.info('state-full sent', {
       stats: bufferStats(headless),
       samples: sampleBufferLines(headless, 4, 60),
@@ -166,11 +165,10 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
 
         // Self-heal: send STATE_FULL to client and reset verification terminal
         const h = registry.getHeadless(sid);
-        const ser = registry.getSerializeAddon(sid);
-        if (h && ser && ws.readyState === 1) {
+        if (h && ws.readyState === 1) {
           const t = registry.getTitle(sid);
           const ch = registry.getCursorHidden(sid);
-          const healVt = serializeFullState(ser, t, ch);
+          const healVt = serializeFullState(h, t, ch);
           ws.send(Buffer.from(String.fromCharCode(STATE_FULL) + healVt));
           lastSnapshot = captureSnapshot(h, t, ch, registry.getScrollCount(sid));
           verifyTerm.write('\x1b[3J' + healVt);
@@ -191,8 +189,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
 
       const t = registry.getTitle(sid);
       const h = registry.getHeadless(sid);
-      const ser = registry.getSerializeAddon(sid);
-      if (!h || !ser) { stopSync(); return; }
+      if (!h) { stopSync(); return; }
 
       const ch = registry.getCursorHidden(sid);
       const curr = captureSnapshot(h, t, ch, registry.getScrollCount(sid));
@@ -202,13 +199,13 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       let wasFull = false;
 
       if (!prevSnapshot || curr.bufferType !== prevSnapshot.bufferType) {
-        vtPayload = serializeFullState(ser, t, ch);
+        vtPayload = serializeFullState(h, t, ch);
         ws.send(Buffer.from(String.fromCharCode(STATE_FULL) + vtPayload));
         wasFull = true;
       } else {
         const diff = generateDiff(prevSnapshot, curr);
         if (diff === null) {
-          vtPayload = serializeFullState(ser, t, ch);
+          vtPayload = serializeFullState(h, t, ch);
           ws.send(Buffer.from(String.fromCharCode(STATE_FULL) + vtPayload));
           wasFull = true;
         } else if (diff !== '') {

@@ -13,6 +13,33 @@ interface CellSnapshot {
   fgMode: number;
   bgMode: number;
   attrs: number;
+  // OSC 8 hyperlink id (0 = none). Resolved to URI via FrameSnapshot.urlIdToUri.
+  // xterm.js doesn't expose this on IBufferCell, so we reach into the internal
+  // `extended.urlId` slot.
+  urlId: number;
+}
+
+// xterm.js internal cell shape that exposes the OSC 8 link id.
+interface InternalBufferCell {
+  extended?: { urlId?: number };
+}
+
+// xterm.js internal Terminal shape that exposes the OSC link service.
+interface InternalTerminal {
+  _core?: {
+    _oscLinkService?: {
+      getLinkData(id: number): { uri: string } | undefined;
+    };
+  };
+}
+
+function readCellUrlId(cell: unknown): number {
+  return (cell as InternalBufferCell).extended?.urlId ?? 0;
+}
+
+function readUriForUrlId(terminal: Terminal, urlId: number): string | undefined {
+  if (!urlId) return undefined;
+  return (terminal as unknown as InternalTerminal)._core?._oscLinkService?.getLinkData(urlId)?.uri;
 }
 
 interface TerminalModes {
@@ -39,6 +66,7 @@ export interface FrameSnapshot {
   scrollCount: number;
   title: string;
   modes: TerminalModes;
+  urlIdToUri: Map<number, string>;
 }
 
 // Bitmask for attrs: bold=1, dim=2, italic=4, underline=8, blink=16, inverse=32, invisible=64, strikethrough=128, overline=256
@@ -104,14 +132,27 @@ export function captureSnapshot(terminal: Terminal, title: string, cursorHidden:
   const rows = terminal.rows;
   const baseY = buf.baseY;
   const cells: CellSnapshot[][] = [];
+  const urlIdToUri = new Map<number, string>();
 
   for (let y = 0; y < rows; y++) {
     const line = buf.getLine(baseY + y);
     const row: CellSnapshot[] = [];
     if (line) {
-      const cell = line.getCell(0)!;
       for (let x = 0; x < cols; x++) {
-        line.getCell(x, cell);
+        // Fresh cell per position — see comment in serializeBufferOf: the
+        // dest-pointer overload of `getCell(x, cell)` leaves `extended.urlId`
+        // stale from the previous cell, which would mark every blank
+        // following a hyperlink as still inside the link.
+        const cell = line.getCell(x);
+        if (!cell) {
+          row.push({ char: ' ', width: 1, fg: 0, bg: 0, fgMode: 0, bgMode: 0, attrs: 0, urlId: 0 });
+          continue;
+        }
+        const urlId = readCellUrlId(cell);
+        if (urlId !== 0 && !urlIdToUri.has(urlId)) {
+          const uri = readUriForUrlId(terminal, urlId);
+          if (uri !== undefined) urlIdToUri.set(urlId, uri);
+        }
         row.push({
           char: cell.getChars() || ' ',
           width: cell.getWidth(),
@@ -120,11 +161,12 @@ export function captureSnapshot(terminal: Terminal, title: string, cursorHidden:
           fgMode: cell.getFgColorMode(),
           bgMode: cell.getBgColorMode(),
           attrs: packAttrs(cell),
+          urlId: urlId !== 0 && urlIdToUri.has(urlId) ? urlId : 0,
         });
       }
     } else {
       for (let x = 0; x < cols; x++) {
-        row.push({ char: ' ', width: 1, fg: 0, bg: 0, fgMode: 0, bgMode: 0, attrs: 0 });
+        row.push({ char: ' ', width: 1, fg: 0, bg: 0, fgMode: 0, bgMode: 0, attrs: 0, urlId: 0 });
       }
     }
     cells.push(row);
@@ -142,6 +184,7 @@ export function captureSnapshot(terminal: Terminal, title: string, cursorHidden:
     scrollCount,
     title,
     modes: readModes(terminal),
+    urlIdToUri,
   };
 }
 
@@ -150,7 +193,7 @@ export function blankSnapshot(cols: number, rows: number): FrameSnapshot {
   for (let y = 0; y < rows; y++) {
     const row: CellSnapshot[] = [];
     for (let x = 0; x < cols; x++) {
-      row.push({ char: ' ', width: 1, fg: 0, bg: 0, fgMode: 0, bgMode: 0, attrs: 0 });
+      row.push({ char: ' ', width: 1, fg: 0, bg: 0, fgMode: 0, bgMode: 0, attrs: 0, urlId: 0 });
     }
     cells.push(row);
   }
@@ -166,6 +209,7 @@ export function blankSnapshot(cols: number, rows: number): FrameSnapshot {
     scrollCount: 0,
     title: '',
     modes: defaultModes(),
+    urlIdToUri: new Map(),
   };
 }
 
@@ -208,8 +252,14 @@ function cellSgrEqual(a: CellSnapshot, b: CellSnapshot): boolean {
 }
 
 function cellEqual(a: CellSnapshot, b: CellSnapshot): boolean {
-  return a.char === b.char && a.width === b.width && cellSgrEqual(a, b);
+  return a.char === b.char && a.width === b.width && a.urlId === b.urlId && cellSgrEqual(a, b);
 }
+
+function osc8Open(uri: string): string {
+  return `\x1b]8;;${uri}\x07`;
+}
+
+const OSC8_CLOSE = '\x1b]8;;\x07';
 
 function emitModeChanges(prev: TerminalModes, curr: TerminalModes): string {
   let out = '';
@@ -282,6 +332,7 @@ export function generateDiff(prev: FrameSnapshot, curr: FrameSnapshot): string |
 
   // Visible area diff
   let lastSgr: CellSnapshot | null = null;
+  let lastUrlId = 0;
 
   for (let y = 0; y < rows; y++) {
     const prevRow = prev.cells[y];
@@ -326,13 +377,25 @@ export function generateDiff(prev: FrameSnapshot, curr: FrameSnapshot): string |
           lastSgr = c;
         }
 
+        if (c.urlId !== lastUrlId) {
+          if (lastUrlId !== 0) out += OSC8_CLOSE;
+          if (c.urlId !== 0) {
+            const uri = curr.urlIdToUri.get(c.urlId);
+            if (uri !== undefined) out += osc8Open(uri);
+          }
+          lastUrlId = c.urlId;
+        }
+
         out += c.char;
         x++;
       }
     }
   }
 
-  // Reset SGR
+  // Close any open OSC 8 link, then reset SGR
+  if (lastUrlId !== 0) {
+    out += OSC8_CLOSE;
+  }
   if (lastSgr) {
     out += '\x1b[0m';
   }
@@ -501,24 +564,180 @@ export function summarizeBytes(data: string | Uint8Array, maxLen = 120): BytesSu
   return { len: str.length, sample, crlfCount: crlf, bareLfCount: bareLf, escCount: esc };
 }
 
-// Serializes via @xterm/addon-serialize, which preserves wrapped-line groups
-// (the `isWrapped` flag) so the client can reflow scrollback on resize. The
-// structural parameter type avoids dragging addon types into this module and
-// sidesteps the @xterm/xterm vs @xterm/headless type mismatch — the addon's
-// `activate(terminal)` signature targets @xterm/xterm's Terminal, but the
-// actual Terminal API surface used is identical.
-export function serializeFullState(serializer: { serialize(): string }, title: string, cursorHidden: boolean): string {
+// Internal: SGR sequence for a live cell (during full-state serialization).
+// Mirrors sgrSequence(CellSnapshot) but reads directly from a cell.
+interface SgrCell {
+  fg: number; bg: number; fgMode: number; bgMode: number; attrs: number;
+}
+
+function sgrSequenceLive(cell: SgrCell): string {
+  const parts: string[] = ['0'];
+  if (cell.attrs & 1) parts.push('1');
+  if (cell.attrs & 2) parts.push('2');
+  if (cell.attrs & 4) parts.push('3');
+  if (cell.attrs & 8) parts.push('4');
+  if (cell.attrs & 16) parts.push('5');
+  if (cell.attrs & 32) parts.push('7');
+  if (cell.attrs & 64) parts.push('8');
+  if (cell.attrs & 128) parts.push('9');
+  if (cell.attrs & 256) parts.push('53');
+  if (cell.fgMode === CM_P16) parts.push(cell.fg < 8 ? `${30 + cell.fg}` : `${90 + cell.fg - 8}`);
+  else if (cell.fgMode === CM_P256) parts.push(`38;5;${cell.fg}`);
+  else if (cell.fgMode === CM_RGB) parts.push(`38;2;${(cell.fg >> 16) & 0xff};${(cell.fg >> 8) & 0xff};${cell.fg & 0xff}`);
+  if (cell.bgMode === CM_P16) parts.push(cell.bg < 8 ? `${40 + cell.bg}` : `${100 + cell.bg - 8}`);
+  else if (cell.bgMode === CM_P256) parts.push(`48;5;${cell.bg}`);
+  else if (cell.bgMode === CM_RGB) parts.push(`48;2;${(cell.bg >> 16) & 0xff};${(cell.bg >> 8) & 0xff};${cell.bg & 0xff}`);
+  return `\x1b[${parts.join(';')}m`;
+}
+
+function sgrLiveEqual(a: SgrCell, b: SgrCell): boolean {
+  return a.attrs === b.attrs && a.fg === b.fg && a.bg === b.bg && a.fgMode === b.fgMode && a.bgMode === b.bgMode;
+}
+
+function serializeModes(modes: TerminalModes): string {
+  let out = '';
+  if (modes.applicationCursorKeysMode) out += '\x1b[?1h';
+  if (modes.applicationKeypadMode) out += '\x1b[?66h';
+  if (modes.bracketedPasteMode) out += '\x1b[?2004h';
+  if (modes.insertMode) out += '\x1b[4h';
+  if (modes.originMode) out += '\x1b[?6h';
+  if (modes.reverseWraparoundMode) out += '\x1b[?45h';
+  if (modes.sendFocusMode) out += '\x1b[?1004h';
+  if (!modes.wraparoundMode) out += '\x1b[?7l';
+  switch (modes.mouseTrackingMode) {
+    case 'x10': out += '\x1b[?9h'; break;
+    case 'vt200': out += '\x1b[?1000h'; break;
+    case 'drag': out += '\x1b[?1002h'; break;
+    case 'any': out += '\x1b[?1003h'; break;
+  }
+  return out;
+}
+
+// Build a full-state byte stream that, written to a client xterm, reconstructs
+// the headless terminal's buffer including OSC 8 hyperlinks. Replaces the
+// previous `@xterm/addon-serialize`-based path (`addon-serialize` 0.14 has no
+// OSC 8 support — markdown URLs from Claude Code lost their link attribute
+// before reaching the client; only the underline + color survived).
+export function serializeFullState(terminal: Terminal, title: string, cursorHidden: boolean): string {
   // Hide cursor for the duration of the client's write to prevent flicker.
-  // Reset SGR + clear screen + home cursor before the addon's payload so the
-  // client starts from a known-clean slate. SGR reset MUST precede \x1b[2J:
+  // Reset SGR + clear screen + home cursor before the buffer payload so the
+  // client starts from a known-clean slate. SGR reset MUST precede `\x1b[2J`:
   // xterm.js uses BCE (Background Color Erase) and fills cleared cells with
   // the current SGR background, not the terminal default.
-  // Buffer-mode switching, terminal modes, and cursor restoration are all
-  // emitted by the addon.
   let out = '\x1b[?25l\x1b[0m\x1b[2J\x1b[H';
-  out += serializer.serialize();
+
+  const isAlt = terminal.buffer.active.type === 'alternate';
+  if (isAlt) {
+    // Match @xterm/addon-serialize: when the source is in alternate-buffer
+    // mode, serialize the normal buffer first, then enter alt and serialize
+    // the alt buffer. The client's STATE_FULL prefix has already exited any
+    // prior alt mode (see terminal-core.ts STATE_FULL handler), so a fresh
+    // serializer starts from normal mode.
+    out += serializeBufferOf(terminal, terminal.buffer.normal);
+    out += '\x1b[?1049h\x1b[H';
+    out += serializeBufferOf(terminal, terminal.buffer.alternate);
+  } else {
+    out += serializeBufferOf(terminal, terminal.buffer.active);
+  }
+
+  out += serializeModes(readModes(terminal));
+
+  const buf = terminal.buffer.active;
+  const cursorRow = buf.cursorY + 1;
+  const cursorCol = buf.cursorX + 1;
+  out += `\x1b[${cursorRow};${cursorCol}H`;
+
   if (title) out += `\x1b]2;${title}\x07`;
   if (!cursorHidden) out += '\x1b[?25h';
+  return out;
+}
+
+type HeadlessBuffer = Terminal['buffer']['active'];
+
+// Internal helper: walks `buf` and emits a byte stream that reconstructs it on
+// a client xterm. The terminal is still required for `_oscLinkService` lookups.
+//
+// Row-count rule (mirrors `@xterm/addon-serialize`): when the buffer fits in
+// the viewport (`buf.length <= rows`), only emit rows up to the last row that
+// contains a non-blank cell — emitting trailing blank rows would write extra
+// `\r\n`s that scroll real content off the top. When the buffer has spilled
+// into scrollback (`buf.length > rows`), emit every row so the client ends up
+// with the same `baseY`. Either way, `\r\n` separators go *between* rows, not
+// after the last one — that final `\r\n` would also scroll.
+function serializeBufferOf(terminal: Terminal, buf: HeadlessBuffer): string {
+  let lastSgr: SgrCell | null = null;
+  let lastUrlId = 0;
+  const total = buf.length;
+  const rows = terminal.rows;
+  let lastContentRow = -1;
+
+  const rowOutputs: string[] = new Array(total);
+
+  for (let y = 0; y < total; y++) {
+    const line = buf.getLine(y);
+    if (!line) { rowOutputs[y] = ''; continue; }
+    let rowOut = '';
+    const width = line.length;
+    let trailing = 0;
+    for (let x = 0; x < width; x++) {
+      // Allocate a fresh cell per position. The dest-pointer overload of
+      // `getCell(x, cell)` updates the SGR fields but leaves `cell.extended`
+      // (where `urlId` lives) stale from the previous cell, which collapses
+      // OSC 8 spans into "single endless link" output and breaks the close
+      // emission. Until xterm.js stops sharing `extended` across getCell
+      // calls, the per-cell allocation is required for correctness.
+      const cellRef = line.getCell(x);
+      if (!cellRef) continue;
+      const w = cellRef.getWidth();
+      if (w === 0) continue;
+      const chars = cellRef.getChars();
+      const sgr: SgrCell = {
+        fg: cellRef.getFgColor(),
+        bg: cellRef.getBgColor(),
+        fgMode: cellRef.getFgColorMode(),
+        bgMode: cellRef.getBgColorMode(),
+        attrs: packAttrs(cellRef),
+      };
+      const urlId = readCellUrlId(cellRef);
+
+      if (!lastSgr || !sgrLiveEqual(lastSgr, sgr)) {
+        rowOut += sgrSequenceLive(sgr);
+        lastSgr = sgr;
+      }
+      if (urlId !== lastUrlId) {
+        if (lastUrlId !== 0) rowOut += OSC8_CLOSE;
+        if (urlId !== 0) {
+          const uri = readUriForUrlId(terminal, urlId);
+          if (uri !== undefined) rowOut += osc8Open(uri);
+        }
+        lastUrlId = urlId;
+      }
+      if (chars === '') {
+        trailing++;
+      } else {
+        if (trailing > 0) { rowOut += ' '.repeat(trailing); trailing = 0; }
+        rowOut += chars;
+        lastContentRow = y;
+      }
+    }
+    rowOutputs[y] = rowOut;
+  }
+
+  const emitCount = total > rows ? total : Math.max(lastContentRow + 1, 0);
+
+  let out = '';
+  for (let i = 0; i < emitCount; i++) {
+    out += rowOutputs[i];
+    if (i + 1 < emitCount) {
+      const nextLine = buf.getLine(i + 1);
+      // Wrapped continuation lines must NOT get a row separator — let the
+      // client's wrap detection rejoin them.
+      if (!nextLine || !nextLine.isWrapped) out += '\r\n';
+    }
+  }
+
+  if (lastUrlId !== 0) out += OSC8_CLOSE;
+  if (lastSgr) out += '\x1b[0m';
   return out;
 }
 

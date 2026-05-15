@@ -2,8 +2,6 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import headlessPkg from '@xterm/headless';
 const { Terminal } = headlessPkg;
-import serializePkg from '@xterm/addon-serialize';
-const { SerializeAddon } = serializePkg;
 import { blankSnapshot, captureSnapshot, generateDiff, serializeFullState, compareSnapshots } from './diff.ts';
 
 describe('blankSnapshot', () => {
@@ -44,12 +42,6 @@ function writeAndWait(terminal: InstanceType<typeof Terminal>, data: string): Pr
 /** Capture snapshot using baseY as scrollCount (equivalent to pre-capacity behavior). */
 function takeSnapshot(terminal: InstanceType<typeof Terminal>, title = '', cursorHidden = false, scrollCount?: number) {
   return captureSnapshot(terminal, title, cursorHidden, scrollCount ?? terminal.buffer.active.baseY);
-}
-
-function makeSerializer(terminal: InstanceType<typeof Terminal>): InstanceType<typeof SerializeAddon> {
-  const addon = new SerializeAddon();
-  terminal.loadAddon(addon as Parameters<typeof terminal.loadAddon>[0]);
-  return addon;
 }
 
 describe('captureSnapshot', () => {
@@ -262,9 +254,8 @@ describe('scrollback at capacity', () => {
 describe('serializeFullState', () => {
   it('reproduces visible area on a fresh terminal', async () => {
     const src = new Terminal({ cols: 40, rows: 10, scrollback: 100, allowProposedApi: true });
-    const ser = makeSerializer(src);
     await writeAndWait(src, 'Hello World');
-    const vt = serializeFullState(ser, '', false);
+    const vt = serializeFullState(src, '', false);
 
     const dst = new Terminal({ cols: 40, rows: 10, scrollback: 100, allowProposedApi: true });
     await writeAndWait(dst, vt);
@@ -282,12 +273,11 @@ describe('serializeFullState', () => {
 
   it('reproduces scrollback on a fresh terminal', async () => {
     const src = new Terminal({ cols: 40, rows: 5, scrollback: 100, allowProposedApi: true });
-    const ser = makeSerializer(src);
     let data = '';
     for (let i = 1; i <= 10; i++) data += `line${i}\r\n`;
     await writeAndWait(src, data);
 
-    const vt = serializeFullState(ser, '', false);
+    const vt = serializeFullState(src, '', false);
     const dst = new Terminal({ cols: 40, rows: 5, scrollback: 100, allowProposedApi: true });
     await writeAndWait(dst, vt);
 
@@ -300,18 +290,16 @@ describe('serializeFullState', () => {
 
   it('includes title in output', async () => {
     const src = new Terminal({ cols: 40, rows: 10, allowProposedApi: true });
-    const ser = makeSerializer(src);
-    const vt = serializeFullState(ser, 'TestTitle', false);
+    const vt = serializeFullState(src, 'TestTitle', false);
     assert.ok(vt.includes('\x1b]2;TestTitle\x07'));
     src.dispose();
   });
 
   it('handles alternate buffer', async () => {
     const src = new Terminal({ cols: 40, rows: 10, allowProposedApi: true });
-    const ser = makeSerializer(src);
     await writeAndWait(src, '\x1b[?1049h'); // Switch to alternate buffer
     await writeAndWait(src, 'Alt content');
-    const vt = serializeFullState(ser, '', false);
+    const vt = serializeFullState(src, '', false);
     assert.ok(vt.includes('\x1b[?1049h'), 'should include alternate buffer switch');
     src.dispose();
   });
@@ -324,23 +312,21 @@ describe('serializeFullState', () => {
     // See terminal-core.ts STATE_FULL handler. So serializeFullState only
     // needs to emit \x1b[?1049h when the source is in alt mode.
     const src = new Terminal({ cols: 40, rows: 10, allowProposedApi: true });
-    const ser = makeSerializer(src);
     await writeAndWait(src, 'Normal content');
-    const vt = serializeFullState(ser, '', false);
+    const vt = serializeFullState(src, '', false);
     assert.ok(!vt.includes('\x1b[?1049h'), 'should NOT include enter-alternate');
     src.dispose();
   });
 
   it('recovers client from alternate buffer stuck state', async () => {
     const src = new Terminal({ cols: 40, rows: 10, scrollback: 100, allowProposedApi: true });
-    const ser = makeSerializer(src);
     let data = '';
     for (let i = 1; i <= 15; i++) data += `line${i}\r\n`;
     await writeAndWait(src, data);
     assert.equal(src.buffer.active.type, 'normal');
     assert.ok(src.buffer.active.baseY > 0, 'source should have scrollback');
 
-    const vt = serializeFullState(ser, '', false);
+    const vt = serializeFullState(src, '', false);
 
     // Destination starts stuck in alternate mode (simulates the bug)
     const dst = new Terminal({ cols: 40, rows: 10, scrollback: 100, allowProposedApi: true });
@@ -374,9 +360,8 @@ describe('serializeFullState', () => {
       '\x1b[?2004l' +
       '\x1b[3J';
     const src = new Terminal({ cols: 40, rows: 5, allowProposedApi: true });
-    const ser = makeSerializer(src);
     await writeAndWait(src, 'fresh session');
-    const vt = serializeFullState(ser, '', false);
+    const vt = serializeFullState(src, '', false);
 
     // Destination simulates the leak: prior session left mouse tracking +
     // bracketed paste enabled in the shared client xterm.
@@ -401,11 +386,10 @@ describe('serializeFullState', () => {
     // Replay into a fresh dst at 40 → wrapped flags must round-trip,
     // otherwise the client cannot reflow scrollback on a later resize.
     const src = new Terminal({ cols: 80, rows: 5, scrollback: 100, allowProposedApi: true });
-    const ser = makeSerializer(src);
     await writeAndWait(src, 'Y'.repeat(160) + '\r\n');
     src.resize(40, 5);
 
-    const vt = serializeFullState(ser, '', false);
+    const vt = serializeFullState(src, '', false);
     const dst = new Terminal({ cols: 40, rows: 5, scrollback: 100, allowProposedApi: true });
     await writeAndWait(dst, '\x1b[?1049l\x1b[3J' + vt);
 
@@ -428,11 +412,10 @@ describe('serializeFullState', () => {
     // group back to two 80-char rows. We push the wrapped content into
     // scrollback (rows=3) because grow-reflow only operates on scrollback.
     const src = new Terminal({ cols: 80, rows: 3, scrollback: 100, allowProposedApi: true });
-    const ser = makeSerializer(src);
     await writeAndWait(src, 'Y'.repeat(160) + '\r\nLINE0\r\nLINE1\r\nLINE2\r\n');
     src.resize(40, 3);
 
-    const vt = serializeFullState(ser, '', false);
+    const vt = serializeFullState(src, '', false);
     const dst = new Terminal({ cols: 40, rows: 3, scrollback: 100, allowProposedApi: true });
     await writeAndWait(dst, '\x1b[?1049l\x1b[3J' + vt);
 
@@ -455,10 +438,9 @@ describe('serializeFullState', () => {
     // Mixed case: wrapping line followed by short non-wrapping lines.
     // Replayed dst should not bleed wrap flags onto the LINE-N rows.
     const src = new Terminal({ cols: 40, rows: 5, scrollback: 100, allowProposedApi: true });
-    const ser = makeSerializer(src);
     await writeAndWait(src, 'X'.repeat(80) + '\r\nLINE0\r\nLINE1\r\nLINE2\r\n');
 
-    const vt = serializeFullState(ser, '', false);
+    const vt = serializeFullState(src, '', false);
     const dst = new Terminal({ cols: 40, rows: 5, scrollback: 100, allowProposedApi: true });
     await writeAndWait(dst, '\x1b[?1049l\x1b[3J' + vt);
 
@@ -470,6 +452,44 @@ describe('serializeFullState', () => {
     assert.equal(dst.buffer.active.getLine(3)?.isWrapped, false);
     assert.equal(dst.buffer.active.getLine(4)?.isWrapped, false);
 
+    src.dispose();
+    dst.dispose();
+  });
+
+  it('round-trips OSC 8 hyperlinks via captureSnapshot diff', async () => {
+    // Claude Code's markdown links emit OSC 8 with a `id=` param + BEL
+    // terminator. The diff path must preserve `urlId` per cell and emit
+    // `\x1b]8;;URL\x07` / `\x1b]8;;\x07` transitions so the client xterm's
+    // `_oscLinkService` registers the link.
+    const src = new Terminal({ cols: 40, rows: 5, scrollback: 100, allowProposedApi: true });
+    const prev = takeSnapshot(src);
+    await writeAndWait(src, '\x1b]8;id=t;https://example.com/\x07Click\x1b]8;;\x07 plain');
+    const curr = takeSnapshot(src);
+    const diff = generateDiff(prev, curr);
+    assert.ok(diff !== null && diff !== '');
+    assert.ok(diff.includes('\x1b]8;;https://example.com/\x07'),
+      `diff should open OSC 8; got: ${JSON.stringify(diff)}`);
+    assert.ok(diff.includes('\x1b]8;;\x07'),
+      `diff should close OSC 8; got: ${JSON.stringify(diff)}`);
+    src.dispose();
+  });
+
+  it('serializeFullState preserves OSC 8 hyperlinks into a fresh client', async () => {
+    const src = new Terminal({ cols: 40, rows: 5, scrollback: 100, allowProposedApi: true });
+    await writeAndWait(src, '\x1b]8;id=t;https://example.com/\x07Click\x1b]8;;\x07 plain\r\n');
+    const vt = serializeFullState(src, '', false);
+    assert.ok(vt.includes('\x1b]8;;https://example.com/\x07'),
+      `state-full should open OSC 8; got: ${JSON.stringify(vt)}`);
+    assert.ok(vt.includes('\x1b]8;;\x07'),
+      `state-full should close OSC 8`);
+
+    const dst = new Terminal({ cols: 40, rows: 5, scrollback: 100, allowProposedApi: true });
+    await writeAndWait(dst, '\x1b[?1049l\x1b[3J' + vt);
+    // Pull the urlId from the destination cell — it must be non-zero,
+    // proving the OSC 8 link survived the round trip.
+    const cell = dst.buffer.active.getLine(0)?.getCell(0);
+    const extendedUrlId = (cell as unknown as { extended?: { urlId?: number } } | undefined)?.extended?.urlId ?? 0;
+    assert.ok(extendedUrlId > 0, 'first cell should have a non-zero urlId after replay');
     src.dispose();
     dst.dispose();
   });
@@ -530,9 +550,8 @@ describe('cursor visibility in diff', () => {
 describe('serializeFullState cursor visibility', () => {
   it('omits cursor show when cursorHidden is true', async () => {
     const src = new Terminal({ cols: 40, rows: 10, allowProposedApi: true });
-    const ser = makeSerializer(src);
     await writeAndWait(src, 'Hello');
-    const vt = serializeFullState(ser, '', true);
+    const vt = serializeFullState(src, '', true);
     assert.ok(vt.startsWith('\x1b[?25l'), 'should start with cursor hide');
     assert.ok(!vt.includes('\x1b[?25h'), 'should NOT show cursor');
     src.dispose();
@@ -540,9 +559,8 @@ describe('serializeFullState cursor visibility', () => {
 
   it('shows cursor when cursorHidden is false', async () => {
     const src = new Terminal({ cols: 40, rows: 10, allowProposedApi: true });
-    const ser = makeSerializer(src);
     await writeAndWait(src, 'Hello');
-    const vt = serializeFullState(ser, '', false);
+    const vt = serializeFullState(src, '', false);
     assert.ok(vt.endsWith('\x1b[?25h'), 'should end with cursor show');
     src.dispose();
   });
@@ -660,7 +678,6 @@ describe('serializeFullState BCE prevention', () => {
     // writes colored cells, then \r\n scrolls with the last cell's SGR active.
     // Without the BCE fix, the new blank row inherits that background color.
     const src = new Terminal({ cols: 20, rows: 5, scrollback: 100, allowProposedApi: true });
-    const ser = makeSerializer(src);
 
     // Write colored content followed by empty lines to create scrollback
     await writeAndWait(src, '\x1b[48;5;237mColored bg\x1b[0m\r\n');
@@ -671,7 +688,7 @@ describe('serializeFullState BCE prevention', () => {
     const srcSnap = takeSnapshot(src);
 
     // Serialize and apply to shadow
-    const vt = serializeFullState(ser, '', false);
+    const vt = serializeFullState(src, '', false);
     const shadow = new Terminal({ cols: 20, rows: 5, scrollback: 100, allowProposedApi: true });
     await writeAndWait(shadow, '\x1b[3J' + vt);
 
@@ -688,7 +705,6 @@ describe('serializeFullState BCE prevention', () => {
     // Simulate self-heal scenario: shadow terminal has non-default SGR
     // from a previous frame, then receives \x1b[3J + STATE_FULL.
     const src = new Terminal({ cols: 20, rows: 5, scrollback: 100, allowProposedApi: true });
-    const ser = makeSerializer(src);
     for (let i = 0; i < 10; i++) {
       await writeAndWait(src, `\x1b[48;5;${200 + i}mLine ${i}\x1b[0m\r\n`);
     }
@@ -697,7 +713,7 @@ describe('serializeFullState BCE prevention', () => {
     // Set a non-default SGR on the shadow (simulating dirty state)
     await writeAndWait(shadow, '\x1b[48;5;196m');
 
-    const vt = serializeFullState(ser, '', false);
+    const vt = serializeFullState(src, '', false);
     await writeAndWait(shadow, '\x1b[3J' + vt);
 
     const srcSnap = takeSnapshot(src);
@@ -714,12 +730,11 @@ describe('serializeFullState BCE prevention', () => {
 describe('diff round-trip verification', () => {
   it('diff applied to shadow terminal matches source terminal', async () => {
     const src = new Terminal({ cols: 40, rows: 10, scrollback: 100, allowProposedApi: true });
-    const ser = makeSerializer(src);
     const shadow = new Terminal({ cols: 40, rows: 10, scrollback: 100, allowProposedApi: true });
 
     // Initialize both with the same STATE_FULL
     await writeAndWait(src, 'Initial content');
-    const fullVt = serializeFullState(ser, '', false);
+    const fullVt = serializeFullState(src, '', false);
     await writeAndWait(shadow, '\x1b[3J' + fullVt);
 
     // Make a change with colors
@@ -744,12 +759,11 @@ describe('diff round-trip verification', () => {
 
   it('scroll diff applied to shadow matches source', async () => {
     const src = new Terminal({ cols: 40, rows: 5, scrollback: 100, allowProposedApi: true });
-    const ser = makeSerializer(src);
     const shadow = new Terminal({ cols: 40, rows: 5, scrollback: 100, allowProposedApi: true });
 
     // Write initial content with colors
     await writeAndWait(src, '\x1b[31mRed line 1\x1b[0m\r\n\x1b[32mGreen line 2\x1b[0m\r\n');
-    const fullVt = serializeFullState(ser, '', false);
+    const fullVt = serializeFullState(src, '', false);
     await writeAndWait(shadow, '\x1b[3J' + fullVt);
 
     const prev = takeSnapshot(src);
@@ -761,7 +775,7 @@ describe('diff round-trip verification', () => {
     const diff = generateDiff(prev, curr);
     if (diff === null) {
       // Large scroll — use STATE_FULL
-      const fullVt2 = serializeFullState(ser, '', false);
+      const fullVt2 = serializeFullState(src, '', false);
       await writeAndWait(shadow, '\x1b[3J' + fullVt2);
     } else if (diff !== '') {
       await writeAndWait(shadow, diff);
