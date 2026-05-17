@@ -31,6 +31,7 @@ import { Toaster } from '@/components/ui/sonner';
 
 const SettingsDialog = lazy(() => import('@/components/SettingsDialog').then(m => ({ default: m.SettingsDialog })));
 const ConnectionClosedDialog = lazy(() => import('@/components/ConnectionClosedDialog').then(m => ({ default: m.ConnectionClosedDialog })));
+const ConnectionSlowOverlay = lazy(() => import('@/components/ConnectionSlowOverlay').then(m => ({ default: m.ConnectionSlowOverlay })));
 const ImagePasteErrorDialog = lazy(() => import('@/components/ImagePasteErrorDialog').then(m => ({ default: m.ImagePasteErrorDialog })));
 const defaultTheme: ITheme = {
   foreground: '#d2d2d2',
@@ -85,6 +86,7 @@ export function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [imagePasteError, setImagePasteError] = useState<ImagePasteErrorInfo | null>(null);
   const [connectionClosedReason, setConnectionClosedReason] = useState<ConnectionClosedReason | null>(null);
+  const [connectingSlow, setConnectingSlow] = useState(false);
   const [batchInputOpen, setBatchInputOpen] = useState(false);
   const [sessionPanelOpen, setSessionPanelOpen] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | undefined>();
@@ -145,6 +147,7 @@ export function App() {
     const run = () => {
       void import('@/components/SettingsDialog');
       void import('@/components/ConnectionClosedDialog');
+      void import('@/components/ConnectionSlowOverlay');
       void import('@/components/ImagePasteErrorDialog');
     };
     if (typeof window.requestIdleCallback === 'function') {
@@ -428,6 +431,8 @@ export function App() {
     onConnectionClosed: (reason: ConnectionClosedReason) => {
       setConnectionClosedReason(reason);
     },
+    onConnectingSlow: () => setConnectingSlow(true),
+    onConnected: () => setConnectingSlow(false),
     onEditorOpen: (filePath: string, content: string, contentType?: string) => {
       setEditorFilePath(filePath);
       setEditorContent(content);
@@ -672,6 +677,12 @@ export function App() {
             reason={connectionClosedReason}
             onReconnect={handleReconnect}
           />
+        </Suspense>
+      )}
+
+      {connectingSlow && connectionClosedReason === null && (
+        <Suspense fallback={null}>
+          <ConnectionSlowOverlay open={connectingSlow} />
         </Suspense>
       )}
 

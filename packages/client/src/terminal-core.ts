@@ -48,6 +48,10 @@ const RENDERER_TEARDOWN_DELAY_MS = 5000;
  *  TCP SYN timeout is 30-120s. 10s lets us retry faster. */
 const CONNECT_TIMEOUT_MS = 10_000;
 
+/** How long a connect / reconnect attempt may stay in-flight before we
+ *  surface the "Things to check" overlay (VPN, server, host awake). */
+const SLOW_CONNECT_MS = 2_000;
+
 /** Client-side liveness: close the socket if no data arrives for this
  *  long while readyState is OPEN.  Server sends RTT_REPORT every 5s
  *  via heartbeat; 20s = 4 missed cycles. */
@@ -114,6 +118,11 @@ export interface TerminalCoreCallbacks {
   onSessionDied?: (sessionId: string) => void;
   onSessionNotFound?: () => void;
   onConnectionClosed?: (reason: ConnectionClosedReason) => void;
+  /** Connect / reconnect has been pending long enough that we should warn
+   *  the user to check VPN / server / host. Cleared via onConnected. */
+  onConnectingSlow?: () => void;
+  /** Socket reached OPEN; pair with `onConnectingSlow` to hide the overlay. */
+  onConnected?: () => void;
   onRttReport?: (rttMs: number) => void;
   onBytesSent?: (bytes: number) => void;
   onBytesReceived?: (bytes: number) => void;
@@ -173,6 +182,8 @@ export class TerminalCore {
   private reconnectDelay = 0;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private connectTimer?: ReturnType<typeof setTimeout>;
+  private slowConnectTimer?: ReturnType<typeof setTimeout>;
+  private slowConnectReported = false;
   private lastMessageAt = 0;
   private gestureDetector?: GestureDetector;
   private lastGestureCenter: { x: number; y: number } = { x: 0, y: 0 };
@@ -249,6 +260,11 @@ export class TerminalCore {
   /** Full teardown — call on unmount (not on reconnect). */
   destroy() {
     this.dispose();
+    if (this.slowConnectTimer !== undefined) {
+      clearTimeout(this.slowConnectTimer);
+      this.slowConnectTimer = undefined;
+    }
+    this.slowConnectReported = false;
     this.stopMomentum();
     for (const d of this.terminalDisposables) d.dispose();
     this.terminalDisposables.length = 0;
@@ -458,6 +474,18 @@ export class TerminalCore {
     this.registerSocket(addEventListener(socket, 'open', () => this.onSocketOpen()));
     this.registerSocket(addEventListener(socket, 'message', (e) => this.onSocketData(e as MessageEvent)));
     this.registerSocket(addEventListener(socket, 'close', (e) => this.onSocketClose(e as CloseEvent)));
+
+    // Start (or keep) the slow-connect timer so a stalled connect / a string
+    // of failed reconnects surfaces the troubleshooting overlay after 2s.
+    // Cleared only on a successful OPEN — re-entrant connects keep the
+    // already-armed timer (or already-reported state) intact.
+    if (!this.slowConnectReported && this.slowConnectTimer === undefined) {
+      this.slowConnectTimer = setTimeout(() => {
+        this.slowConnectTimer = undefined;
+        this.slowConnectReported = true;
+        this.callbacks.onConnectingSlow?.();
+      }, SLOW_CONNECT_MS);
+    }
 
     // Connection timeout: if the socket doesn't reach OPEN within the
     // deadline, close it.  The close event triggers scheduleReconnect().
@@ -1072,6 +1100,14 @@ export class TerminalCore {
     if (this.connectTimer !== undefined) {
       clearTimeout(this.connectTimer);
       this.connectTimer = undefined;
+    }
+    if (this.slowConnectTimer !== undefined) {
+      clearTimeout(this.slowConnectTimer);
+      this.slowConnectTimer = undefined;
+    }
+    if (this.slowConnectReported) {
+      this.slowConnectReported = false;
+      this.callbacks.onConnected?.();
     }
     this.lastMessageAt = Date.now();
     this.logger.info('websocket opened');
