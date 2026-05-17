@@ -814,7 +814,7 @@ export class TerminalCore {
   /** True when the tap lands on the cursor's row or one row above or
    *  below, regardless of column.  Mimics iOS native — tap anywhere
    *  on the caret line to surface a paste popover. */
-  private tapIsNearCursor(clientX: number, clientY: number): boolean {
+  private tapIsNearCursor(_clientX: number, clientY: number): boolean {
     const term = this.terminal;
     const el = term?.element;
     if (!term || !el) return false;
