@@ -28,6 +28,9 @@ export interface SelectionOverlayOptions {
    *  mouse mode is on; the host is responsible for dispatching the
    *  synthetic MouseEvents and clearing the xterm selection. */
   onSendToApp?: () => void;
+  /** Active xterm renderer.  The loupe magnifies the WebGL canvas;
+   *  it is suppressed when the DOM renderer is in effect. */
+  getRenderer?: () => 'webgl' | 'dom';
 }
 
 export class SelectionOverlayAddon implements ITerminalAddon {
@@ -78,11 +81,20 @@ export class SelectionOverlayAddon implements ITerminalAddon {
 
   private onPasteCallback?: () => void;
   private onSendToAppCallback?: () => void;
+  private getRenderer?: () => 'webgl' | 'dom';
+
+  // Loupe — circular magnifier shown while a handle is being dragged.
+  private loupe: HTMLDivElement | null = null;
+  private loupeCanvas: HTMLCanvasElement | null = null;
+  private loupeCtx: CanvasRenderingContext2D | null = null;
+  private loupeSourceCanvas: HTMLCanvasElement | null = null;
+  private loupeRenderDisposable: IDisposable | null = null;
 
   constructor(options: SelectionOverlayOptions) {
     this.isTouchDevice = options.isTouchDevice;
     this.onPasteCallback = options.onPaste;
     this.onSendToAppCallback = options.onSendToApp;
+    this.getRenderer = options.getRenderer;
   }
 
   activate(terminal: Terminal): void {
@@ -118,6 +130,7 @@ export class SelectionOverlayAddon implements ITerminalAddon {
 
   dispose(): void {
     this.stopAutoScroll();
+    this.stopLoupe();
     this.unblockTouchScroll();
     if (this.boundOnTerminalPointerDown && this.terminal?.element) {
       this.terminal.element.removeEventListener('pointerdown', this.boundOnTerminalPointerDown, { capture: true });
@@ -166,6 +179,7 @@ export class SelectionOverlayAddon implements ITerminalAddon {
   /** Hide handles + menu and clear selection. */
   dismiss(): void {
     this.stopAutoScroll();
+    this.stopLoupe();
     this.unblockTouchScroll();
     this.active = false;
     this.selection = null;
@@ -216,12 +230,48 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     this.endBar = this.createBar();
     this.endCircle = this.createCircle('end');
     this.editMenu = this.createEditMenu();
+    this.loupe = this.createLoupe();
 
     this.container.appendChild(this.startBar);
     this.container.appendChild(this.startCircle);
     this.container.appendChild(this.endBar);
     this.container.appendChild(this.endCircle);
     this.container.appendChild(this.editMenu);
+    this.container.appendChild(this.loupe);
+  }
+
+  /** Circular magnifier shown above the finger while a handle is dragged.
+   *  Hosts an inner 2D <canvas> sized at devicePixelRatio. */
+  private createLoupe(): HTMLDivElement {
+    const size = SelectionOverlayAddon.LOUPE_SIZE;
+    const loupe = document.createElement('div');
+    Object.assign(loupe.style, {
+      position: 'absolute',
+      width: size + 'px',
+      height: size + 'px',
+      borderRadius: '50%',
+      overflow: 'hidden',
+      border: '1px solid rgba(255,255,255,0.4)',
+      boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+      pointerEvents: 'none',
+      display: 'none',
+      zIndex: '12',
+    });
+    const canvas = document.createElement('canvas');
+    const dpr = window.devicePixelRatio || 1;
+    canvas.width = size * dpr;
+    canvas.height = size * dpr;
+    Object.assign(canvas.style, {
+      position: 'absolute',
+      left: '0',
+      top: '0',
+      width: size + 'px',
+      height: size + 'px',
+    });
+    loupe.appendChild(canvas);
+    this.loupeCanvas = canvas;
+    this.loupeCtx = canvas.getContext('2d');
+    return loupe;
   }
 
   /** Blue vertical bar marking the selection boundary. */
@@ -360,6 +410,12 @@ export class SelectionOverlayAddon implements ITerminalAddon {
   private static readonly HANDLE_GAP = 20;
   // Circle visible radius (half of 10px).
   private static readonly CIRCLE_R = 5;
+  // Loupe diameter in CSS pixels.
+  private static readonly LOUPE_SIZE = 120;
+  // Magnification factor.  iOS uses roughly 1.5-2x.
+  private static readonly LOUPE_ZOOM = 1.6;
+  // Vertical gap between the loupe bottom and the finger position.
+  private static readonly LOUPE_LIFT = 24;
 
   private updatePositions(): void {
     if (!this.terminal || !this.selection) return;
@@ -470,6 +526,108 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     this.editMenu.style.display = 'flex';
   }
 
+  // ── Loupe ─────────────────────────────────────────────────────────────────
+
+  /** Locate the main WebGL canvas under .xterm-screen.  The WebGL addon
+   *  appends a LinkRenderLayer 2D canvas first and the main WebGL canvas
+   *  after, so the last <canvas> child is the one with the rendered
+   *  glyphs.  Probing getContext('webgl2') is safe because the link layer
+   *  already owns a 2D context and the call returns null without
+   *  attaching anything. */
+  private resolveWebglCanvas(): HTMLCanvasElement | null {
+    const screen = this.terminal?.element?.querySelector('.xterm-screen');
+    if (!screen) return null;
+    const canvases = Array.from(screen.querySelectorAll('canvas'));
+    let last: HTMLCanvasElement | null = null;
+    for (const c of canvases) {
+      last = c;
+      if (c.getContext('webgl2') || c.getContext('webgl')) return c;
+    }
+    return last;
+  }
+
+  /** Start the loupe for a fresh handle drag.  No-op when the active
+   *  xterm renderer is the DOM fallback — drawImage of a span tree
+   *  isn't meaningful and the perf upside is small. */
+  private startLoupe(clientX: number, clientY: number): void {
+    if (!this.loupe || !this.terminal) return;
+    if (this.getRenderer && this.getRenderer() !== 'webgl') return;
+
+    const canvas = this.resolveWebglCanvas();
+    if (!canvas) return;
+    this.loupeSourceCanvas = canvas;
+
+    this.loupe.style.display = 'block';
+    this.loupeRenderDisposable = this.terminal.onRender(() => this.drawLoupe());
+    this.positionLoupe(clientX, clientY);
+    this.drawLoupe();
+  }
+
+  private stopLoupe(): void {
+    if (this.loupeRenderDisposable) {
+      this.loupeRenderDisposable.dispose();
+      this.loupeRenderDisposable = null;
+    }
+    this.loupeSourceCanvas = null;
+    if (this.loupe) this.loupe.style.display = 'none';
+  }
+
+  private positionLoupe(clientX: number, clientY: number): void {
+    if (!this.loupe || !this.terminal?.element) return;
+    const termRect = this.terminal.element.getBoundingClientRect();
+    const size = SelectionOverlayAddon.LOUPE_SIZE;
+    const lift = SelectionOverlayAddon.LOUPE_LIFT;
+
+    // Horizontal: center on finger, clamp within terminal element.
+    let left = clientX - termRect.left - size / 2;
+    left = Math.max(0, Math.min(termRect.width - size, left));
+
+    // Vertical: prefer above the finger; flip below near the top edge.
+    const aboveTop = clientY - termRect.top - size - lift;
+    const top = aboveTop >= 0 ? aboveTop : clientY - termRect.top + lift;
+
+    this.loupe.style.left = left + 'px';
+    this.loupe.style.top = top + 'px';
+  }
+
+  private drawLoupe(): void {
+    if (!this.loupeCtx || !this.loupeCanvas || !this.loupeSourceCanvas) return;
+    if (!this.terminal || !this.selection || !this.dragTarget) return;
+
+    const cell = this.dragTarget === 'start' ? this.selection.start : this.selection.end;
+    const viewportY = this.terminal.buffer.active.viewportY;
+    const viewRow = cell.y - viewportY;
+
+    // Source coords are in the xterm canvas's own CSS-pixel space.
+    // The canvas is a child of .xterm-screen with origin (0,0) at the
+    // screen's top-left, so gridOffsetX/Y (which is termEl→screen) does
+    // not apply here.
+    const src = this.loupeSourceCanvas;
+    const cssW = src.clientWidth || src.width;
+    const cssH = src.clientHeight || src.height;
+    const ratioX = cssW > 0 ? src.width / cssW : 1;
+    const ratioY = cssH > 0 ? src.height / cssH : 1;
+
+    const cx = cell.x * this.cellWidth;
+    const cy = (viewRow + 0.5) * this.cellHeight;
+
+    const size = SelectionOverlayAddon.LOUPE_SIZE;
+    const zoom = SelectionOverlayAddon.LOUPE_ZOOM;
+    const sourceCss = size / zoom;
+    const sx = (cx - sourceCss / 2) * ratioX;
+    const sy = (cy - sourceCss / 2) * ratioY;
+    const sw = sourceCss * ratioX;
+    const sh = sourceCss * ratioY;
+
+    const ctx = this.loupeCtx;
+    const dw = this.loupeCanvas.width;
+    const dh = this.loupeCanvas.height;
+    const bg = (this.terminal.options.theme?.background as string | undefined) ?? '#000';
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, dw, dh);
+    ctx.drawImage(src, sx, sy, sw, sh, 0, 0, dw, dh);
+  }
+
   // ── Handle Dragging ───────────────────────────────────────────────────────
 
   private onHandlePointerDown(target: DragTarget, e: PointerEvent): void {
@@ -505,6 +663,10 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     if (this.editMenu) {
       this.editMenu.style.display = 'none';
     }
+
+    this.lastPointerX = e.clientX;
+    this.lastPointerY = e.clientY;
+    this.startLoupe(e.clientX, e.clientY);
   }
 
   private onHandlePointerMove(e: PointerEvent): void {
@@ -540,6 +702,8 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     this.normalizeSelection();
     this.applySelection();
     this.updatePositions();
+    this.positionLoupe(e.clientX, e.clientY);
+    this.drawLoupe();
   }
 
   private onHandlePointerUp(e: PointerEvent): void {
@@ -560,6 +724,7 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     }
 
     this.dragTarget = null;
+    this.stopLoupe();
     this.updatePositions();
   }
 
@@ -603,6 +768,8 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     this.normalizeSelection();
     this.applySelection();
     this.updatePositions();
+    this.positionLoupe(this.lastPointerX, this.lastPointerY);
+    this.drawLoupe();
   }
 
   private stopAutoScroll(): void {

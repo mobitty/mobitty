@@ -387,6 +387,7 @@ export class TerminalCore {
       isTouchDevice: () => this.isTouchDevice(),
       onPaste: () => void this.handlePaste(),
       onSendToApp: () => this.dispatchSelectionAsDrag(),
+      getRenderer: () => (this.webglAddon ? 'webgl' : 'dom'),
     });
     terminal.loadAddon(this.selectionOverlay);
     this.registerTerminal({ dispose: () => { this.selectionOverlay?.dispose(); this.selectionOverlay = undefined; } });
@@ -1743,7 +1744,7 @@ export class TerminalCore {
     switch (value) {
       case 'webgl':
         if (this.webglAddon) return;
-        this.webglAddon = new WebglAddon();
+        this.webglAddon = new WebglAddon(true);
         try {
           this.webglAddon.onContextLoss(() => {
             this.logger.warn('webgl-context-loss', this.getRenderDiagnostics('context-loss'));
