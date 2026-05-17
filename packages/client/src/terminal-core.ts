@@ -811,10 +811,9 @@ export class TerminalCore {
     requestAnimationFrame(() => this.selectionOverlay?.show());
   }
 
-  /** True when (clientX, clientY) lands within 3 cells of the
-   *  terminal cursor in both axes (Chebyshev distance).  Used by the
-   *  gesture detector to decide whether to swallow a single tap and
-   *  show a paste mini-menu. */
+  /** True when the tap lands on the cursor's row or one row above or
+   *  below, regardless of column.  Mimics iOS native — tap anywhere
+   *  on the caret line to surface a paste popover. */
   private tapIsNearCursor(clientX: number, clientY: number): boolean {
     const term = this.terminal;
     const el = term?.element;
@@ -822,24 +821,15 @@ export class TerminalCore {
     const screen = el.querySelector<HTMLElement>('.xterm-screen');
     if (!screen) return false;
     const rect = screen.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) return false;
-    const cellW = screen.clientWidth / term.cols;
+    if (rect.height === 0) return false;
     const cellH = screen.clientHeight / term.rows;
-    if (cellW === 0 || cellH === 0) return false;
-    const tapCol = Math.floor((clientX - rect.left) / cellW);
+    if (cellH === 0) return false;
     const tapViewRow = Math.floor((clientY - rect.top) / cellH);
     // cursorY is buffer-absolute on the normal buffer; convert to
     // viewport-relative by subtracting viewportY.
     const buf = term.buffer.active;
     const cursorViewRow = buf.cursorY - buf.viewportY;
-    const near = Math.abs(tapCol - buf.cursorX) <= 3 && Math.abs(tapViewRow - cursorViewRow) <= 3;
-    this.logger.debug('tap-near-cursor', {
-      tap: { col: tapCol, row: tapViewRow },
-      cursor: { col: buf.cursorX, row: cursorViewRow },
-      viewportY: buf.viewportY,
-      near,
-    });
-    return near;
+    return Math.abs(tapViewRow - cursorViewRow) <= 1;
   }
 
   /** Replay the current xterm selection to the TUI as a drag.  The
