@@ -753,9 +753,12 @@ export class TerminalCore {
         this.onTouchStartPause();
       },
       onLongPressDefault: (clientX, clientY) => {
-        // shiftKey:true triggers xterm's shouldForceSelection so word-select
-        // runs even when the TUI has mouse mode on.
-        this.dispatchTouchMultiClick(2, clientX, clientY, /*shiftKey*/ true);
+        // xterm's SelectionService and coreMouseService both fire on the
+        // same mousedown; selection runs even when mouse mode is on (the
+        // TUI also gets a stray CSI click, accepted).  shiftKey would
+        // route to _handleIncrementalClick which extends-from-nothing, so
+        // we deliberately don't set it here.
+        this.dispatchTouchMultiClick(2, clientX, clientY);
         this.selectionOverlay?.setMouseMode(this.terminal.modes.mouseTrackingMode);
         requestAnimationFrame(() => this.selectionOverlay?.show());
       },
@@ -780,7 +783,7 @@ export class TerminalCore {
   }
 
   private selectLineAtPoint(center: { x: number; y: number }) {
-    this.dispatchTouchMultiClick(3, center.x, center.y, /*shiftKey*/ true);
+    this.dispatchTouchMultiClick(3, center.x, center.y);
     this.selectionOverlay?.setMouseMode(this.terminal.modes.mouseTrackingMode);
     requestAnimationFrame(() => this.selectionOverlay?.show());
   }
@@ -804,7 +807,11 @@ export class TerminalCore {
     const row = Math.floor((clientY - rect.top) / cellH);
     // cursorX/Y are viewport-relative (rows index within the visible area).
     const buf = term.buffer.active;
-    return Math.abs(col - buf.cursorX) <= 3 && Math.abs(row - buf.cursorY) <= 3;
+    const near = Math.abs(col - buf.cursorX) <= 3 && Math.abs(row - buf.cursorY) <= 3;
+    this.logger.debug('tap-near-cursor', {
+      tap: { col, row }, cursor: { col: buf.cursorX, row: buf.cursorY }, near,
+    });
+    return near;
   }
 
   /** Replay the current xterm selection to the TUI as a drag.  The
