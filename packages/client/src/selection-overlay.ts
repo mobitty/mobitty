@@ -98,10 +98,12 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     // Reposition on scroll
     this.disposables.push(terminal.onScroll(() => this.onScroll()));
 
-    // Dismiss on terminal output
+    // Dismiss the selection overlay on terminal output (selection bounds
+    // become stale).  The paste-only menu is just a popover at a fixed
+    // viewport position with no selection bound — TUIs constantly
+    // redraw, so we don't hide it on every write.
     this.disposables.push(terminal.onWriteParsed(() => {
       if (this.active) this.dismiss();
-      if (this.pasteMenuActive) this.hidePasteOnlyMenu();
     }));
 
     // Recalculate on resize

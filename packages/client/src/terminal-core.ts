@@ -369,6 +369,11 @@ export class TerminalCore {
   }
 
   open(parent: HTMLElement) {
+    // Enable iTerm2-style alt-click-to-bypass-mouse-mode.  This is what
+    // makes xterm's SelectionService.shouldForceSelection respect altKey
+    // on Mac/iPadOS; combined with our synthetic shiftKey it covers both
+    // Mac (altKey) and non-Mac (shiftKey) bypass paths.
+    this.options.termOptions.macOptionClickForcesSelection = true;
     this.terminal = new Terminal(this.options.termOptions);
     const { terminal, fitAddon, overlayAddon, webLinksAddon } = this;
 
@@ -753,16 +758,16 @@ export class TerminalCore {
         this.onTouchStartPause();
       },
       onLongPressDefault: (clientX, clientY) => {
-        // xterm's SelectionService and coreMouseService both fire on the
-        // same mousedown; selection runs even when mouse mode is on (the
-        // TUI also gets a stray CSI click, accepted).  shiftKey would
-        // route to _handleIncrementalClick which extends-from-nothing, so
-        // we deliberately don't set it here.
+        // In mouse mode xterm disables SelectionService; we pass
+        // forceSelection so shiftKey/altKey bypass it.  Out of mouse
+        // mode the SelectionService is active and we want detail-based
+        // dispatch with no modifiers.
+        const inMouseMode = this.terminal.modes.mouseTrackingMode !== 'none';
         this.logger.debug('long-press-fired', {
-          clientX, clientY,
+          clientX, clientY, inMouseMode,
           mouseMode: this.terminal.modes.mouseTrackingMode,
         });
-        this.dispatchTouchMultiClick(2, clientX, clientY);
+        this.dispatchTouchMultiClick(2, clientX, clientY, inMouseMode);
         this.selectionOverlay?.setMouseMode(this.terminal.modes.mouseTrackingMode);
         requestAnimationFrame(() => {
           const pos = this.terminal.getSelectionPosition();
@@ -779,14 +784,20 @@ export class TerminalCore {
     this.registerTerminal({ dispose: () => { this.gestureDetector?.dispose(); this.gestureDetector = undefined; } });
   }
 
-  private dispatchTouchMultiClick(detail: number, clientX: number, clientY: number, shiftKey = false) {
+  private dispatchTouchMultiClick(detail: number, clientX: number, clientY: number, forceSelection = false) {
     const element = this.terminal?.element;
     if (!element) return;
     const ownerDoc = element.ownerDocument ?? document;
+    // shiftKey covers non-Mac shouldForceSelection; altKey covers Mac
+    // (paired with macOptionClickForcesSelection set in open()).  When
+    // mouse mode is off, _enabled is true and shiftKey would route to
+    // _handleIncrementalClick — so caller passes forceSelection=true
+    // only when mouse mode is on.
     const init = {
       bubbles: true, cancelable: true, button: 0, buttons: 1, detail,
       clientX, clientY, screenX: clientX, screenY: clientY,
-      shiftKey,
+      shiftKey: forceSelection,
+      altKey: forceSelection,
       view: ownerDoc.defaultView ?? window,
     };
     element.dispatchEvent(new MouseEvent('mousedown', init));
@@ -794,7 +805,8 @@ export class TerminalCore {
   }
 
   private selectLineAtPoint(center: { x: number; y: number }) {
-    this.dispatchTouchMultiClick(3, center.x, center.y);
+    const inMouseMode = this.terminal.modes.mouseTrackingMode !== 'none';
+    this.dispatchTouchMultiClick(3, center.x, center.y, inMouseMode);
     this.selectionOverlay?.setMouseMode(this.terminal.modes.mouseTrackingMode);
     requestAnimationFrame(() => this.selectionOverlay?.show());
   }
