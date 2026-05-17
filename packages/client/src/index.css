@@ -158,6 +158,35 @@ html, body {
   -webkit-touch-callout: none;
 }
 
+/* iOS-native selection layer. Mounted as a sibling of .xterm by
+   `IosSelectionLayer` only when the iOS shell advertises
+   `capabilities.selection`. Transparent DOM text mirror that sits over
+   the xterm canvas so WebKit's long-press recognizer fires here and shows
+   real iOS handles + action sheet. The intentional contrast with .xterm:
+   no -webkit-touch-callout: none — we WANT the callout. */
+.ios-selection-layer {
+  position: absolute;
+  z-index: 5;
+  color: transparent;
+  user-select: text;
+  -webkit-user-select: text;
+  /* Match the rest of `.xterm *` so the browser delivers pointer events
+     to the gesture-detector underneath instead of claiming them for
+     default scroll/zoom. */
+  touch-action: none;
+  /* Selection highlight on transparent text reads as a tinted rectangle
+     over the canvas glyphs beneath. */
+  -webkit-tap-highlight-color: transparent;
+  /* IosSelectionLayer syncs font-family / font-size / line-height /
+     letter-spacing / left / top / width / height inline to mirror xterm's
+     cell grid. */
+}
+.ios-selection-row {
+  white-space: pre;
+  height: var(--mobitty-cell-height, 1em);
+  line-height: var(--mobitty-cell-height, 1em);
+}
+
 /* Hide scrollbars on the mobile softkey bar's horizontal scroll strip
    (and any other scroll container that opts in via this class). */
 .scrollbar-hide {
