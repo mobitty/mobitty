@@ -66,6 +66,13 @@ export interface MobittyNativeBridge {
     text?: string;
     image?: { mimeType: string; base64: string };
   } | null>;
+  /// Write text into `UIPasteboard.general` directly. Used by the OSC 52
+  /// copy path: `navigator.clipboard.writeText` is blocked in WKWebView
+  /// without a user gesture, but a TUI emitting OSC 52 has no gesture, so
+  /// writes route through native. Pasteboard writes don't trigger the iOS
+  /// 16+ *Allow Paste from "…"* prompt — only reads do. Fire-and-forget.
+  /// Optional so the web works against older iOS shells.
+  writeClipboard?: (text: string) => void;
 }
 
 declare global {

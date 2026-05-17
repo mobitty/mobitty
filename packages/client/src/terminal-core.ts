@@ -40,6 +40,12 @@ const CMD_DOWNLOAD_START = 0x3c;
  *  context for tabs that stay backgrounded. */
 const MAX_PASTE_IMAGE_BYTES = 25 * 1024 * 1024; // 25 MB
 
+// Cap on the *decoded* OSC 52 payload. xterm.js's parser already limits
+// the raw OSC payload to 10 MB; we cap lower so a runaway TUI can't trash
+// the user's clipboard with a multi-MB blob. 1 MB covers any realistic
+// editor yank.
+const OSC52_MAX_DECODED_BYTES = 1024 * 1024; // 1 MB
+
 const RENDERER_TEARDOWN_DELAY_MS = 5000;
 
 /** Max time for a WebSocket to reach OPEN before we close and retry.
@@ -380,6 +386,7 @@ export class TerminalCore {
     this.registerTerminal({ dispose: () => { this.selectionOverlay?.dispose(); this.selectionOverlay = undefined; } });
     this.registerKeyInterceptor();
     this.registerNativePasteImageHandler();
+    this.registerOsc52Handler();
     this.syncPageBackground();
     fitAddon.fit();
 
@@ -913,6 +920,69 @@ export class TerminalCore {
       copied = typeof document.execCommand === 'function' && document.execCommand('copy');
     } catch { /* ignore */ }
     this.overlayAddon.showOverlay(copied ? '\u2702' : 'Copy failed', copied ? 300 : 700);
+  }
+
+  // OSC 52: `ESC ] 52 ; <target> ; <base64> BEL` \u2014 a TUI inside the session
+  // asks us to put text on the user's clipboard. See
+  // docs/done-design-osc-52-copy.md for the design.
+  private registerOsc52Handler(): void {
+    const terminal = this.terminal;
+    this.registerTerminal(terminal.parser.registerOscHandler(52, (data) => {
+      const semi = data.indexOf(';');
+      if (semi < 0) return true;
+      const target = data.slice(0, semi);
+      const payload = data.slice(semi + 1);
+      // Targets: c=clipboard, p=primary, q=secondary, s=select. We map
+      // c and s onto the system clipboard; ignore primary/secondary.
+      // Empty target is also clipboard per the de-facto convention.
+      if (target !== '' && !/[cs]/.test(target)) return true;
+      // Query: `ESC ] 52 ; c ; ? BEL`. Refuse on privacy grounds \u2014 leaking
+      // the user's clipboard to a remote app is the OSC 52 footgun we'd
+      // rather not ship.
+      if (payload === '?') {
+        this.logger.debug('osc52-query-denied', {});
+        return true;
+      }
+      // Empty payload would clear the clipboard. Silently ignore.
+      if (payload === '') return true;
+      let text: string;
+      try {
+        text = atob(payload);
+      } catch {
+        this.logger.warn('osc52-bad-base64', { length: payload.length });
+        return true;
+      }
+      if (text.length > OSC52_MAX_DECODED_BYTES) {
+        this.logger.warn('osc52-too-large', { length: text.length, cap: OSC52_MAX_DECODED_BYTES });
+        this.overlayAddon?.showOverlay('Copy too large', 800);
+        return true;
+      }
+      void this.writeClipboardFromTui(text);
+      return true;
+    }));
+  }
+
+  private async writeClipboardFromTui(text: string): Promise<void> {
+    const bridge = getNativeBridge();
+    if (bridge?.writeClipboard) {
+      try {
+        bridge.writeClipboard(text);
+        this.overlayAddon?.showOverlay('Copied from session', 800);
+        return;
+      } catch (err) {
+        this.logger.warn('osc52-bridge-write-failed', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    if (navigator.clipboard?.writeText) {
+      try {
+        await navigator.clipboard.writeText(text);
+        this.overlayAddon?.showOverlay('Copied from session', 800);
+        return;
+      } catch (err) {
+        this.logger.warn('osc52-write-failed', { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    this.overlayAddon?.showOverlay('Copy failed', 800);
   }
 
   /** Capture-phase paste listener: intercepts images from native paste events. */
