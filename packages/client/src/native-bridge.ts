@@ -54,6 +54,18 @@ export interface MobittyNativeBridge {
   /// their last value persists. Optional so the web works against older
   /// iOS shells.
   setShakeToUndo?: (enabled: boolean) => void;
+  /// Read `UIPasteboard.general` directly via the native side, bypassing
+  /// WKWebView's cross-app clipboard gate (which silently denies
+  /// `navigator.clipboard.read`/`readText` for content from other apps).
+  /// Touching the pasteboard here triggers iOS 16+'s *Allow Paste from
+  /// "…"* prompt — the intended user-facing consent gate.
+  /// Resolves to `null` only if the bridge is missing in this iOS shell.
+  /// An empty pasteboard (or user denying the prompt) resolves to `{}`.
+  /// Optional so the web works against older iOS shells.
+  readClipboard?: () => Promise<{
+    text?: string;
+    image?: { mimeType: string; base64: string };
+  } | null>;
 }
 
 declare global {

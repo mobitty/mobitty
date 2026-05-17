@@ -23,6 +23,7 @@ import { ClientLogger } from './client-logger';
 import type { SessionInfo } from './sessions';
 import { findFontOption, loadFont } from './fonts';
 import { openExternalUrl } from './open-external-url';
+import { getNativeBridge } from './native-bridge';
 
 const CMD_CLIPBOARD_IMAGE = 0x36;
 const CMD_CLIPBOARD_IMAGE_ACK = 0x36;
@@ -564,6 +565,38 @@ export class TerminalCore {
    *  to execCommand('paste') on non-secure contexts.
    *  Must be called from a user-gesture event handler. */
   async handlePaste(): Promise<void> {
+    // Native iOS bridge takes precedence: WKWebView denies cross-app
+    // navigator.clipboard reads, so we route through UIPasteboard on the
+    // Swift side. On non-iOS or older iOS shells the bridge is absent and
+    // this branch is skipped entirely.
+    const bridge = getNativeBridge();
+    if (bridge?.readClipboard) {
+      try {
+        const r = await bridge.readClipboard();
+        // r === null means the reply handler isn't registered on this
+        // iOS shell — fall through to browser paths. Any non-null reply
+        // (including {} on empty pasteboard or user-denied prompt) is
+        // authoritative; navigator.clipboard would only throw and
+        // surface a misleading error dialog.
+        if (r !== null) {
+          if (r.image) {
+            const bytes = Uint8Array.from(atob(r.image.base64), c => c.charCodeAt(0));
+            const blob = new Blob([bytes], { type: r.image.mimeType });
+            if (blob.size > 0 && blob.size <= MAX_PASTE_IMAGE_BYTES) {
+              void this.handleNativePasteImage(blob, r.image.mimeType);
+              return;
+            }
+          }
+          if (r.text && r.text !== '') {
+            this.handleBatchInput(r.text);
+            return;
+          }
+          this.overlayAddon?.showOverlay('Clipboard empty', 700);
+          this.keepTerminalFocus();
+          return;
+        }
+      } catch { /* bridge errored — fall through to browser paths */ }
+    }
     let clipboardError = '';
     // Try clipboard.read() first — it can return images and text.
     if (navigator.clipboard?.read) {
