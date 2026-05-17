@@ -461,7 +461,7 @@ function SessionRowItem({
     <div
       className={`group relative flex items-center gap-2 px-3 py-2 rounded-md border ${
         isCurrent ? 'border-primary bg-primary/10' : 'border-border'
-      } ${isFocused ? 'ring-2 ring-primary' : ''} ${!editMode && (session.alive || isCurrent) ? 'cursor-pointer' : ''} ${
+      } ${!editMode && (session.alive || isCurrent) ? 'cursor-pointer' : ''} ${
         isRowDragging ? 'opacity-50' : ''
       } ${isDropTarget ? 'border-t-2 border-t-primary' : ''}`}
       onClick={() => {
@@ -550,7 +550,11 @@ function SessionRowItem({
 
   if (!swipeEnabled) {
     return (
-      <div ref={focusedRef} data-drag-item>
+      <div
+        ref={focusedRef}
+        data-drag-item
+        className={isFocused ? 'rounded-md ring-2 ring-primary' : undefined}
+      >
         {rowBody}
       </div>
     );
@@ -571,7 +575,7 @@ function SessionRowItem({
     <div
       ref={focusedRef}
       data-drag-item
-      className="relative overflow-hidden rounded-md"
+      className={`relative overflow-hidden rounded-md ${isFocused ? 'ring-2 ring-primary' : ''}`}
     >
       {/* Left action — grows from the left as the user swipes right */}
       {leftActive && (
