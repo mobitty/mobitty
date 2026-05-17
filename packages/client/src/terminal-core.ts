@@ -8,7 +8,6 @@ import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import { OverlayAddon } from './overlay';
 import { SelectionOverlayAddon } from './selection-overlay';
-import { IosSelectionLayer } from './ios-selection-layer';
 import type { Profile, ProfileTheme, SoftkeyKeySettings } from './profiles';
 import type { KeyBehavior, ModifierFlags, VirtualKey, ComboStep, KeySpec } from './softkey-types';
 import { getKeySpec, emptyModifiers, parseComboString, matchComboEvent } from './softkey-types';
@@ -161,10 +160,6 @@ export class TerminalCore {
   private fitAddon = new FitAddon();
   private overlayAddon = new OverlayAddon();
   private selectionOverlay?: SelectionOverlayAddon;
-  /** Active only when the iOS shell advertises `capabilities.selection`.
-   *  Replaces `selectionOverlay` on iOS native — WebKit owns handles +
-   *  action menu against a transparent DOM mirror of the visible rows. */
-  private iosSelectionLayer?: IosSelectionLayer;
   private webLinksAddon = new WebLinksAddon((_event, uri) => {
     openExternalUrl(uri);
   });
@@ -252,7 +247,6 @@ export class TerminalCore {
       this.pendingConnectRaf = undefined;
     }
     this.selectionOverlay?.dismiss();
-    this.iosSelectionLayer?.dismiss();
     for (const d of this.socketDisposables) d.dispose();
     this.socketDisposables.length = 0;
   }
@@ -378,22 +372,12 @@ export class TerminalCore {
 
     terminal.open(parent);
 
-    if (getNativeBridge()?.capabilities?.selection) {
-      // iOS native shell with the DOM-overlay selection capability: WebKit
-      // owns long-press → handles → action sheet against a transparent
-      // mirror of the visible rows. The custom web-rendered overlay is
-      // skipped entirely so we don't end up with both UIs fighting over
-      // the same gesture.
-      this.iosSelectionLayer = new IosSelectionLayer({ terminal, container: parent });
-      this.registerTerminal({ dispose: () => { this.iosSelectionLayer?.dispose(); this.iosSelectionLayer = undefined; } });
-    } else {
-      this.selectionOverlay = new SelectionOverlayAddon({
-        isTouchDevice: () => this.isTouchDevice(),
-        onPaste: () => void this.handlePaste(),
-      });
-      terminal.loadAddon(this.selectionOverlay);
-      this.registerTerminal({ dispose: () => { this.selectionOverlay?.dispose(); this.selectionOverlay = undefined; } });
-    }
+    this.selectionOverlay = new SelectionOverlayAddon({
+      isTouchDevice: () => this.isTouchDevice(),
+      onPaste: () => void this.handlePaste(),
+    });
+    terminal.loadAddon(this.selectionOverlay);
+    this.registerTerminal({ dispose: () => { this.selectionOverlay?.dispose(); this.selectionOverlay = undefined; } });
     this.registerKeyInterceptor();
     this.registerNativePasteImageHandler();
     this.syncPageBackground();
@@ -587,7 +571,7 @@ export class TerminalCore {
       case 'wheel-step': this.sendVirtualWheelStep(action.direction); break;
       case 'select-line': this.selectLineAtPoint(this.lastGestureCenter); break;
       case 'select-visible-lines': this.selectVisibleViewportLines(); break;
-      case 'select-all': this.terminal?.selectAll(); requestAnimationFrame(() => this.showCurrentSelectionUi()); break;
+      case 'select-all': this.terminal?.selectAll(); requestAnimationFrame(() => this.selectionOverlay?.show()); break;
       case 'toggle-modifier': break;
       case 'batch-input-toggle': break;
       case 'inline-input': break;
@@ -734,16 +718,8 @@ export class TerminalCore {
 
   private registerGestureDetection() {
     if (!this.isTouchDevice()) return;
-    const xtermEl = this.terminal?.element;
-    if (!xtermEl) return;
-
-    // When the iOS-native selection layer is mounted as a sibling of
-    // `.xterm`, pointer events that land on the layer do NOT bubble through
-    // `.xterm`. Bind the gesture detector to the common parent so it still
-    // sees pan-scroll, two-finger gestures, etc. while a finger is on the
-    // selection layer. On non-iOS the parent contains only `.xterm` (see
-    // XtermTerminal.tsx) so the scope is unchanged.
-    const element = this.iosSelectionLayer ? (xtermEl.parentElement ?? xtermEl) : xtermEl;
+    const element = this.terminal?.element;
+    if (!element) return;
 
     this.gestureDetector = new GestureDetector(element, this.gestureMapping, {
       onGesture: (gestureId, center) => {
@@ -769,12 +745,6 @@ export class TerminalCore {
         this.onTouchStartPause();
       },
       onLongPressDefault: (clientX, clientY) => {
-        // On iOS native, WebKit's own long-press recognizer fires on the
-        // selection layer and takes over — we leave our default behavior
-        // (synthetic double-click + custom overlay) off so the two don't
-        // collide. WebKit will already have surfaced its handles + action
-        // sheet by the time this would run.
-        if (this.iosSelectionLayer) return;
         this.dispatchTouchMultiClick(2, clientX, clientY);
         requestAnimationFrame(() => this.selectionOverlay?.show());
       },
@@ -797,18 +767,7 @@ export class TerminalCore {
 
   private selectLineAtPoint(center: { x: number; y: number }) {
     this.dispatchTouchMultiClick(3, center.x, center.y);
-    requestAnimationFrame(() => this.showCurrentSelectionUi());
-  }
-
-  /** Surface whatever selection xterm just made: WebKit handles on the
-   *  DOM mirror when running in the iOS shell, the custom web overlay
-   *  otherwise. */
-  private showCurrentSelectionUi(): void {
-    if (this.iosSelectionLayer) {
-      this.iosSelectionLayer.showCurrentTerminalSelection();
-    } else {
-      this.selectionOverlay?.show();
-    }
+    requestAnimationFrame(() => this.selectionOverlay?.show());
   }
 
   /** Sample first N and last N buffer lines for diagnostic logging. */
@@ -888,7 +847,7 @@ export class TerminalCore {
     const end = Math.min(terminal.buffer.active.length - 1, start + Math.max(1, terminal.rows) - 1);
     if (end < start) return;
     terminal.selectLines(start, end);
-    requestAnimationFrame(() => this.showCurrentSelectionUi());
+    requestAnimationFrame(() => this.selectionOverlay?.show());
   }
 
   // --- Keyboard shortcuts ---
@@ -960,10 +919,6 @@ export class TerminalCore {
   private registerNativePasteImageHandler(): void {
     const el = this.terminal?.element;
     if (!el) return;
-    // On iOS native the sibling selection layer is where WebKit's
-    // action-menu Paste fires from, so listen on the common parent to
-    // catch both the layer and the xterm-helper-textarea paste paths.
-    const target: EventTarget = this.iosSelectionLayer ? (el.parentElement ?? el) : el;
     const onPaste = (e: ClipboardEvent): void => {
       const items = e.clipboardData?.items;
       const itemTypes = items ? Array.from(items).map(it => it?.type ?? '(null)') : null;
@@ -987,24 +942,11 @@ export class TerminalCore {
       const hasText = e.clipboardData?.getData('text/plain') !== '';
       this.logger.debug('paste-no-image', { itemCount: items.length, itemTypes, hasText });
       if (items.length === 0 && !hasText) {
-        // On iOS native, WKWebView delivers a blank paste event for any
-        // cross-app pasteboard content. Route through the JS<->native
-        // bridge (which surfaces the iOS Allow-Paste prompt and reads
-        // `UIPasteboard.general` directly) so WebKit's action-menu
-        // Paste, hardware Cmd+V, and any other OS-fired paste go
-        // through the same handlePaste path as softkey Paste and
-        // Ctrl+Shift+V.
-        if (this.iosSelectionLayer) {
-          e.stopImmediatePropagation();
-          e.preventDefault();
-          void this.handlePaste();
-          return;
-        }
         this.overlayAddon?.showOverlay('Clipboard empty \u2014 allow access when prompted', 2000);
       }
     };
-    target.addEventListener('paste', onPaste as EventListener, { capture: true });
-    this.registerTerminal({ dispose: () => target.removeEventListener('paste', onPaste as EventListener, { capture: true } as EventListenerOptions) });
+    el.addEventListener('paste', onPaste, { capture: true });
+    this.registerTerminal({ dispose: () => el.removeEventListener('paste', onPaste, { capture: true }) });
   }
 
   /** Handle an image blob from a native paste event. */
@@ -1907,14 +1849,6 @@ export class TerminalCore {
     // field that onTouchStart writes to instead.
     this.carriedResidual = this.pausedMomentum;
     this.pausedMomentum = 0;
-    // On iOS native, any existing WebKit selection in the DOM mirror would
-    // otherwise hijack this drag as a selection-extension gesture and the
-    // viewport never scrolls. Clearing the Selection here makes "drag the
-    // text area" mean scroll, while "long-press first" still gets the user
-    // a fresh selection. WebKit-owned handle drags don't reach this
-    // callback because the system gesture-recognizer captures the touch
-    // and our pan threshold is never crossed.
-    this.iosSelectionLayer?.dismiss();
   }
 
   private onPanScrollEnd(releaseVelocity: number): void {

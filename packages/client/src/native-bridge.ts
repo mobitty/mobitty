@@ -13,7 +13,7 @@ export interface MobittyNativeBridge {
   readonly __installed: true;
   readonly version: number;
   readonly platform: 'ios';
-  readonly capabilities: { keyboard: boolean; push: boolean; selection: boolean };
+  readonly capabilities: { keyboard: boolean; push: boolean };
 
   onKeyAction: (action: KeyBehavior, modifiers: ModifierFlags | null) => void;
   onKeyboardModeChanged: (mode: KeyboardMode) => void;
