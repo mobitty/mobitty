@@ -758,9 +758,20 @@ export class TerminalCore {
         // TUI also gets a stray CSI click, accepted).  shiftKey would
         // route to _handleIncrementalClick which extends-from-nothing, so
         // we deliberately don't set it here.
+        this.logger.debug('long-press-fired', {
+          clientX, clientY,
+          mouseMode: this.terminal.modes.mouseTrackingMode,
+        });
         this.dispatchTouchMultiClick(2, clientX, clientY);
         this.selectionOverlay?.setMouseMode(this.terminal.modes.mouseTrackingMode);
-        requestAnimationFrame(() => this.selectionOverlay?.show());
+        requestAnimationFrame(() => {
+          const pos = this.terminal.getSelectionPosition();
+          this.logger.debug('long-press-show', {
+            hasSelection: !!pos,
+            selection: pos,
+          });
+          this.selectionOverlay?.show();
+        });
       },
       isTapNearTarget: (cx, cy) => this.tapIsNearCursor(cx, cy),
       onSingleTap: (cx, cy) => this.selectionOverlay?.showPasteOnlyMenu(cx, cy),
@@ -803,13 +814,18 @@ export class TerminalCore {
     const cellW = screen.clientWidth / term.cols;
     const cellH = screen.clientHeight / term.rows;
     if (cellW === 0 || cellH === 0) return false;
-    const col = Math.floor((clientX - rect.left) / cellW);
-    const row = Math.floor((clientY - rect.top) / cellH);
-    // cursorX/Y are viewport-relative (rows index within the visible area).
+    const tapCol = Math.floor((clientX - rect.left) / cellW);
+    const tapViewRow = Math.floor((clientY - rect.top) / cellH);
+    // cursorY is buffer-absolute on the normal buffer; convert to
+    // viewport-relative by subtracting viewportY.
     const buf = term.buffer.active;
-    const near = Math.abs(col - buf.cursorX) <= 3 && Math.abs(row - buf.cursorY) <= 3;
+    const cursorViewRow = buf.cursorY - buf.viewportY;
+    const near = Math.abs(tapCol - buf.cursorX) <= 3 && Math.abs(tapViewRow - cursorViewRow) <= 3;
     this.logger.debug('tap-near-cursor', {
-      tap: { col, row }, cursor: { col: buf.cursorX, row: buf.cursorY }, near,
+      tap: { col: tapCol, row: tapViewRow },
+      cursor: { col: buf.cursorX, row: cursorViewRow },
+      viewportY: buf.viewportY,
+      near,
     });
     return near;
   }
