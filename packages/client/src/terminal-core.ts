@@ -381,6 +381,7 @@ export class TerminalCore {
     this.selectionOverlay = new SelectionOverlayAddon({
       isTouchDevice: () => this.isTouchDevice(),
       onPaste: () => void this.handlePaste(),
+      onSendToApp: () => this.dispatchSelectionAsDrag(),
     });
     terminal.loadAddon(this.selectionOverlay);
     this.registerTerminal({ dispose: () => { this.selectionOverlay?.dispose(); this.selectionOverlay = undefined; } });
@@ -752,20 +753,26 @@ export class TerminalCore {
         this.onTouchStartPause();
       },
       onLongPressDefault: (clientX, clientY) => {
-        this.dispatchTouchMultiClick(2, clientX, clientY);
+        // shiftKey:true triggers xterm's shouldForceSelection so word-select
+        // runs even when the TUI has mouse mode on.
+        this.dispatchTouchMultiClick(2, clientX, clientY, /*shiftKey*/ true);
+        this.selectionOverlay?.setMouseMode(this.terminal.modes.mouseTrackingMode);
         requestAnimationFrame(() => this.selectionOverlay?.show());
       },
+      isTapNearTarget: (cx, cy) => this.tapIsNearCursor(cx, cy),
+      onSingleTap: (cx, cy) => this.selectionOverlay?.showPasteOnlyMenu(cx, cy),
     }, this.computeContinuousScrollGestures());
     this.registerTerminal({ dispose: () => { this.gestureDetector?.dispose(); this.gestureDetector = undefined; } });
   }
 
-  private dispatchTouchMultiClick(detail: number, clientX: number, clientY: number) {
+  private dispatchTouchMultiClick(detail: number, clientX: number, clientY: number, shiftKey = false) {
     const element = this.terminal?.element;
     if (!element) return;
     const ownerDoc = element.ownerDocument ?? document;
     const init = {
       bubbles: true, cancelable: true, button: 0, buttons: 1, detail,
       clientX, clientY, screenX: clientX, screenY: clientY,
+      shiftKey,
       view: ownerDoc.defaultView ?? window,
     };
     element.dispatchEvent(new MouseEvent('mousedown', init));
@@ -773,8 +780,64 @@ export class TerminalCore {
   }
 
   private selectLineAtPoint(center: { x: number; y: number }) {
-    this.dispatchTouchMultiClick(3, center.x, center.y);
+    this.dispatchTouchMultiClick(3, center.x, center.y, /*shiftKey*/ true);
+    this.selectionOverlay?.setMouseMode(this.terminal.modes.mouseTrackingMode);
     requestAnimationFrame(() => this.selectionOverlay?.show());
+  }
+
+  /** True when (clientX, clientY) lands within 3 cells of the
+   *  terminal cursor in both axes (Chebyshev distance).  Used by the
+   *  gesture detector to decide whether to swallow a single tap and
+   *  show a paste mini-menu. */
+  private tapIsNearCursor(clientX: number, clientY: number): boolean {
+    const term = this.terminal;
+    const el = term?.element;
+    if (!term || !el) return false;
+    const screen = el.querySelector<HTMLElement>('.xterm-screen');
+    if (!screen) return false;
+    const rect = screen.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) return false;
+    const cellW = screen.clientWidth / term.cols;
+    const cellH = screen.clientHeight / term.rows;
+    if (cellW === 0 || cellH === 0) return false;
+    const col = Math.floor((clientX - rect.left) / cellW);
+    const row = Math.floor((clientY - rect.top) / cellH);
+    // cursorX/Y are viewport-relative (rows index within the visible area).
+    const buf = term.buffer.active;
+    return Math.abs(col - buf.cursorX) <= 3 && Math.abs(row - buf.cursorY) <= 3;
+  }
+
+  /** Replay the current xterm selection to the TUI as a drag.  The
+   *  three synthetic events have shiftKey:false so xterm's mouse
+   *  encoder takes over and the TUI's own selection algorithm runs. */
+  private dispatchSelectionAsDrag(): void {
+    const term = this.terminal;
+    const el = term?.element;
+    if (!term || !el) return;
+    const sel = term.getSelectionPosition();
+    if (!sel) return;
+    const screen = el.querySelector<HTMLElement>('.xterm-screen');
+    if (!screen) return;
+    const cellW = screen.clientWidth / term.cols;
+    const cellH = screen.clientHeight / term.rows;
+    const rect = screen.getBoundingClientRect();
+    const viewportY = term.buffer.active.viewportY;
+    // Cell centers — gives the drag a stable in-cell point regardless of
+    // sub-pixel rounding in cellW/cellH.
+    const startX = rect.left + (sel.start.x + 0.5) * cellW;
+    const startY = rect.top + (sel.start.y - viewportY + 0.5) * cellH;
+    const endX = rect.left + (sel.end.x + 0.5) * cellW;
+    const endY = rect.top + (sel.end.y - viewportY + 0.5) * cellH;
+    const view = (el.ownerDocument ?? document).defaultView ?? window;
+    const make = (type: string, x: number, y: number, buttons: number) =>
+      new MouseEvent(type, {
+        bubbles: true, cancelable: true, button: 0, buttons,
+        clientX: x, clientY: y, screenX: x, screenY: y,
+        view,
+      });
+    el.dispatchEvent(make('mousedown', startX, startY, 1));
+    el.dispatchEvent(make('mousemove', endX, endY, 1));
+    el.dispatchEvent(make('mouseup', endX, endY, 0));
   }
 
   /** Sample first N and last N buffer lines for diagnostic logging. */

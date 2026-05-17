@@ -24,6 +24,10 @@ type DragTarget = 'start' | 'end';
 export interface SelectionOverlayOptions {
   isTouchDevice: () => boolean;
   onPaste?: () => void;
+  /** Replay current selection to the TUI as a drag.  Only invoked when
+   *  mouse mode is on; the host is responsible for dispatching the
+   *  synthetic MouseEvents and clearing the xterm selection. */
+  onSendToApp?: () => void;
 }
 
 export class SelectionOverlayAddon implements ITerminalAddon {
@@ -38,6 +42,14 @@ export class SelectionOverlayAddon implements ITerminalAddon {
   private endBar: HTMLDivElement | null = null;
   private endCircle: HTMLDivElement | null = null;
   private editMenu: HTMLDivElement | null = null;
+  // "Send to app" lives in the edit menu but only displays in mouse mode.
+  private sendBtn: HTMLDivElement | null = null;
+  private sendDivider: HTMLDivElement | null = null;
+  // Standalone one-button menu shown by showPasteOnlyMenu — independent
+  // of the selection lifecycle (no selection is active when it shows).
+  private pasteMenu: HTMLDivElement | null = null;
+  private pasteMenuActive = false;
+  private mouseModeOn = false;
 
   // State
   private selection: SelectionRange | null = null;
@@ -65,10 +77,12 @@ export class SelectionOverlayAddon implements ITerminalAddon {
   private boundBlockTouch: ((e: TouchEvent) => void) | null = null;
 
   private onPasteCallback?: () => void;
+  private onSendToAppCallback?: () => void;
 
   constructor(options: SelectionOverlayOptions) {
     this.isTouchDevice = options.isTouchDevice;
     this.onPasteCallback = options.onPaste;
+    this.onSendToAppCallback = options.onSendToApp;
   }
 
   activate(terminal: Terminal): void {
@@ -87,6 +101,7 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     // Dismiss on terminal output
     this.disposables.push(terminal.onWriteParsed(() => {
       if (this.active) this.dismiss();
+      if (this.pasteMenuActive) this.hidePasteOnlyMenu();
     }));
 
     // Recalculate on resize
@@ -95,6 +110,7 @@ export class SelectionOverlayAddon implements ITerminalAddon {
         this.measureCells();
         this.updatePositions();
       }
+      if (this.pasteMenuActive) this.hidePasteOnlyMenu();
     }));
   }
 
@@ -114,6 +130,9 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     this.disposables.length = 0;
     this.container?.remove();
     this.container = null;
+    this.pasteMenu?.remove();
+    this.pasteMenu = null;
+    this.pasteMenuActive = false;
     this.terminal = null;
   }
 
@@ -264,7 +283,34 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     const pasteBtn = this.createMenuButton('Paste', () => this.onPaste());
     menu.appendChild(pasteBtn);
 
+    const sendDivider = document.createElement('div');
+    Object.assign(sendDivider.style, { width: '1px', background: '#545458', display: 'none' });
+    menu.appendChild(sendDivider);
+    const sendBtn = this.createMenuButton('Send to app', () => this.onSendToApp());
+    sendBtn.style.display = 'none';
+    menu.appendChild(sendBtn);
+    this.sendDivider = sendDivider;
+    this.sendBtn = sendBtn;
+    this.applySendToAppVisibility();
+
     return menu;
+  }
+
+  private applySendToAppVisibility(): void {
+    if (!this.sendBtn || !this.sendDivider) return;
+    const disp = this.mouseModeOn ? '' : 'none';
+    this.sendBtn.style.display = disp;
+    this.sendDivider.style.display = disp;
+  }
+
+  /** Called by the host whenever the TUI's mouse-tracking mode changes.
+   *  Drives visibility of the "Send to app" button. */
+  setMouseMode(mode: string): void {
+    const on = mode !== 'none';
+    if (on === this.mouseModeOn) return;
+    this.mouseModeOn = on;
+    this.applySendToAppVisibility();
+    if (this.active) this.updatePositions();
   }
 
   private createMenuButton(label: string, action: () => void): HTMLDivElement {
@@ -628,17 +674,84 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     this.onPasteCallback?.();
   }
 
+  private onSendToApp(): void {
+    // Caller reads selection and dispatches MouseEvents before we
+    // clear the selection in dismiss().
+    this.onSendToAppCallback?.();
+    this.dismiss();
+  }
+
+  // ── Paste-only menu (no selection active) ────────────────────────────────
+
+  private createPasteMenu(): HTMLDivElement {
+    const menu = document.createElement('div');
+    Object.assign(menu.style, {
+      position: 'absolute',
+      display: 'none',
+      background: '#2c2c2e',
+      borderRadius: '8px',
+      boxShadow: '0 2px 12px rgba(0,0,0,0.3)',
+      pointerEvents: 'auto',
+      touchAction: 'manipulation',
+      userSelect: 'none',
+      WebkitUserSelect: 'none',
+      overflow: 'hidden',
+      zIndex: '11',
+    });
+    const btn = this.createMenuButton('Paste', () => this.onPasteFromPasteMenu());
+    menu.appendChild(btn);
+    return menu;
+  }
+
+  /** Show a one-button "Paste" popover near the given viewport coords.
+   *  Independent of selection state — used for tap-near-cursor. */
+  showPasteOnlyMenu(clientX: number, clientY: number): void {
+    const termEl = this.terminal?.element;
+    if (!termEl) return;
+    if (!this.pasteMenu) {
+      this.pasteMenu = this.createPasteMenu();
+      termEl.appendChild(this.pasteMenu);
+    }
+    this.pasteMenu.style.display = 'block';
+    this.pasteMenuActive = true;
+    const termRect = termEl.getBoundingClientRect();
+    const menuWidth = this.pasteMenu.offsetWidth || 80;
+    const menuHeight = this.pasteMenu.offsetHeight || 36;
+    let left = clientX - termRect.left - menuWidth / 2;
+    left = Math.max(0, Math.min(termRect.width - menuWidth, left));
+    const aboveTop = clientY - termRect.top - menuHeight - 12;
+    const top = aboveTop >= 0 ? aboveTop : clientY - termRect.top + 24;
+    this.pasteMenu.style.left = left + 'px';
+    this.pasteMenu.style.top = top + 'px';
+  }
+
+  private hidePasteOnlyMenu(): void {
+    if (this.pasteMenu) this.pasteMenu.style.display = 'none';
+    this.pasteMenuActive = false;
+  }
+
+  private onPasteFromPasteMenu(): void {
+    this.hidePasteOnlyMenu();
+    this.onPasteCallback?.();
+  }
+
   // ── Event Handlers ────────────────────────────────────────────────────────
 
   private onTerminalPointerDown(e: PointerEvent): void {
+    const target = e.target;
+    if (this.pasteMenuActive) {
+      if (target instanceof Node && this.pasteMenu?.contains(target)) return;
+      this.hidePasteOnlyMenu();
+      return;
+    }
     if (!this.active) return;
     // If the tap is inside the overlay container, let it through
-    const target = e.target;
     if (target instanceof Node && this.container?.contains(target)) return;
     this.dismiss();
   }
 
   private onScroll(): void {
+    if (this.pasteMenuActive) this.hidePasteOnlyMenu();
     if (!this.active || !this.terminal || !this.selection) return;
     // During a handle drag, auto-scroll manages positioning directly
     if (this.dragTarget) return;

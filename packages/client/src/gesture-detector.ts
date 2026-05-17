@@ -19,6 +19,11 @@ export interface GestureDetectorCallbacks {
   onPanScrollEnd?: (releaseVelocity: number) => void;
   onTouchStart?: () => void;
   onLongPressDefault: (clientX: number, clientY: number) => void;
+  /** Synchronous predicate: should this touch end be intercepted (no
+   *  synthetic mouse to xterm) so the host can react via onSingleTap? */
+  isTapNearTarget?: (clientX: number, clientY: number) => boolean;
+  /** Fired ~300ms after a single tap that was flagged near-target. */
+  onSingleTap?: (clientX: number, clientY: number) => void;
 }
 
 export interface VelocitySample {
@@ -215,7 +220,11 @@ export class GestureDetector {
     };
 
     this.boundOnCaptureTouchEnd = (e: TouchEvent) => {
-      if (this.didIntercept || this.didLongPress) {
+      const lifted = e.changedTouches[0];
+      const nearTarget = lifted
+        ? (this.callbacks.isTapNearTarget?.(lifted.clientX, lifted.clientY) ?? false)
+        : false;
+      if (this.didIntercept || this.didLongPress || nearTarget) {
         e.preventDefault(); // suppress synthetic mousedown → xterm focus → keyboard
       }
       if (e.touches.length === 0) {
@@ -609,6 +618,8 @@ export class GestureDetector {
       this.callbacks.onGesture('triple-tap', center);
     } else if (count >= 2 && this.mapping['double-tap']) {
       this.callbacks.onGesture('double-tap', center);
+    } else if (count === 1 && this.callbacks.isTapNearTarget?.(center.x, center.y)) {
+      this.callbacks.onSingleTap?.(center.x, center.y);
     }
   }
 
