@@ -145,6 +145,8 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     this.disposables.length = 0;
     this.container?.remove();
     this.container = null;
+    this.loupe?.remove();
+    this.loupe = null;
     this.pasteMenu?.remove();
     this.pasteMenu = null;
     this.pasteMenuActive = false;
@@ -237,16 +239,20 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     this.container.appendChild(this.endBar);
     this.container.appendChild(this.endCircle);
     this.container.appendChild(this.editMenu);
-    this.container.appendChild(this.loupe);
+    // Loupe lives in document.body so it can paint into the top
+    // safe-area strip — #root has `contain: paint` which would
+    // otherwise trap even position: fixed descendants.
+    document.body.appendChild(this.loupe);
   }
 
   /** Circular magnifier shown above the finger while a handle is dragged.
-   *  Hosts an inner 2D <canvas> sized at devicePixelRatio. */
+   *  Hosts an inner 2D <canvas> sized at devicePixelRatio. Positioned in
+   *  viewport coordinates so it can paint into the iOS safe-area strip. */
   private createLoupe(): HTMLDivElement {
     const size = SelectionOverlayAddon.LOUPE_SIZE;
     const loupe = document.createElement('div');
     Object.assign(loupe.style, {
-      position: 'absolute',
+      position: 'fixed',
       width: size + 'px',
       height: size + 'px',
       borderRadius: '50%',
@@ -255,7 +261,7 @@ export class SelectionOverlayAddon implements ITerminalAddon {
       boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
       pointerEvents: 'none',
       display: 'none',
-      zIndex: '12',
+      zIndex: '9999',
     });
     const canvas = document.createElement('canvas');
     const dpr = window.devicePixelRatio || 1;
@@ -573,18 +579,20 @@ export class SelectionOverlayAddon implements ITerminalAddon {
   }
 
   private positionLoupe(clientX: number, clientY: number): void {
-    if (!this.loupe || !this.terminal?.element) return;
-    const termRect = this.terminal.element.getBoundingClientRect();
+    if (!this.loupe) return;
     const size = SelectionOverlayAddon.LOUPE_SIZE;
     const lift = SelectionOverlayAddon.LOUPE_LIFT;
 
-    // Horizontal: center on finger, clamp within terminal element.
-    let left = clientX - termRect.left - size / 2;
-    left = Math.max(0, Math.min(termRect.width - size, left));
+    // Loupe is position: fixed; clientX/Y are already viewport coords.
+    let left = clientX - size / 2;
+    left = Math.max(0, Math.min(window.innerWidth - size, left));
 
-    // Vertical: prefer above the finger; flip below near the top edge.
-    const aboveTop = clientY - termRect.top - size - lift;
-    const top = aboveTop >= 0 ? aboveTop : clientY - termRect.top + lift;
+    // Vertical: above the finger, clamped to viewport top. With the
+    // WebView extending into the safe-area strip, top=0 is the very top
+    // of the screen and the loupe can paint over the status bar instead
+    // of flipping below the finger near the top row.
+    let top = clientY - size - lift;
+    top = Math.max(0, top);
 
     this.loupe.style.left = left + 'px';
     this.loupe.style.top = top + 'px';
