@@ -626,6 +626,18 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     ctx.fillStyle = bg;
     ctx.fillRect(0, 0, dw, dh);
     ctx.drawImage(src, sx, sy, sw, sh, 0, 0, dw, dh);
+
+    // The selection bar lives in overlay DOM, not on the WebGL canvas,
+    // so drawImage doesn't capture it.  Paint a matching bar in the
+    // loupe at the magnified cell-boundary position — horizontally the
+    // loupe is centered on the dragged endpoint, so the bar always sits
+    // at the loupe's horizontal midline.  Vertical extent matches the
+    // magnified cell row.
+    const loupeDpr = dw / SelectionOverlayAddon.LOUPE_SIZE;
+    const barW = 2 * loupeDpr;
+    const cellPx = this.cellHeight * zoom * loupeDpr;
+    ctx.fillStyle = '#007AFF';
+    ctx.fillRect((dw - barW) / 2, (dh - cellPx) / 2, barW, cellPx);
   }
 
   // ── Handle Dragging ───────────────────────────────────────────────────────
