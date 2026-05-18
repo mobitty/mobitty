@@ -18,7 +18,7 @@ import { writeImageToSystemClipboard, writeImageToFile, getProcessCwd } from './
 import type { SessionRegistry } from './sessions.ts';
 import type { ShellStore } from './shells.ts';
 import type { Logger } from './logger.ts';
-import { captureSnapshot, generateDiff, serializeFullState, compareSnapshots, bufferStats, summarizeBytes, sampleBufferLines, detectLineRepetition } from './diff.ts';
+import { captureSnapshot, generateDiff, serializeFullState, compareSnapshots, bufferStats, summarizeBytes, sampleBufferLines, sampleAltBuffer, detectLineRepetition } from './diff.ts';
 import type { FrameSnapshot } from './diff.ts';
 import { resolveCliBin, ensureCliBinShim } from './cli-bin.ts';
 
@@ -121,6 +121,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
     socketLogger.info('state-full sent', {
       stats: bufferStats(headless),
       samples: sampleBufferLines(headless, 4, 60),
+      altSamples: sampleAltBuffer(headless, 4, 60),
       repeat: detectLineRepetition(headless),
       payload: summarizeBytes(vtFull, 200),
     });
@@ -228,7 +229,6 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
           payload: summarizeBytes(vtPayload, 200),
         });
       }
-
 
       // Verification terminal
       if (verifyTerm && socketLogger) {
@@ -428,6 +428,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
               clientRows: rows,
               before: headlessBeforeResize ? bufferStats(headlessBeforeResize) : null,
               samples: headlessBeforeResize ? sampleBufferLines(headlessBeforeResize, 4, 60) : null,
+              altSamples: headlessBeforeResize ? sampleAltBuffer(headlessBeforeResize, 4, 60) : null,
               repeat: headlessBeforeResize ? detectLineRepetition(headlessBeforeResize) : null,
             });
             registry.resizeSession(sessionId, columns, rows);

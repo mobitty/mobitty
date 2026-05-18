@@ -428,26 +428,38 @@ export interface BufferStats {
   cursorY: number;
   wrappedLines: number;
   fullWidthNonWrappedLines: number;
+  // Lines whose internal cell-array width exceeds `cols`. xterm.js's alternate
+  // buffer doesn't reflow on shrink — those cells past `cols` hold stale
+  // pre-resize content that's invisible at the new width. See
+  // done-bug-reconnect-alt-buffer-misaligned.md.
+  staleWidthLines: number;
+  bufferType: 'normal' | 'alternate';
 }
 
 // Counts wrapped vs non-wrapped rows in the buffer. fullWidthNonWrappedLines is
 // the diagnostic for the "TUI emitted CRLF after filling the line" pattern that
 // foils grow-reflow — those rows look full but xterm.js can't merge them later.
+// bufferType reports which buffer is active so consumers can tell normal-mode
+// stats from alt-mode (TUI) stats — see
+// done-bug-reconnect-alt-buffer-misaligned.md.
 export function bufferStats(terminal: Terminal): BufferStats {
   const buf = terminal.buffer.active;
+  const cols = terminal.cols;
   let wrapped = 0;
   let fullNonWrapped = 0;
+  let staleWidth = 0;
   for (let y = 0; y < buf.length; y++) {
     const line = buf.getLine(y);
     if (!line) continue;
+    if (line.length > cols) staleWidth++;
     if (line.isWrapped) {
       wrapped++;
-    } else if (line.translateToString(true).length === terminal.cols) {
+    } else if (line.translateToString(true).length === cols) {
       fullNonWrapped++;
     }
   }
   return {
-    cols: terminal.cols,
+    cols,
     rows: terminal.rows,
     bufferLen: buf.length,
     baseY: buf.baseY,
@@ -455,6 +467,8 @@ export function bufferStats(terminal: Terminal): BufferStats {
     cursorY: buf.cursorY,
     wrappedLines: wrapped,
     fullWidthNonWrappedLines: fullNonWrapped,
+    staleWidthLines: staleWidth,
+    bufferType: buf.type === 'alternate' ? 'alternate' : 'normal',
   };
 }
 
@@ -467,6 +481,28 @@ export interface LineSample {
 // truncated to `maxChars`. Use for compact log snapshots.
 export function sampleBufferLines(terminal: Terminal, n: number, maxChars = 60): LineSample {
   const buf = terminal.buffer.active;
+  const total = buf.length;
+  const first: string[] = [];
+  const last: string[] = [];
+  const take = Math.min(n, total);
+  for (let i = 0; i < take; i++) {
+    const line = buf.getLine(i);
+    first.push(line ? line.translateToString(true).slice(0, maxChars) : '');
+  }
+  const lastStart = Math.max(take, total - n);
+  for (let i = lastStart; i < total; i++) {
+    const line = buf.getLine(i);
+    last.push(line ? line.translateToString(true).slice(0, maxChars) : '');
+  }
+  return { first, last };
+}
+
+// Like sampleBufferLines, but explicitly samples the alternate buffer even when
+// the active buffer is normal. Use to compare alt-buffer contents across
+// transitions while a TUI is in alt mode — see
+// done-bug-reconnect-alt-buffer-misaligned.md.
+export function sampleAltBuffer(terminal: Terminal, n: number, maxChars = 60): LineSample {
+  const buf = terminal.buffer.alternate;
   const total = buf.length;
   const first: string[] = [];
   const last: string[] = [];
@@ -633,11 +669,11 @@ export function serializeFullState(terminal: Terminal, title: string, cursorHidd
     // the alt buffer. The client's STATE_FULL prefix has already exited any
     // prior alt mode (see terminal-core.ts STATE_FULL handler), so a fresh
     // serializer starts from normal mode.
-    out += serializeBufferOf(terminal, terminal.buffer.normal);
+    out += serializeBufferOf(terminal, terminal.buffer.normal, /* isAlt */ false);
     out += '\x1b[?1049h\x1b[H';
-    out += serializeBufferOf(terminal, terminal.buffer.alternate);
+    out += serializeBufferOf(terminal, terminal.buffer.alternate, /* isAlt */ true);
   } else {
-    out += serializeBufferOf(terminal, terminal.buffer.active);
+    out += serializeBufferOf(terminal, terminal.buffer.active, /* isAlt */ false);
   }
 
   out += serializeModes(readModes(terminal));
@@ -664,11 +700,22 @@ type HeadlessBuffer = Terminal['buffer']['active'];
 // into scrollback (`buf.length > rows`), emit every row so the client ends up
 // with the same `baseY`. Either way, `\r\n` separators go *between* rows, not
 // after the last one — that final `\r\n` would also scroll.
-function serializeBufferOf(terminal: Terminal, buf: HeadlessBuffer): string {
+//
+// `isAlt` controls how `isWrapped` continuation rows are emitted. For the
+// normal buffer (`isAlt=false`), wrap-paired rows are emitted *without* a
+// `\r\n` between them so the client's xterm.js can reflow them at its own
+// width. For the alternate buffer (`isAlt=true`) every row gets a `\r\n` —
+// alt-buffer `isWrapped` flags are not semantic (they come from xterm.js's
+// asymmetric shrink path splitting full-width CRLF rows like Claude Code's
+// separators) and joining them causes the client to autowrap differently
+// from the server, producing the wrap-pair misalignment documented in
+// done-bug-reconnect-alt-buffer-misaligned.md.
+function serializeBufferOf(terminal: Terminal, buf: HeadlessBuffer, isAlt: boolean): string {
   let lastSgr: SgrCell | null = null;
   let lastUrlId = 0;
   const total = buf.length;
   const rows = terminal.rows;
+  const cols = terminal.cols;
   let lastContentRow = -1;
 
   const rowOutputs: string[] = new Array(total);
@@ -677,7 +724,14 @@ function serializeBufferOf(terminal: Terminal, buf: HeadlessBuffer): string {
     const line = buf.getLine(y);
     if (!line) { rowOutputs[y] = ''; continue; }
     let rowOut = '';
-    const width = line.length;
+    // Cap at `cols`, not `line.length`. xterm.js's alternate buffer does not
+    // reflow on shrink — line memory keeps the pre-shrink width, so
+    // `line.length` can exceed `cols` and the cells past `cols` hold stale
+    // pre-resize content. Emitting them produced text > cols per row, and the
+    // client's xterm.js autowrapped at `cols`, creating phantom wrap-pair
+    // continuations that pushed real alt-buffer content off the viewport.
+    // See done-bug-reconnect-alt-buffer-misaligned.md.
+    const width = Math.min(line.length, cols);
     let trailing = 0;
     for (let x = 0; x < width; x++) {
       // Allocate a fresh cell per position. The dest-pointer overload of
@@ -730,9 +784,11 @@ function serializeBufferOf(terminal: Terminal, buf: HeadlessBuffer): string {
     out += rowOutputs[i];
     if (i + 1 < emitCount) {
       const nextLine = buf.getLine(i + 1);
-      // Wrapped continuation lines must NOT get a row separator — let the
-      // client's wrap detection rejoin them.
-      if (!nextLine || !nextLine.isWrapped) out += '\r\n';
+      // Normal buffer: skip the separator on wrap-pair continuations so the
+      // client can reflow at its own width. Alt buffer: always emit — its
+      // wrap flags are resize artifacts, not soft-wrap semantics. See
+      // done-bug-reconnect-alt-buffer-misaligned.md.
+      if (isAlt || !nextLine || !nextLine.isWrapped) out += '\r\n';
     }
   }
 
