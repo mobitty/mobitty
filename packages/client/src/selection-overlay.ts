@@ -245,17 +245,19 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     document.body.appendChild(this.loupe);
   }
 
-  /** Circular magnifier shown above the finger while a handle is dragged.
-   *  Hosts an inner 2D <canvas> sized at devicePixelRatio. Positioned in
-   *  viewport coordinates so it can paint into the iOS safe-area strip. */
+  /** Flat ellipse magnifier (iOS 17 style) shown above the finger while a
+   *  handle is dragged. Hosts an inner 2D <canvas> sized at
+   *  devicePixelRatio. Positioned in viewport coordinates so it can paint
+   *  into the iOS safe-area strip. */
   private createLoupe(): HTMLDivElement {
-    const size = SelectionOverlayAddon.LOUPE_SIZE;
+    const w = SelectionOverlayAddon.LOUPE_WIDTH;
+    const h = SelectionOverlayAddon.LOUPE_HEIGHT;
     const loupe = document.createElement('div');
     Object.assign(loupe.style, {
       position: 'fixed',
-      width: size + 'px',
-      height: size + 'px',
-      borderRadius: '50%',
+      width: w + 'px',
+      height: h + 'px',
+      borderRadius: h / 2 + 'px',
       overflow: 'hidden',
       border: '1px solid rgba(255,255,255,0.4)',
       boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
@@ -265,14 +267,14 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     });
     const canvas = document.createElement('canvas');
     const dpr = window.devicePixelRatio || 1;
-    canvas.width = size * dpr;
-    canvas.height = size * dpr;
+    canvas.width = w * dpr;
+    canvas.height = h * dpr;
     Object.assign(canvas.style, {
       position: 'absolute',
       left: '0',
       top: '0',
-      width: size + 'px',
-      height: size + 'px',
+      width: w + 'px',
+      height: h + 'px',
     });
     loupe.appendChild(canvas);
     this.loupeCanvas = canvas;
@@ -285,26 +287,26 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     const bar = document.createElement('div');
     Object.assign(bar.style, {
       position: 'absolute',
-      width: '2px',
+      width: SelectionOverlayAddon.BAR_WIDTH + 'px',
       background: '#007AFF',
       pointerEvents: 'none',
     });
     return bar;
   }
 
-  /** Draggable circle with 44px touch target (10px visible). */
+  /** Draggable dot — 14px visible, snug 28px touch target. */
   private createCircle(target: DragTarget): HTMLDivElement {
     const circle = document.createElement('div');
     Object.assign(circle.style, {
       position: 'absolute',
-      width: '10px',
-      height: '10px',
+      width: '14px',
+      height: '14px',
       borderRadius: '50%',
       background: '#007AFF',
       backgroundClip: 'content-box',
       boxSizing: 'content-box',
-      padding: '17px',
-      margin: '-17px',
+      padding: '7px',
+      margin: '-7px',
       pointerEvents: 'auto',
       touchAction: 'none',
       cursor: 'grab',
@@ -412,12 +414,17 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     this.gridOffsetY = screenRect.top - termRect.top;
   }
 
-  // Gap between the cell edge and the circle center.
-  private static readonly HANDLE_GAP = 20;
-  // Circle visible radius (half of 10px).
-  private static readonly CIRCLE_R = 5;
-  // Loupe diameter in CSS pixels.
-  private static readonly LOUPE_SIZE = 120;
+  // Gap between the cell edge and the circle center. Tuned so the bar
+  // tip ends inside the dot — the iOS 17 "lollipop" look.
+  private static readonly HANDLE_GAP = 7;
+  // Dot visible radius (half of 14px).
+  private static readonly CIRCLE_R = 7;
+  // Selection bar (stem) thickness in CSS px.
+  private static readonly BAR_WIDTH = 3;
+  // Loupe is a short, fat pill (iOS 17 shape — flat top/bottom,
+  // semi-circular ends).
+  private static readonly LOUPE_WIDTH = 120;
+  private static readonly LOUPE_HEIGHT = 80;
   // Magnification factor.  iOS uses roughly 1.5-2x.
   private static readonly LOUPE_ZOOM = 1.6;
   // Vertical gap between the loupe bottom and the finger position.
@@ -429,53 +436,32 @@ export class SelectionOverlayAddon implements ITerminalAddon {
 
     const viewportY = this.terminal.buffer.active.viewportY;
     const rows = this.terminal.rows;
-    const termHeight = this.gridOffsetY + rows * this.cellHeight;
     const gap = SelectionOverlayAddon.HANDLE_GAP;
-    const cr = SelectionOverlayAddon.CIRCLE_R;
 
-    // ── Start handle ────────────────────────────────────────────────────
+    // ── Start handle (always points up; clipped by parent overflow if
+    //    the cell sits at the very top row) ───────────────────────────
     const startViewRow = this.selection.start.y - viewportY;
     const startX = this.gridOffsetX + this.selection.start.x * this.cellWidth;
     const startCellTop = this.gridOffsetY + startViewRow * this.cellHeight;
-    const startCellBot = startCellTop + this.cellHeight;
 
     if (startViewRow >= 0 && startViewRow < rows) {
-      // Default: circle above cell.  Flip when near top edge.
-      const startFlipped = startCellTop < (gap + cr);
-
-      if (startFlipped) {
-        // Circle below cell, bar extends from cell top down through gap
-        this.positionBar(this.startBar, startX, startCellTop, this.cellHeight + gap);
-        this.positionCircle(this.startCircle, startX, startCellBot + gap);
-      } else {
-        // Circle above cell, bar extends from gap up through cell
-        this.positionBar(this.startBar, startX, startCellTop - gap, this.cellHeight + gap);
-        this.positionCircle(this.startCircle, startX, startCellTop - gap);
-      }
+      this.positionBar(this.startBar, startX, startCellTop - gap, this.cellHeight + gap);
+      this.positionCircle(this.startCircle, startX, startCellTop - gap);
     } else {
       this.hideElement(this.startBar);
       this.hideElement(this.startCircle);
     }
 
-    // ── End handle ──────────────────────────────────────────────────────
+    // ── End handle (always points down; clipped by parent overflow if
+    //    the cell sits at the very bottom row) ────────────────────────
     const endViewRow = this.selection.end.y - viewportY;
     const endX = this.gridOffsetX + this.selection.end.x * this.cellWidth;
     const endCellTop = this.gridOffsetY + endViewRow * this.cellHeight;
     const endCellBot = endCellTop + this.cellHeight;
 
     if (endViewRow >= 0 && endViewRow < rows) {
-      // Default: circle below cell.  Flip when near bottom edge.
-      const endFlipped = (termHeight - endCellBot) < (gap + cr);
-
-      if (endFlipped) {
-        // Circle above cell, bar extends from gap up through cell
-        this.positionBar(this.endBar, endX, endCellTop - gap, this.cellHeight + gap);
-        this.positionCircle(this.endCircle, endX, endCellTop - gap);
-      } else {
-        // Circle below cell, bar extends from cell top down through gap
-        this.positionBar(this.endBar, endX, endCellTop, this.cellHeight + gap);
-        this.positionCircle(this.endCircle, endX, endCellBot + gap);
-      }
+      this.positionBar(this.endBar, endX, endCellTop, this.cellHeight + gap);
+      this.positionCircle(this.endCircle, endX, endCellBot + gap);
     } else {
       this.hideElement(this.endBar);
       this.hideElement(this.endCircle);
@@ -485,10 +471,10 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     this.positionEditMenu(startX, startCellTop, endX, endCellBot);
   }
 
-  /** Position a 2px bar centered on x, starting at top with given height. */
+  /** Position the selection bar centered on x. */
   private positionBar(bar: HTMLDivElement, x: number, top: number, height: number): void {
     bar.style.display = '';
-    bar.style.left = (x - 1) + 'px';
+    bar.style.left = (x - Math.floor(SelectionOverlayAddon.BAR_WIDTH / 2)) + 'px';
     bar.style.top = top + 'px';
     bar.style.height = height + 'px';
   }
@@ -580,18 +566,19 @@ export class SelectionOverlayAddon implements ITerminalAddon {
 
   private positionLoupe(clientX: number, clientY: number): void {
     if (!this.loupe) return;
-    const size = SelectionOverlayAddon.LOUPE_SIZE;
+    const w = SelectionOverlayAddon.LOUPE_WIDTH;
+    const h = SelectionOverlayAddon.LOUPE_HEIGHT;
     const lift = SelectionOverlayAddon.LOUPE_LIFT;
 
     // Loupe is position: fixed; clientX/Y are already viewport coords.
-    let left = clientX - size / 2;
-    left = Math.max(0, Math.min(window.innerWidth - size, left));
+    let left = clientX - w / 2;
+    left = Math.max(0, Math.min(window.innerWidth - w, left));
 
     // Vertical: above the finger, clamped to viewport top. With the
     // WebView extending into the safe-area strip, top=0 is the very top
     // of the screen and the loupe can paint over the status bar instead
     // of flipping below the finger near the top row.
-    let top = clientY - size - lift;
+    let top = clientY - h - lift;
     top = Math.max(0, top);
 
     this.loupe.style.left = left + 'px';
@@ -619,13 +606,15 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     const cx = cell.x * this.cellWidth;
     const cy = (viewRow + 0.5) * this.cellHeight;
 
-    const size = SelectionOverlayAddon.LOUPE_SIZE;
+    const lw = SelectionOverlayAddon.LOUPE_WIDTH;
+    const lh = SelectionOverlayAddon.LOUPE_HEIGHT;
     const zoom = SelectionOverlayAddon.LOUPE_ZOOM;
-    const sourceCss = size / zoom;
-    const sx = (cx - sourceCss / 2) * ratioX;
-    const sy = (cy - sourceCss / 2) * ratioY;
-    const sw = sourceCss * ratioX;
-    const sh = sourceCss * ratioY;
+    const sourceCssW = lw / zoom;
+    const sourceCssH = lh / zoom;
+    const sx = (cx - sourceCssW / 2) * ratioX;
+    const sy = (cy - sourceCssH / 2) * ratioY;
+    const sw = sourceCssW * ratioX;
+    const sh = sourceCssH * ratioY;
 
     const ctx = this.loupeCtx;
     const dw = this.loupeCanvas.width;
@@ -635,17 +624,42 @@ export class SelectionOverlayAddon implements ITerminalAddon {
     ctx.fillRect(0, 0, dw, dh);
     ctx.drawImage(src, sx, sy, sw, sh, 0, 0, dw, dh);
 
-    // The selection bar lives in overlay DOM, not on the WebGL canvas,
-    // so drawImage doesn't capture it.  Paint a matching bar in the
-    // loupe at the magnified cell-boundary position — horizontally the
-    // loupe is centered on the dragged endpoint, so the bar always sits
-    // at the loupe's horizontal midline.  Vertical extent matches the
-    // magnified cell row.
-    const loupeDpr = dw / SelectionOverlayAddon.LOUPE_SIZE;
-    const barW = 2 * loupeDpr;
+    // The selection bars and handle dots live in overlay DOM, not on
+    // the WebGL canvas, so drawImage doesn't capture them. Repaint
+    // both handles inside the loupe so a short selection (where the
+    // non-active endpoint sits inside the magnified region) is fully
+    // represented. Out-of-area portions clip naturally to the loupe
+    // canvas. The loupe is centered on the active endpoint, so its
+    // bar maps to the loupe's center; the other endpoint's bar is
+    // offset by the inter-handle delta.
+    const loupeDpr = dw / lw;
+    const barW = SelectionOverlayAddon.BAR_WIDTH * zoom * loupeDpr;
     const cellPx = this.cellHeight * zoom * loupeDpr;
+    const gapPx = SelectionOverlayAddon.HANDLE_GAP * zoom * loupeDpr;
+    const crPx = SelectionOverlayAddon.CIRCLE_R * zoom * loupeDpr;
+    const rows = this.terminal.rows;
+
+    const drawHandle = (handleCell: BufferCell, type: DragTarget) => {
+      const handleViewRow = handleCell.y - viewportY;
+      if (handleViewRow < 0 || handleViewRow >= rows) return;
+      const handleCx = handleCell.x * this.cellWidth;
+      const handleCy = (handleViewRow + 0.5) * this.cellHeight;
+      // Map source-canvas CSS coords to loupe canvas coords. The
+      // active cell maps to (dw/2, dh/2) by construction.
+      const lpx = (handleCx - cx) * zoom * loupeDpr + dw / 2;
+      const lpyCenter = (handleCy - cy) * zoom * loupeDpr + dh / 2;
+      const barTop = lpyCenter - cellPx / 2;
+      const barBottom = lpyCenter + cellPx / 2;
+      ctx.fillRect(lpx - barW / 2, barTop, barW, cellPx);
+      const dotY = type === 'start' ? barTop - gapPx : barBottom + gapPx;
+      ctx.beginPath();
+      ctx.arc(lpx, dotY, crPx, 0, Math.PI * 2);
+      ctx.fill();
+    };
+
     ctx.fillStyle = '#007AFF';
-    ctx.fillRect((dw - barW) / 2, (dh - cellPx) / 2, barW, cellPx);
+    drawHandle(this.selection.start, 'start');
+    drawHandle(this.selection.end, 'end');
   }
 
   // ── Handle Dragging ───────────────────────────────────────────────────────
