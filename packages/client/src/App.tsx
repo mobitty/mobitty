@@ -603,27 +603,29 @@ export function App() {
         onKeepFocus={() => terminalRef.current?.core?.focus()}
       />
 
-      <SoftkeyBar
-        ref={softkeyBarRef}
-        pages={softkeyConfig.pages}
-        customKeys={softkeyConfig.customKeys}
-        containers={softkeyConfig.containers}
-        activeContainerId={openContainerId}
-        batchInputOpen={batchInputOpen}
-        softkeySize={softkeySize}
-        hasAlerts={alertedSessionIds.size > 0}
-        isMobile={isMobile}
-        isNativeApp={isNativeApp()}
-        onSessionsOpen={() => setSessionPanelOpen(true)}
-        onMeterToggle={() => setMeterOpen(prev => !prev)}
-        onAction={(action, mods) => terminalRef.current?.core?.handleSoftkeyAction(action, mods)}
-        onPaste={handlePaste}
-        onBatchInputToggle={() => setBatchInputOpen(prev => !prev)}
-        onBatchSubmit={handleBatchSubmit}
-        onContainerToggle={handleContainerToggle}
-        onKeepFocus={() => terminalRef.current?.core?.focus()}
-        onModifiersChange={setModifiers}
-      />
+      {!(profile?.hideSoftkeyBar && (profile.sessionSwitcherHotkey ?? '').trim() !== '') && (
+        <SoftkeyBar
+          ref={softkeyBarRef}
+          pages={softkeyConfig.pages}
+          customKeys={softkeyConfig.customKeys}
+          containers={softkeyConfig.containers}
+          activeContainerId={openContainerId}
+          batchInputOpen={batchInputOpen}
+          softkeySize={softkeySize}
+          hasAlerts={alertedSessionIds.size > 0}
+          isMobile={isMobile}
+          isNativeApp={isNativeApp()}
+          onSessionsOpen={() => setSessionPanelOpen(true)}
+          onMeterToggle={() => setMeterOpen(prev => !prev)}
+          onAction={(action, mods) => terminalRef.current?.core?.handleSoftkeyAction(action, mods)}
+          onPaste={handlePaste}
+          onBatchInputToggle={() => setBatchInputOpen(prev => !prev)}
+          onBatchSubmit={handleBatchSubmit}
+          onContainerToggle={handleContainerToggle}
+          onKeepFocus={() => terminalRef.current?.core?.focus()}
+          onModifiersChange={setModifiers}
+        />
+      )}
 
       {/* Overlays — absolute within #root (contain: paint) */}
       <RemoteEditorPanel

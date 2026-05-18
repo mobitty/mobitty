@@ -68,6 +68,7 @@ export interface Profile {
   notificationMode: 'iterm' | 'kitty' | 'ghostty' | 'off';
   remoteEditor: boolean;
   copyOnSelect: boolean;
+  hideSoftkeyBar?: boolean;
 }
 
 // ── Declarative Field Schema ─────────────────────────────────────────────────
@@ -112,6 +113,7 @@ interface EnumFieldRule {
 interface BooleanFieldRule {
   readonly type: 'boolean';
   readonly default: boolean;
+  readonly optional?: true;
   readonly errors: {
     readonly type: string;
   };
@@ -240,6 +242,14 @@ export const PROFILE_FIELD_RULES: Readonly<Record<string, FieldRule>> = {
   copyOnSelect: {
     type: 'boolean',
     default: false,
+    errors: {
+      type: 'Must be true or false',
+    },
+  },
+  hideSoftkeyBar: {
+    type: 'boolean',
+    default: false,
+    optional: true,
     errors: {
       type: 'Must be true or false',
     },

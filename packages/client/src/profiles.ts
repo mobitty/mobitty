@@ -49,6 +49,7 @@ export const DEFAULT_DESKTOP_PROFILE: Profile = {
   notificationMode: 'ghostty',
   remoteEditor: false,
   copyOnSelect: false,
+  hideSoftkeyBar: false,
 };
 
 export const DEFAULT_MOBILE_PROFILE: Profile = {

@@ -31,6 +31,7 @@ import { DEFAULT_GESTURE_MAPPING } from '@/gesture-types';
 import { fetchThemeList, fetchTheme, saveTheme, deleteTheme, isBuiltinTheme, getThemeCredit } from '@/themes';
 import { fetchShells, saveShell, deleteShell, rediscoverShells, type ShellInfo } from '@/shells';
 import { FONT_OPTIONS, CUSTOM_FONT_VALUE, findFontOption, loadFont } from '@/fonts';
+import { cn } from '@/lib/utils';
 
 function FieldError({ error }: { error: string | undefined }) {
   if (!error) return null;
@@ -132,6 +133,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
   const [notificationMode, setNotificationMode] = useState<'iterm' | 'kitty' | 'ghostty' | 'off'>('ghostty');
   const [remoteEditor, setRemoteEditor] = useState(false);
   const [copyOnSelect, setCopyOnSelect] = useState(false);
+  const [hideSoftkeyBar, setHideSoftkeyBar] = useState(false);
   const [hotkeyError, setHotkeyError] = useState<string | undefined>();
   const [status, setStatus] = useState('');
   const [fieldErrors, setFieldErrors] = useState<ProfileFieldErrors>(new Map());
@@ -205,6 +207,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
     setNotificationMode(profile.notificationMode);
     setRemoteEditor(profile.remoteEditor);
     setCopyOnSelect(profile.copyOnSelect);
+    setHideSoftkeyBar(profile.hideSoftkeyBar ?? false);
     setHotkeyError(undefined);
     setFieldErrors(new Map());
   }, []);
@@ -262,6 +265,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
       notificationMode,
       remoteEditor,
       copyOnSelect,
+      hideSoftkeyBar,
     };
     if (Object.keys(gestures).length > 0) {
       candidate['gestures'] = gestures;
@@ -720,6 +724,19 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
               />
             </div>
             <FieldError error={hotkeyError} />
+
+            {/* Hide softkey bar (desktop only) */}
+            {editingDevice === 'desktop' && (
+              <div className="flex items-center gap-2">
+                <Label className={cn('min-w-[100px] text-xs text-muted-foreground', sessionSwitcherHotkey.trim() === '' && 'opacity-50')}>Hide Softkeys</Label>
+                <HelpTip>Hide the softkey bar so the terminal gets the full window. The session panel is still reachable via the Session Hotkey above; clear the hotkey to disable this option.</HelpTip>
+                <Switch
+                  checked={hideSoftkeyBar}
+                  onCheckedChange={setHideSoftkeyBar}
+                  disabled={sessionSwitcherHotkey.trim() === ''}
+                />
+              </div>
+            )}
 
             {/* Copy hotkey */}
             <div className="flex items-center gap-2">
