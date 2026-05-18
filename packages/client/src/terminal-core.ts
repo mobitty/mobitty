@@ -80,6 +80,12 @@ const Command = {
   RESIZE_TERMINAL: '1',
 } as const;
 
+/** Cap on how many `state-update-applied` events to log after each STATE_FULL.
+ *  Bounded so the post-reconnect diff window gets captured without
+ *  ballooning long-running session logs. See
+ *  done-bug-reconnect-alt-buffer-misaligned.md. */
+const POST_STATE_FULL_UPDATE_LOG_LIMIT = 5;
+
 type RendererType = 'dom' | 'webgl';
 
 interface ClientOptions {
@@ -214,6 +220,24 @@ export class TerminalCore {
   private currentSessionId?: string;
   private scrollPositions = new Map<string, number>();   // sessionId → distFromBottom at last switch-out
   private lastConnectedSessionId: string | null = null;  // sessionId whose content the buffer currently holds
+  /** Counter for `state-update-applied` info-level logging — reset on each
+   *  STATE_FULL, capped at POST_STATE_FULL_UPDATE_LOG_LIMIT so the
+   *  post-reconnect diff frames get captured. See
+   *  done-bug-reconnect-alt-buffer-misaligned.md. */
+  private postStateFullUpdateCount = 0;
+  /** True between receiving a STATE_FULL and its actual payload draining into
+   *  xterm.js. While true, incoming STATE_UPDATE diffs are queued in
+   *  `queuedStateUpdates` and replayed *after* the state-full drains.
+   *
+   *  Without this, the empty-write-flush trick in the STATE_FULL handler
+   *  creates a window where a freshly-arrived STATE_UPDATE would land in the
+   *  WriteBuffer *between* the flush callback and the actual state-full
+   *  payload — so the diff applied to the pre-state-full buffer (e.g. normal
+   *  mode) instead of the post-state-full alt buffer, and state-full's
+   *  `\x1b[2J` then wiped the diff's effects. See
+   *  done-bug-reconnect-alt-buffer-misaligned.md. */
+  private stateFullPending = false;
+  private queuedStateUpdates: Uint8Array[] = [];
   private softkeySettings: Record<string, SoftkeyKeySettings> = {};
   private scrollback: number;
   private imagePasteDir?: string;
@@ -883,24 +907,136 @@ export class TerminalCore {
     return { first, last };
   }
 
+  /** Sample the alternate buffer specifically (even if `active` is normal). Use
+   *  for alt-buffer state diagnostics — see
+   *  done-bug-reconnect-alt-buffer-misaligned.md. */
+  private sampleAltBufferLines(n: number): { first: string[]; last: string[] } {
+    const buf = this.terminal.buffer.alternate;
+    const total = buf.length;
+    const first: string[] = [];
+    const last: string[] = [];
+    for (let i = 0; i < Math.min(n, total); i++) {
+      const line = buf.getLine(i);
+      first.push(line ? line.translateToString(true).slice(0, 40) : '');
+    }
+    for (let i = Math.max(0, total - n); i < total; i++) {
+      const line = buf.getLine(i);
+      last.push(line ? line.translateToString(true).slice(0, 40) : '');
+    }
+    return { first, last };
+  }
+
+  /** Write a STATE_UPDATE diff payload into xterm.js, with info-level
+   *  post-drain logging for the first N diffs after each STATE_FULL.
+   *  See done-bug-reconnect-alt-buffer-misaligned.md. */
+  private applyStateUpdate(payload: Uint8Array): void {
+    if (this.postStateFullUpdateCount < POST_STATE_FULL_UPDATE_LOG_LIMIT) {
+      const index = this.postStateFullUpdateCount + 1;
+      this.postStateFullUpdateCount = index;
+      // Capture dims at MESSAGE RECEIPT (synchronous, before WriteBuffer
+      // drains). If these differ from the post-drain values, something
+      // resized the terminal during the drain.
+      const dimsBefore = this.clientDimSnapshot();
+      this.terminal.write(payload, () => {
+        this.logger.info('state-update-applied', {
+          index,
+          payloadSize: payload.length,
+          dimsBefore,
+          dimsAfter: this.clientDimSnapshot(),
+          postLines: this.sampleBufferLines(6),
+          altLines: this.sampleAltBufferLines(6),
+        });
+      });
+    } else {
+      this.terminal.write(payload);
+    }
+  }
+
+  /** Replay STATE_UPDATEs that were held while a STATE_FULL was mid-apply.
+   *  Called from the state-full inner write-drain callback. See
+   *  done-bug-reconnect-alt-buffer-misaligned.md. */
+  private drainQueuedStateUpdates(): void {
+    if (this.queuedStateUpdates.length === 0) return;
+    const queue = this.queuedStateUpdates;
+    this.queuedStateUpdates = [];
+    this.logger.info('state-update queue drained', { count: queue.length });
+    for (const payload of queue) {
+      this.applyStateUpdate(payload);
+    }
+  }
+
+  /** Comprehensive client-side dim snapshot for post-reconnect diagnosis. The
+   *  bufferLength field on existing logs proved ambiguous — a buffer length
+   *  larger than the server's row count can mean either "the client's
+   *  terminal grew after the handshake" (A) or "alt buffer retained content
+   *  across the \x1b[?1049l/h round-trip" (B). This dump separates the
+   *  signals so the next repro tells us which. See
+   *  done-bug-reconnect-alt-buffer-misaligned.md. */
+  private clientDimSnapshot(): Record<string, unknown> {
+    const t = this.terminal;
+    const buf = t.buffer;
+    const vv = typeof window !== 'undefined' ? window.visualViewport : null;
+    let proposed: { cols?: number; rows?: number } | null = null;
+    try {
+      const p = this.fitAddon.proposeDimensions();
+      if (p) proposed = { cols: p.cols, rows: p.rows };
+    } catch { /* container not measurable */ }
+    // Per-buffer first-line lengths. xterm.js's terminal.cols can diverge
+    // from a buffer's cell row width if a resize happened while that buffer
+    // was inactive — the 3-col wrap pattern seen on alt-buffer reconnect
+    // (done-bug-reconnect-alt-buffer-misaligned.md) is consistent with the
+    // alt buffer holding stale line widths.
+    const altLine0Len = buf.alternate.getLine(0)?.length ?? null;
+    const normalLine0Len = buf.normal.getLine(0)?.length ?? null;
+    const activeLine0Len = buf.active.getLine(0)?.length ?? null;
+    return {
+      termCols: t.cols,
+      termRows: t.rows,
+      activeType: buf.active.type,
+      activeLength: buf.active.length,
+      altLength: buf.alternate.length,
+      normalLength: buf.normal.length,
+      altLine0Len,
+      normalLine0Len,
+      activeLine0Len,
+      cursorX: buf.active.cursorX,
+      cursorY: buf.active.cursorY,
+      baseY: buf.active.baseY,
+      viewportY: buf.active.viewportY,
+      modes: {
+        origin: t.modes.originMode,
+        wrap: t.modes.wraparoundMode,
+        mouse: t.modes.mouseTrackingMode,
+      },
+      fitProposed: proposed,
+      visualViewport: vv ? { w: Math.round(vv.width), h: Math.round(vv.height) } : null,
+      docClient: typeof document !== 'undefined' ? {
+        w: document.documentElement.clientWidth,
+        h: document.documentElement.clientHeight,
+      } : null,
+    };
+  }
+
   // Count wrapped vs full-width-non-wrapped rows. fullWidthNonWrappedLines is
   // the diagnostic for content that grow-reflow can't merge — see
   // todo-bug-claude-code-line-wrap.md.
-  private bufferWrapStats(): { bufferLen: number; cols: number; wrappedLines: number; fullWidthNonWrappedLines: number } {
+  private bufferWrapStats(): { bufferLen: number; cols: number; wrappedLines: number; fullWidthNonWrappedLines: number; staleWidthLines: number } {
     const buf = this.terminal.buffer.active;
     const cols = this.terminal.cols;
     let wrapped = 0;
     let fullNonWrapped = 0;
+    let staleWidth = 0;
     for (let y = 0; y < buf.length; y++) {
       const line = buf.getLine(y);
       if (!line) continue;
+      if (line.length > cols) staleWidth++;
       if (line.isWrapped) {
         wrapped++;
       } else if (line.translateToString(true).length === cols) {
         fullNonWrapped++;
       }
     }
-    return { bufferLen: buf.length, cols, wrappedLines: wrapped, fullWidthNonWrappedLines: fullNonWrapped };
+    return { bufferLen: buf.length, cols, wrappedLines: wrapped, fullWidthNonWrappedLines: fullNonWrapped, staleWidthLines: staleWidth };
   }
 
   // Mirror of server-side detectLineRepetition (diff.ts). Scans the
@@ -1189,6 +1325,7 @@ export class TerminalCore {
         fullWidthNonWrappedLines: stats.fullWidthNonWrappedLines,
         samples: this.sampleBufferLines(4),
         repeat: this.bufferRepetitionStats(),
+        dims: this.clientDimSnapshot(),
       });
       const msg = JSON.stringify({ columns: cols, rows });
       this.socket?.send(this.textEncoder.encode(Command.RESIZE_TERMINAL + msg));
@@ -1211,7 +1348,12 @@ export class TerminalCore {
       this.callbacks.onConnected?.();
     }
     this.lastMessageAt = Date.now();
-    this.logger.info('websocket opened');
+    this.logger.info('websocket opened', {
+      dims: this.clientDimSnapshot(),
+      reconnect: this.opened,
+      lastConnectedSessionId: this.lastConnectedSessionId,
+      requestedSessionId: this.options.sessionId ?? null,
+    });
     const { overlayAddon } = this;
 
     // Clear any lingering overlay (e.g. "Reconnecting..." from failed initial attempts)
@@ -1272,7 +1414,13 @@ export class TerminalCore {
       handshake['remoteEditor'] = this.remoteEditor;
       if (this.themeForeground) handshake['themeForeground'] = this.themeForeground;
       if (this.themeBackground) handshake['themeBackground'] = this.themeBackground;
-      this.logger.info('handshake', { sessionId: this.options.sessionId ?? null, shell: this.options.shellName ?? null, columns: terminal.cols, rows: terminal.rows });
+      this.logger.info('handshake', {
+        sessionId: this.options.sessionId ?? null,
+        shell: this.options.shellName ?? null,
+        columns: terminal.cols,
+        rows: terminal.rows,
+        dims: this.clientDimSnapshot(),
+      });
       this.socket?.send(textEncoder.encode(JSON.stringify(handshake)));
 
       terminal.focus();
@@ -1281,7 +1429,10 @@ export class TerminalCore {
 
   private scheduleReconnect() {
     this.reconnectDelay = Math.min(Math.max(this.reconnectDelay, 500) * 2, 10000);
-    this.logger.info('reconnecting', { delay: this.reconnectDelay });
+    this.logger.info('reconnecting', {
+      delay: this.reconnectDelay,
+      dims: this.clientDimSnapshot(),
+    });
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
       this.connect();
@@ -1378,7 +1529,11 @@ export class TerminalCore {
 
   private onSocketClose(event: CloseEvent) {
     this.logger.setConnected(false);
-    this.logger.info('websocket closed', { code: event.code });
+    this.logger.info('websocket closed', {
+      code: event.code,
+      reason: event.reason || null,
+      dims: this.clientDimSnapshot(),
+    });
     const { overlayAddon } = this;
     this.dispose();
 
@@ -1538,6 +1693,29 @@ export class TerminalCore {
 
     switch (cmdChar) {
       case Command.STATE_FULL: {
+        // Reset the post-reconnect state-update logging window — see
+        // done-bug-reconnect-alt-buffer-misaligned.md.
+        this.postStateFullUpdateCount = 0;
+        // Hold any STATE_UPDATE diffs that arrive between now and when the
+        // state-full payload finishes draining into xterm.js. Without this,
+        // diffs land in the WriteBuffer between the empty-write flush and
+        // the actual state-full payload — applying to the pre-state-full
+        // buffer (wrong mode, wrong cells) before being wiped by
+        // state-full's `\x1b[2J`. See
+        // done-bug-reconnect-alt-buffer-misaligned.md.
+        this.stateFullPending = true;
+        // Any diffs queued by a previous in-progress state-full are now
+        // obsolete — this state-full will overwrite their target state.
+        this.queuedStateUpdates = [];
+        // Log synchronously on receipt — captures the client's terminal
+        // dims *before* the WriteBuffer drains anything. Compared with
+        // the dims field in state-full-applied to spot any resize that
+        // happens during the drain.
+        this.logger.info('state-full received', {
+          payloadSize: payload.length,
+          dimsOnReceipt: this.clientDimSnapshot(),
+          altLinesBefore: this.sampleAltBufferLines(6),
+        });
         // Snapshot state BEFORE any pending WriteBuffer entries drain.
         // If these differ from the post-drain values, pending writes were
         // in-flight — a likely cause of stale distFromBottom.
@@ -1648,16 +1826,32 @@ export class TerminalCore {
               rows: this.terminal.rows,
               preLines,
               postLines,
+              altLines: this.sampleAltBufferLines(6),
+              dims: this.clientDimSnapshot(),
               wrapStats: this.bufferWrapStats(),
               repeat: this.bufferRepetitionStats(),
             });
+            // State-full has fully drained — release any queued diffs into
+            // the WriteBuffer. They'll now apply to the correct
+            // (post-state-full) alt buffer instead of the pre-state-full
+            // normal buffer. See done-bug-reconnect-alt-buffer-misaligned.md.
+            this.stateFullPending = false;
+            this.drainQueuedStateUpdates();
           });
         });
         break;
       }
       case Command.STATE_UPDATE:
         this.logger.debug('state-update', { len: payload.length });
-        this.terminal.write(payload);
+        if (this.stateFullPending) {
+          this.queuedStateUpdates.push(payload);
+          this.logger.info('state-update queued (state-full pending)', {
+            payloadSize: payload.length,
+            queueDepth: this.queuedStateUpdates.length,
+          });
+          break;
+        }
+        this.applyStateUpdate(payload);
         break;
       case Command.SET_WINDOW_TITLE:
         this.title = this.textDecoder.decode(payload);
