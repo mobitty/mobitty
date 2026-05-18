@@ -1,14 +1,18 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
-import { Save, X } from 'lucide-react';
+import { Save, X, Minimize2 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useShakeToUndoOnFocus } from '@/hooks/use-shake-to-undo-on-focus';
 import { getRemoteEditorDraft, setRemoteEditorDraft, clearRemoteEditorDraft } from '@/remote-editor-storage';
+import { getBatchInputDraft, setBatchInputDraft } from '@/batch-input-storage';
+
+export type RemoteEditorMode = 'remote-editor' | 'fullscreen-input';
 
 interface RemoteEditorPanelProps {
   open: boolean;
-  filePath: string;
-  content: string;
+  mode?: RemoteEditorMode;
+  filePath?: string;
+  content?: string;
   contentType?: string;
   onSave: (content: string) => void;
   onCancel: () => void;
@@ -19,10 +23,19 @@ function basename(filePath: string): string {
   return parts[parts.length - 1] ?? filePath;
 }
 
-export function RemoteEditorPanel({ open, filePath, content, contentType, onSave, onCancel }: RemoteEditorPanelProps) {
+export function RemoteEditorPanel({
+  open,
+  mode = 'remote-editor',
+  filePath = '',
+  content = '',
+  contentType,
+  onSave,
+  onCancel,
+}: RemoteEditorPanelProps) {
   const [draft, setDraft] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const isImage = contentType?.startsWith('image/') ?? false;
+  const isFullscreenInput = mode === 'fullscreen-input';
+  const isImage = !isFullscreenInput && (contentType?.startsWith('image/') ?? false);
 
   useShakeToUndoOnFocus(textareaRef);
 
@@ -32,27 +45,31 @@ export function RemoteEditorPanel({ open, filePath, content, contentType, onSave
   }, [isImage, content, contentType]);
 
   // localStorage draft wins over server content so in-progress edits
-  // survive session switch / reconnect.
+  // survive session switch / reconnect. Fullscreen-input mode shares the
+  // mobitty-batch-input key with the inline BatchInputPanel.
   useEffect(() => {
-    if (open && !isImage) {
+    if (!open || isImage) return;
+    if (isFullscreenInput) {
+      setDraft(getBatchInputDraft());
+    } else {
       setDraft(getRemoteEditorDraft(filePath) ?? content);
-      setTimeout(() => {
-        textareaRef.current?.focus({ preventScroll: true });
-      }, 0);
     }
-  }, [open, content, isImage, filePath]);
+    setTimeout(() => {
+      textareaRef.current?.focus({ preventScroll: true });
+    }, 0);
+  }, [open, content, isImage, isFullscreenInput, filePath]);
 
   const handleSave = useCallback(() => {
-    clearRemoteEditorDraft(filePath);
+    if (!isFullscreenInput) clearRemoteEditorDraft(filePath);
     onSave(draft);
-  }, [draft, filePath, onSave]);
+  }, [draft, filePath, isFullscreenInput, onSave]);
 
   const handleCancel = useCallback(() => {
-    if (!isImage) clearRemoteEditorDraft(filePath);
+    if (!isFullscreenInput && !isImage) clearRemoteEditorDraft(filePath);
     onCancel();
-  }, [isImage, filePath, onCancel]);
+  }, [isImage, isFullscreenInput, filePath, onCancel]);
 
-  // Ctrl/Cmd + S or Enter to save (text mode only)
+  // Ctrl/Cmd + S or Enter to save / exit (text modes only)
   useEffect(() => {
     if (!open || isImage) return;
     const handler = (e: KeyboardEvent) => {
@@ -73,19 +90,32 @@ export function RemoteEditorPanel({ open, filePath, content, contentType, onSave
     )}>
       {/* Header */}
       <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border">
-        <span className="flex-1 font-mono text-sm truncate text-muted-foreground" title={filePath}>
-          {basename(filePath)}
+        <span className="flex-1 font-mono text-sm truncate text-muted-foreground" title={isFullscreenInput ? 'Input' : filePath}>
+          {isFullscreenInput ? 'Input' : basename(filePath)}
         </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="gap-1 text-muted-foreground hover:text-foreground"
-          onClick={handleCancel}
-        >
-          <X className="h-4 w-4" />
-          {isImage ? 'Close' : 'Cancel'}
-        </Button>
-        {!isImage && (
+        {!isFullscreenInput && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="gap-1 text-muted-foreground hover:text-foreground"
+            onClick={handleCancel}
+          >
+            <X className="h-4 w-4" />
+            {isImage ? 'Close' : 'Cancel'}
+          </Button>
+        )}
+        {isFullscreenInput && (
+          <Button
+            variant="default"
+            size="sm"
+            className="gap-1"
+            onClick={handleSave}
+          >
+            <Minimize2 className="h-4 w-4" />
+            Exit
+          </Button>
+        )}
+        {!isFullscreenInput && !isImage && (
           <Button
             variant="default"
             size="sm"
@@ -119,12 +149,16 @@ export function RemoteEditorPanel({ open, filePath, content, contentType, onSave
           onChange={(e) => {
             const val = e.target.value;
             setDraft(val);
-            setRemoteEditorDraft(filePath, val);
+            if (isFullscreenInput) {
+              setBatchInputDraft(val);
+            } else {
+              setRemoteEditorDraft(filePath, val);
+            }
           }}
           spellCheck={false}
           autoCapitalize="off"
           autoCorrect="off"
-          aria-label="Remote editor"
+          aria-label={isFullscreenInput ? 'Fullscreen input' : 'Remote editor'}
         />
       )}
     </div>

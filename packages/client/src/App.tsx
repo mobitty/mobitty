@@ -95,6 +95,7 @@ export function App() {
   const [connectionClosedReason, setConnectionClosedReason] = useState<ConnectionClosedReason | null>(null);
   const [connectingSlow, setConnectingSlow] = useState(false);
   const [batchInputOpen, setBatchInputOpen] = useState(false);
+  const [batchInputFullscreen, setBatchInputFullscreen] = useState(false);
   const [sessionPanelOpen, setSessionPanelOpen] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | undefined>();
   const [isMobile] = useState(isTouchDevice);
@@ -586,8 +587,10 @@ export function App() {
       {/* Bottom panels — normal flow flex items (top to bottom = visual bottom to top) */}
       <BatchInputPanel
         open={batchInputOpen}
+        fullscreen={batchInputFullscreen}
         onSubmit={handleBatchSubmit}
         onClose={() => { setBatchInputOpen(false); terminalRef.current?.core?.focus(); }}
+        onFullscreenToggle={() => setBatchInputFullscreen(true)}
       />
 
       <ContainerPanel
@@ -630,6 +633,13 @@ export function App() {
         contentType={editorContentType}
         onSave={handleEditorSave}
         onCancel={handleEditorCancel}
+      />
+
+      <RemoteEditorPanel
+        open={batchInputFullscreen}
+        mode="fullscreen-input"
+        onSave={() => setBatchInputFullscreen(false)}
+        onCancel={() => setBatchInputFullscreen(false)}
       />
 
       {pendingShellSelection && initialShells.length > 0 && (
