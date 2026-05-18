@@ -44,17 +44,6 @@ interface SoftkeyBarProps {
 
 // --- InlineInput sub-component ---
 
-function autoSizeInline(el: HTMLTextAreaElement) {
-  el.style.height = 'auto';
-  const style = getComputedStyle(el);
-  const lineHeight = parseInt(style.lineHeight, 10) || 20;
-  const maxHeight = lineHeight * 5;
-  const minH = parseFloat(style.minHeight) || 0;
-  const clamped = Math.max(minH, Math.min(el.scrollHeight, maxHeight));
-  el.style.height = `${clamped}px`;
-  el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
-}
-
 interface InlineInputProps {
   softkeySize: number;
   onSubmit: (text: string) => void;
@@ -65,21 +54,10 @@ function InlineInput({ softkeySize, onSubmit, onKeepFocus }: InlineInputProps) {
   const [draft, setDraft] = useState(() => getBatchInputDraft());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  useEffect(() => {
-    const ta = textareaRef.current;
-    if (ta) {
-      ta.value = draft;
-      autoSizeInline(ta);
-    }
-    // Only run on mount
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
     setDraft(val);
     setBatchInputDraft(val);
-    autoSizeInline(e.target);
   }, []);
 
   const handleSubmit = useCallback(() => {
