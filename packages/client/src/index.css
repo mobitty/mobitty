@@ -126,6 +126,7 @@ html, body {
   width: 100%;
   height: 100%;
   contain: paint;
+  padding-top: env(safe-area-inset-top);
 }
 
 /* xterm overrides */

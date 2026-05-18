@@ -286,8 +286,8 @@ export function App() {
     const root = document.getElementById('root');
     if (!root) return;
     const px = `${profile?.padding ?? 4}px`;
-    root.style.paddingLeft = px;
-    root.style.paddingRight = px;
+    root.style.paddingLeft = `max(${px}, env(safe-area-inset-left))`;
+    root.style.paddingRight = `max(${px}, env(safe-area-inset-right))`;
   }, [profile?.padding]);
 
   // Session-panel hotkey: cross-platform; the modifier requirement below is what
