@@ -159,6 +159,37 @@ html, body {
   -webkit-touch-callout: none;
 }
 
+/* Hide the xterm scrollbar slider. xterm.js 6.0.0 has no flag to disable
+   the SmoothScrollableElement scrollbar; the smallest `overviewRuler.width`
+   we can pass is 1 (the source uses `|| 14`, so 0 falls through). The
+   1px reservation is already in defaultTermOptions in App.tsx; this rule
+   suppresses the slider that would otherwise paint during scroll. Drop
+   both together when `scrollbar.showScrollbar: false` lands upstream —
+   see `docs/todo-feat-xterm-disable-scrollbar.md`. */
+.xterm .xterm-scrollable-element > .scrollbar > .slider {
+  display: none;
+}
+
+/* xterm.js paints three things in the gap to the right of
+   `.xterm-screen` (where `cols × cellWidth < viewport width`):
+   - `.xterm-scrollable-element` — inline `background-color: rgb(245, 245, 245)`
+     (VSCode SmoothScrollableElement default light-gray)
+   - `.xterm-viewport` — `background-color: #000` from xterm.css
+     (left over from a macOS scrollbar opacity workaround)
+   - `.xterm-decoration-overview-ruler` — 1px canvas at the right edge,
+     created whenever `overviewRuler.width` is set; xterm fills it with
+     white pixels even when no decorations are registered
+   All three become visible as stripes on the right edge once the
+   slider above is hidden. Suppress them so the cell-area canvas
+   bleeds clean to the edge. */
+.xterm .xterm-scrollable-element,
+.xterm .xterm-viewport {
+  background-color: transparent !important;
+}
+.xterm .xterm-decoration-overview-ruler {
+  display: none;
+}
+
 /* Hide scrollbars on the mobile softkey bar's horizontal scroll strip
    (and any other scroll container that opts in via this class). */
 .scrollbar-hide {
