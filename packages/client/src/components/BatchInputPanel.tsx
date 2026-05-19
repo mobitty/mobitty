@@ -57,7 +57,7 @@ export function BatchInputPanel({ open, fullscreen, onSubmit, onClose, onFullscr
     onClose();
   }, [draft, onSubmit, onClose]);
 
-  if (!open) return null;
+  if (!open || fullscreen) return null;
 
   return (
     <div

@@ -568,7 +568,9 @@ export function App() {
 
   return (
     <>
-      {/* Terminal area — flex-1, always present for layout stability */}
+      {/* Terminal area — flex-1, always present for layout stability.
+          Editor overlays mount here so their `absolute inset-0` is scoped
+          to the terminal frame (below the safe-area, above the softkey bar). */}
       <div className="flex-1 min-h-0 overflow-hidden relative">
         {!pendingShellSelection && (
           <XtermTerminal
@@ -582,6 +584,22 @@ export function App() {
             customKeyMap={customKeyMap}
           />
         )}
+
+        <RemoteEditorPanel
+          open={editorOpen}
+          filePath={editorFilePath}
+          content={editorContent}
+          contentType={editorContentType}
+          onSave={handleEditorSave}
+          onCancel={handleEditorCancel}
+        />
+
+        <RemoteEditorPanel
+          open={batchInputFullscreen}
+          mode="fullscreen-input"
+          onSave={() => setBatchInputFullscreen(false)}
+          onCancel={() => setBatchInputFullscreen(false)}
+        />
       </div>
 
       {/* Bottom panels — normal flow flex items (top to bottom = visual bottom to top) */}
@@ -627,22 +645,6 @@ export function App() {
         />
       )}
 
-      {/* Overlays — absolute within #root (contain: paint) */}
-      <RemoteEditorPanel
-        open={editorOpen}
-        filePath={editorFilePath}
-        content={editorContent}
-        contentType={editorContentType}
-        onSave={handleEditorSave}
-        onCancel={handleEditorCancel}
-      />
-
-      <RemoteEditorPanel
-        open={batchInputFullscreen}
-        mode="fullscreen-input"
-        onSave={() => setBatchInputFullscreen(false)}
-        onCancel={() => setBatchInputFullscreen(false)}
-      />
 
       {pendingShellSelection && initialShells.length > 0 && (
         <ShellSelectionPanel shells={initialShells} onSelect={handleInitialShellSelect} />
