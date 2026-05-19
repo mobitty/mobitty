@@ -691,7 +691,7 @@ export function App() {
         onKeepFocus={() => terminalRef.current?.core?.focus()}
       />
 
-      {!(profile?.hideSoftkeyBar && (profile.sessionSwitcherHotkey ?? '').trim() !== '') && (
+      {(!(profile?.hideSoftkeyBar && (profile.sessionSwitcherHotkey ?? '').trim() !== '') || sessionPanelOpen || settingsOpen) && (
         <SoftkeyBar
           ref={softkeyBarRef}
           pages={softkeyConfig.pages}
