@@ -6,6 +6,7 @@ import {
   INPUT, RESIZE_TERMINAL, UPDATE_SETTINGS, JSON_DATA, CLIENT_LOG,
   CLIPBOARD_IMAGE, CLIPBOARD_IMAGE_ACK, RTT_REPORT, SESSION_ALERT, SESSION_NOTIFICATION,
   EDITOR_OPEN, EDITOR_DONE, DOWNLOAD_START,
+  FILE_UPLOAD, FILE_UPLOAD_ACK,
   HEARTBEAT_INTERVAL_MS, HEARTBEAT_TIMEOUT_MS,
   isResizeMessage, isHandshakeMessage, isUpdateSettingsMessage,
   isClientLogBatch,
@@ -15,6 +16,7 @@ const DEFAULT_SCROLLBACK = 5000;
 import { resolve, relative, isAbsolute } from 'node:path';
 import { writePty } from './pty.ts';
 import { writeImageToSystemClipboard, writeImageToFile, getProcessCwd } from './clipboard.ts';
+import { writeUploadToCwd, shellQuoteForBash } from './upload.ts';
 import type { SessionRegistry } from './sessions.ts';
 import type { ShellStore } from './shells.ts';
 import type { Logger } from './logger.ts';
@@ -59,6 +61,16 @@ function sendClipboardImageAck(ws: WebSocket, requestId: number, status: number,
   buf.writeUInt32BE(requestId, 1);
   buf[5] = status;
   if (errorBytes.length > 0) errorBytes.copy(buf, 6);
+  ws.send(buf);
+}
+
+function sendFileUploadAck(ws: WebSocket, requestId: number, status: number, trailing?: string): void {
+  const trailingBytes = trailing ? Buffer.from(trailing, 'utf-8') : Buffer.alloc(0);
+  const buf = Buffer.allocUnsafe(6 + trailingBytes.length);
+  buf[0] = FILE_UPLOAD_ACK;
+  buf.writeUInt32BE(requestId, 1);
+  buf[5] = status;
+  if (trailingBytes.length > 0) trailingBytes.copy(buf, 6);
   ws.send(buf);
 }
 
@@ -637,6 +649,36 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         const msg = err instanceof Error ? err.message : String(err);
         socketLogger.error('clipboard image handler failed', { error: msg });
         sendClipboardImageAck(ws, requestId, 1, JSON.stringify({ clipboardError: msg }));
+      });
+      return;
+    }
+
+    if (command === FILE_UPLOAD) {
+      if (sessionId === null) return;
+      const handle = registry.getHandle(sessionId);
+      if (!handle) return;
+      // [cmd:1][requestId:4 BE][filenameLen:2 BE][filename:N][fileData:M]
+      if (buf.length < 7) return;
+      const requestId = buf.readUInt32BE(1);
+      const filenameLen = buf.readUInt16BE(5);
+      if (buf.length < 7 + filenameLen) return;
+      const filename = buf.subarray(7, 7 + filenameLen).toString('utf-8');
+      const fileData = buf.subarray(7 + filenameLen);
+
+      const cwd = getProcessCwd(handle.pid);
+      writeUploadToCwd(fileData, filename, cwd).then(result => {
+        if (result.success && result.savedName) {
+          socketLogger.info('file uploaded to cwd', { name: result.savedName, bytes: fileData.length, cwd });
+          writePty(handle, './' + shellQuoteForBash(result.savedName) + ' ');
+          sendFileUploadAck(ws, requestId, 0, result.savedName);
+        } else {
+          socketLogger.warn('file upload failed', { name: filename, error: result.error });
+          sendFileUploadAck(ws, requestId, 1, JSON.stringify({ error: result.error }));
+        }
+      }).catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        socketLogger.error('file upload handler failed', { error: msg });
+        sendFileUploadAck(ws, requestId, 1, JSON.stringify({ error: msg }));
       });
       return;
     }
