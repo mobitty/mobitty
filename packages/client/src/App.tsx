@@ -607,8 +607,10 @@ export function App() {
   return (
     <>
       {/* Terminal area — flex-1, always present for layout stability.
-          Editor overlays mount here so their `absolute inset-0` is scoped
-          to the terminal frame (below the safe-area, above the softkey bar). */}
+          Full-screen panels (editor, session list, shell picker, settings)
+          mount here so their `absolute inset-0` is scoped to the terminal
+          frame — below the safe-area band #root reserves via
+          padding-top: env(safe-area-inset-top), above the softkey bar. */}
       <div className="flex-1 min-h-0 overflow-hidden relative">
         {!pendingShellSelection && (
           <XtermTerminal
@@ -638,6 +640,36 @@ export function App() {
           onSave={() => setBatchInputFullscreen(false)}
           onCancel={() => setBatchInputFullscreen(false)}
         />
+
+        {pendingShellSelection && initialShells.length > 0 && (
+          <ShellSelectionPanel shells={initialShells} onSelect={handleInitialShellSelect} />
+        )}
+
+        <SessionPanel
+          open={sessionPanelOpen}
+          onClose={() => { setSessionPanelOpen(false); terminalRef.current?.core?.focus(); }}
+          sessions={sessions}
+          onRefreshSessions={refreshSessions}
+          currentSessionId={currentSessionId}
+          alertedSessionIds={alertedSessionIds}
+          onSwitchSession={handleSwitchSession}
+          onCreateSession={handleCreateSession}
+          onSettingsOpen={() => setSettingsOpen(true)}
+          onNoSessionsLeft={handleNoSessionsLeft}
+          isMobile={isMobile}
+        />
+
+        {settingsOpen && (
+          <Suspense fallback={null}>
+            <SettingsDialog
+              open={settingsOpen}
+              onOpenChange={setSettingsOpen}
+              currentProfile={profile}
+              isMobile={isMobile}
+              onApply={handleApplyProfile}
+            />
+          </Suspense>
+        )}
       </div>
 
       {/* Bottom panels — normal flow flex items (top to bottom = visual bottom to top) */}
@@ -685,42 +717,12 @@ export function App() {
       )}
 
 
-      {pendingShellSelection && initialShells.length > 0 && (
-        <ShellSelectionPanel shells={initialShells} onSelect={handleInitialShellSelect} />
-      )}
-
-      <SessionPanel
-        open={sessionPanelOpen}
-        onClose={() => { setSessionPanelOpen(false); terminalRef.current?.core?.focus(); }}
-        sessions={sessions}
-        onRefreshSessions={refreshSessions}
-        currentSessionId={currentSessionId}
-        alertedSessionIds={alertedSessionIds}
-        onSwitchSession={handleSwitchSession}
-        onCreateSession={handleCreateSession}
-        onSettingsOpen={() => setSettingsOpen(true)}
-        onNoSessionsLeft={handleNoSessionsLeft}
-        isMobile={isMobile}
-      />
-
       <SystemMeterPanel
         open={meterOpen}
         metrics={metricsRef.current}
         onClose={() => setMeterOpen(false)}
         getTerminalDiagnostics={() => terminalRef.current?.core?.getDiagnostics()}
       />
-
-      {settingsOpen && (
-        <Suspense fallback={null}>
-          <SettingsDialog
-            open={settingsOpen}
-            onOpenChange={setSettingsOpen}
-            currentProfile={profile}
-            isMobile={isMobile}
-            onApply={handleApplyProfile}
-          />
-        </Suspense>
-      )}
 
       {imagePasteError !== null && (
         <Suspense fallback={null}>
