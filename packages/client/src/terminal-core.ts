@@ -34,6 +34,8 @@ const CMD_UPDATE_SETTINGS = 0x32;
 const CMD_EDITOR_OPEN = 0x3b;
 const CMD_EDITOR_DONE = 0x3a;
 const CMD_DOWNLOAD_START = 0x3c;
+const CMD_FILE_UPLOAD = 0x3d;
+const CMD_FILE_UPLOAD_ACK = 0x3d;
 
 /** Delay before tearing down GPU renderer when the tab is hidden.
  *  Avoids thrashing on quick tab switches while still freeing the GPU
@@ -210,6 +212,8 @@ export class TerminalCore {
   private customKeyMap?: Map<string, KeySpec>;
   private clipboardImageRequestId = 0;
   private pendingClipboardImageResolve?: (result: { status: number; errorInfo?: ImagePasteErrorInfo }) => void;
+  private fileUploadRequestId = 0;
+  private pendingFileUploadResolve?: (result: { status: number; savedName?: string; error?: string }) => void;
 
   private modifierSource?: ModifierSource;
   private logger: ClientLogger;
@@ -615,6 +619,8 @@ export class TerminalCore {
       case 'inline-input': break;
       case 'meter-toggle': break;
       case 'container-toggle': break;
+      case 'paste': break;
+      case 'file-upload': break;
     }
   }
 
@@ -1312,6 +1318,73 @@ export class TerminalCore {
     });
   }
 
+  /** Upload a file to the session's cwd. Server writes the file, types its path
+   *  into the PTY, and acks with the saved basename (deduped on collision). */
+  async handleFileUpload(buffer: ArrayBuffer, filename: string): Promise<void> {
+    const requestId = this.sendFileUpload(buffer, filename);
+    if (requestId <= 0) {
+      this.logger.warn('file-upload-send-failed', { filename, dataSize: buffer.byteLength });
+      this.overlayAddon?.showOverlay('Upload failed', 700);
+      return;
+    }
+    this.overlayAddon?.showOverlay('Uploading ' + filename + '…', 1500);
+    const { status, savedName, error } = await this.waitForFileUploadAck(requestId, 30_000);
+    if (status === 0) {
+      this.overlayAddon?.showOverlay('Uploaded: ' + (savedName ?? filename), 1500);
+    } else {
+      this.logger.warn('file-upload-failed', { filename, error });
+      this.overlayAddon?.showOverlay('Upload failed', 700);
+    }
+  }
+
+  private sendFileUpload(fileData: ArrayBuffer, filename: string): number {
+    const { socket, textEncoder } = this;
+    if (!socket || socket.readyState !== WebSocket.OPEN) {
+      this.logger.warn('file-upload-socket-not-open', { readyState: socket?.readyState ?? -1 });
+      return 0;
+    }
+
+    this.fileUploadRequestId++;
+    const requestId = this.fileUploadRequestId;
+
+    const nameBytes = textEncoder.encode(filename);
+    if (nameBytes.length === 0 || nameBytes.length > 65535) {
+      this.logger.warn('file-upload-name-invalid', { filename, len: nameBytes.length });
+      return 0;
+    }
+
+    const payload = new Uint8Array(1 + 4 + 2 + nameBytes.length + fileData.byteLength);
+    payload[0] = CMD_FILE_UPLOAD;
+    const view = new DataView(payload.buffer);
+    view.setUint32(1, requestId, false);
+    view.setUint16(5, nameBytes.length, false);
+    payload.set(nameBytes, 7);
+    payload.set(new Uint8Array(fileData), 7 + nameBytes.length);
+    socket.send(payload);
+
+    return requestId;
+  }
+
+  private waitForFileUploadAck(_requestId: number, timeoutMs: number): Promise<{ status: number; savedName?: string; error?: string }> {
+    return new Promise<{ status: number; savedName?: string; error?: string }>((resolve) => {
+      const timer = setTimeout(() => {
+        if (this.pendingFileUploadResolve === resolveOnce) {
+          this.pendingFileUploadResolve = undefined;
+        }
+        this.logger.warn('file-upload-ack-timeout', { requestId: _requestId, timeoutMs });
+        resolve({ status: 1, error: 'timeout' });
+      }, timeoutMs);
+
+      const resolveOnce = (result: { status: number; savedName?: string; error?: string }) => {
+        clearTimeout(timer);
+        this.pendingFileUploadResolve = undefined;
+        resolve(result);
+      };
+
+      this.pendingFileUploadResolve = resolveOnce;
+    });
+  }
+
   private initListeners() {
     const { terminal, overlayAddon } = this;
     this.registerSocket(terminal.onData(data => this.sendData(data)));
@@ -1656,6 +1729,25 @@ export class TerminalCore {
         } catch { this.logger.debug('CLIPBOARD_IMAGE_ACK parse failed'); }
       }
       this.pendingClipboardImageResolve?.({ status, errorInfo });
+      return;
+    }
+
+    if (cmd === CMD_FILE_UPLOAD_ACK && rawData.byteLength >= 6) {
+      const status = bytes[5]!;
+      const trailing = rawData.byteLength > 6 ? this.textDecoder.decode(new Uint8Array(rawData, 6)) : '';
+      if (status === 0) {
+        this.pendingFileUploadResolve?.({ status, savedName: trailing || undefined });
+      } else {
+        let error: string | undefined;
+        try {
+          const parsed: unknown = JSON.parse(trailing);
+          if (typeof parsed === 'object' && parsed !== null) {
+            const r = parsed as Record<string, unknown>;
+            if (typeof r['error'] === 'string') error = r['error'];
+          }
+        } catch { this.logger.debug('FILE_UPLOAD_ACK parse failed'); }
+        this.pendingFileUploadResolve?.({ status, error });
+      }
       return;
     }
 

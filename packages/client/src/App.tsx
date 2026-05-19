@@ -513,6 +513,44 @@ export function App() {
     void terminalRef.current?.core?.handlePaste();
   }, []);
 
+  const handleFileUpload = useCallback(() => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.multiple = true;
+    input.style.position = 'fixed';
+    input.style.left = '-9999px';
+    input.style.opacity = '0';
+    input.style.pointerEvents = 'none';
+    document.body.appendChild(input);
+
+    const cleanup = () => {
+      if (input.parentNode) input.parentNode.removeChild(input);
+    };
+    input.addEventListener('cancel', cleanup, { once: true });
+    input.addEventListener('change', () => {
+      const files = input.files ? Array.from(input.files) : [];
+      const core = terminalRef.current?.core;
+      cleanup();
+      if (!core || files.length === 0) {
+        core?.focus();
+        return;
+      }
+      void (async () => {
+        for (const file of files) {
+          try {
+            const buffer = await file.arrayBuffer();
+            await core.handleFileUpload(buffer, file.name);
+          } catch (err) {
+            const msg = err instanceof Error ? err.message : String(err);
+            core.clientLogger.warn('file-upload-read-failed', { name: file.name, error: msg });
+          }
+        }
+        core.focus();
+      })();
+    }, { once: true });
+    input.click();
+  }, []);
+
   const handleSwitchSession = useCallback((sessionId: string) => {
     setLastSessionId(sessionId);
     setCurrentSessionId(sessionId);
@@ -637,6 +675,7 @@ export function App() {
           onMeterToggle={() => setMeterOpen(prev => !prev)}
           onAction={(action, mods) => terminalRef.current?.core?.handleSoftkeyAction(action, mods)}
           onPaste={handlePaste}
+          onFileUpload={handleFileUpload}
           onBatchInputToggle={() => setBatchInputOpen(prev => !prev)}
           onBatchSubmit={handleBatchSubmit}
           onContainerToggle={handleContainerToggle}

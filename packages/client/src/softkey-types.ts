@@ -23,6 +23,7 @@ export type KeyBehavior =
   | { kind: 'batch-input-toggle' }
   | { kind: 'inline-input' }
   | { kind: 'paste' }
+  | { kind: 'file-upload' }
   | { kind: 'meter-toggle' }
   | { kind: 'container-toggle'; containerId: string }
   | { kind: 'select-line' }
@@ -78,6 +79,7 @@ export const KEY_REGISTRY: Record<string, KeySpec> = {
   batch_input: { id: 'batch_input', label: 'Input', behavior: { kind: 'batch-input-toggle' }, repeat: { kind: 'none' }, consumesModifiers: false },
   inline_input: { id: 'inline_input', label: 'Input', behavior: { kind: 'inline-input' }, repeat: { kind: 'none' }, consumesModifiers: false },
   paste: { id: 'paste', label: 'Paste', behavior: { kind: 'paste' }, repeat: { kind: 'none' }, consumesModifiers: false },
+  upload: { id: 'upload', label: 'Upload', behavior: { kind: 'file-upload' }, repeat: { kind: 'none' }, consumesModifiers: false },
   system_meter: { id: 'system_meter', label: 'Meter', behavior: { kind: 'meter-toggle' }, repeat: { kind: 'none' }, consumesModifiers: false },
   select_line: { id: 'select_line', label: 'Sel Line', behavior: { kind: 'select-line' }, repeat: { kind: 'none' }, consumesModifiers: false },
   select_visible: { id: 'select_visible', label: 'Sel Visible', behavior: { kind: 'select-visible-lines' }, repeat: { kind: 'none' }, consumesModifiers: false },
@@ -218,10 +220,10 @@ export const DEFAULT_MOBILE_CONTAINERS: SoftkeyContainerSpec[] = [
 ];
 
 export const DEFAULT_MOBILE_PAGES: string[][] = [
-  ['esc', 'ctrl', 'alt', 'shift', 'tab', 'batch_input', 'extra'],
+  ['esc', 'ctrl', 'alt', 'shift', 'tab', 'batch_input', 'extra', 'paste', 'upload'],
 ];
 
-export const DEFAULT_DESKTOP_PAGES: string[][] = [['system_meter', 'inline_input']];
+export const DEFAULT_DESKTOP_PAGES: string[][] = [['system_meter', 'upload', 'inline_input']];
 
 // --- Key ID validation ---
 
