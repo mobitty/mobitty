@@ -194,7 +194,7 @@ function AudienceSplit() {
             <li>Touch-first UX — soft keys, gestures, scroll</li>
             <li>Paste screenshots into AI agents</li>
             <li>Persistent sessions across devices</li>
-            <li>PWA — install on your home screen</li>
+            <li><a href="/docs/guides/ios-app">Native iOS app</a> with a real terminal keyboard</li>
             <li>Free non-commercial use, $99 lifetime Pro</li>
           </ul>
           <a href="/docs/getting-started" className={styles.audienceCta}>Get started free</a>

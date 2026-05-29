@@ -92,6 +92,18 @@ Options for secure remote access:
 - HTTPS tunnels (Cloudflare Tunnel, Azure Dev Tunnels)
 - VPN (Tailscale, custom WireGuard/OpenVPN)
 
+## iOS App
+
+A native iOS shell over the same web client. Available on iOS 17+ via TestFlight and the App Store.
+
+Adds to the browser experience:
+- Native on-screen terminal keyboard with built-in Readline, Tmux, Vim, and Claude Code layouts plus an in-place drag-arrange customizer (define your own layouts on a real grid that doesn't reflow across orientations).
+- Multi-server connection rotation. Each saved server holds an ordered list of URLs (LAN, Tailscale, public hostname); the app tries them in order until one connects.
+- iOS-specific gestures: 3-finger long-press opens a quick menu (reload, keyboard mode, settings, manage servers); right-edge swipe opens the native server list; left-edge swipe opens the web client's session list.
+- Touch-friendly selection with iOS-style handles and a magnifying loupe that rides above the finger during drag.
+- Hardware-keyboard toggle: hides the softkey bar automatically when a Bluetooth or Magic Keyboard is paired.
+- Privacy manifest declares one required-reason API (UserDefaults for saved servers); no telemetry, no fingerprinting, no credentials stored in the app — authentication is handled by your tunnel.
+
 ## Known Limitations
 
 Browser-reserved shortcuts (Ctrl+W, Ctrl+T, Ctrl+N, Ctrl+Tab, F11) cannot be intercepted by web applications. These shortcuts work in the terminal only when Mobitty is installed as a standalone app (PWA). Install via the browser's "Install" or "Add to Home Screen" option.

@@ -9,6 +9,7 @@ const sidebars: SidebarsConfig = {
       items: [
         'guides/installation',
         'guides/remote-access',
+        'guides/ios-app',
         'guides/known-limitations',
         'guides/troubleshooting',
       ],

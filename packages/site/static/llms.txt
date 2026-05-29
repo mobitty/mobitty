@@ -9,6 +9,7 @@ Mobitty is a self-hosted, source-available web terminal designed for using AI co
 - Touch-first UX: soft keys, gestures, macros designed for fingers
 - AI agent integration: paste screenshots into terminal agents, watch output in real time
 - Persistent sessions: shell processes survive disconnects, pick up from any device
+- Native iOS app: real on-screen terminal keyboard, multi-server connection rotation, edge-swipe and 3-finger gestures, touch-selection loupe
 - Adaptive protocol: adjusts refresh rate and compression to network conditions
 - Shell tools (mobitty-cli): edit files in-browser, download files to browser, view images
 - Remote editor: edit files in-browser when programs request $EDITOR
@@ -50,6 +51,7 @@ Business Source License 1.1 (BSL-1.1). Converts to GPLv2+ four years after each 
 - [Getting Started](https://mobitty.dev/docs/getting-started)
 - [Installation](https://mobitty.dev/docs/guides/installation)
 - [Security and Remote Access](https://mobitty.dev/docs/guides/remote-access)
+- [iOS App](https://mobitty.dev/docs/guides/ios-app)
 - [Known Limitations](https://mobitty.dev/docs/guides/known-limitations)
 - [Server Configuration](https://mobitty.dev/docs/reference/cli-options)
 - [Sessions](https://mobitty.dev/docs/reference/sessions)
