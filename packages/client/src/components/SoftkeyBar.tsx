@@ -120,6 +120,9 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
     onModifiersChangeRef.current = onModifiersChange;
     const onActionRef = useRef(onAction);
     onActionRef.current = onAction;
+    // Stable handle to the latest key dispatcher so the native onKeyAction
+    // listener (registered once, empty deps) doesn't capture a stale closure.
+    const runKeyBehaviorRef = useRef<(behavior: KeyBehavior, consumesModifiers: boolean) => void>(() => {});
 
     const updateModifiers = useCallback((next: ModifierFlags) => {
       modifiersRef.current = next;
@@ -191,7 +194,22 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
       const bridge = getNativeBridge();
       if (!bridge) return;
       bridge.onKeyAction = (action, mods) => {
-        onActionRef.current(action, mods ?? emptyModifiers());
+        // Native taps carry no modifier info (mods == null): the sticky
+        // ctrl/alt/shift state lives here in the softkey bar, not on the iOS
+        // side. Route the tap through the same handler the on-screen keys use
+        // so it consumes the armed modifiers (arrows, chars) and toggles them
+        // (ctrl/alt/shift) — otherwise a modifier armed in the bar is silently
+        // dropped when the next key comes from the iOS custom keyboard. A
+        // future shell that resolves modifiers itself can pass `mods` to
+        // bypass the bar's sticky state.
+        if (mods) {
+          onActionRef.current(action, mods);
+          return;
+        }
+        runKeyBehaviorRef.current(
+          action,
+          action.kind === 'send-virtual' || action.kind === 'send-char',
+        );
       };
       return () => {
         bridge.onKeyAction = () => {};
@@ -267,40 +285,41 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
       updateModifiers({ ...modifiersRef.current, [modifier]: !modifiersRef.current[modifier] });
     }, [updateModifiers]);
 
+    // Run a key's behavior, shared by on-screen softkey taps and iOS
+    // native-keyboard taps routed through the bridge. `consumesModifiers`
+    // mirrors the KeySpec flag — send-virtual / send-char pull in the bar's
+    // sticky ctrl/alt/shift, everything else doesn't.
+    const runKeyBehavior = useCallback((behavior: KeyBehavior, consumesModifiers: boolean) => {
+      switch (behavior.kind) {
+        case 'toggle-modifier':
+          handleToggleModifier(behavior.modifier);
+          return;
+        case 'paste':
+          onPaste();
+          return;
+        case 'file-upload':
+          onFileUpload();
+          return;
+        case 'batch-input-toggle':
+          onBatchInputToggle();
+          return;
+        case 'meter-toggle':
+          onMeterToggle();
+          return;
+        case 'container-toggle':
+          onContainerToggle(behavior.containerId);
+          return;
+        default: {
+          const mods = consumesModifiers ? consumeModifiers() : emptyModifiers();
+          onAction(behavior, mods);
+        }
+      }
+    }, [consumeModifiers, handleToggleModifier, onAction, onPaste, onFileUpload, onBatchInputToggle, onMeterToggle, onContainerToggle]);
+    runKeyBehaviorRef.current = runKeyBehavior;
+
     const handleKeyPress = useCallback((keySpec: KeySpec) => {
-      if (keySpec.behavior.kind === 'toggle-modifier') {
-        handleToggleModifier(keySpec.behavior.modifier);
-        return;
-      }
-
-      if (keySpec.behavior.kind === 'paste') {
-        onPaste();
-        return;
-      }
-
-      if (keySpec.behavior.kind === 'file-upload') {
-        onFileUpload();
-        return;
-      }
-
-      if (keySpec.behavior.kind === 'batch-input-toggle') {
-        onBatchInputToggle();
-        return;
-      }
-
-      if (keySpec.behavior.kind === 'meter-toggle') {
-        onMeterToggle();
-        return;
-      }
-
-      if (keySpec.behavior.kind === 'container-toggle') {
-        onContainerToggle(keySpec.behavior.containerId);
-        return;
-      }
-
-      const mods = keySpec.consumesModifiers ? consumeModifiers() : emptyModifiers();
-      onAction(keySpec.behavior, mods);
-    }, [consumeModifiers, handleToggleModifier, onAction, onPaste, onFileUpload, onBatchInputToggle, onContainerToggle]);
+      runKeyBehavior(keySpec.behavior, keySpec.consumesModifiers);
+    }, [runKeyBehavior]);
 
     const nextPage = useCallback(() => {
       if (pages.length <= 1) return;
