@@ -223,7 +223,23 @@ export const DEFAULT_MOBILE_PAGES: string[][] = [
   ['esc', 'ctrl', 'alt', 'shift', 'tab', 'batch_input', 'extra', 'paste', 'upload'],
 ];
 
-export const DEFAULT_DESKTOP_PAGES: string[][] = [['system_meter', 'upload', 'inline_input']];
+export const DEFAULT_DESKTOP_CUSTOM_KEYS: SoftkeyCustomKeySpec[] = [
+  { id: 'ctrl_w', label: 'C-w', combo: ['Ctrl+w'] },
+  { id: 'ctrl_r', label: 'C-r', combo: ['Ctrl+r'] },
+  { id: 'ctrl_t', label: 'C-t', combo: ['Ctrl+t'] },
+  { id: 'ctrl_n', label: 'C-n', combo: ['Ctrl+n'] },
+  { id: 'ctrl_l', label: 'C-l', combo: ['Ctrl+l'] },
+  { id: 'ctrl_d', label: 'C-d', combo: ['Ctrl+d'] },
+  { id: 'ctrl_f', label: 'C-f', combo: ['Ctrl+f'] },
+  { id: 'ctrl_u', label: 'C-u', combo: ['Ctrl+u'] },
+  { id: 'ctrl_k', label: 'C-k', combo: ['Ctrl+k'] },
+];
+
+export const DEFAULT_DESKTOP_PAGES: string[][] = [[
+  'ctrl', 'alt', 'shift',
+  'ctrl_w', 'ctrl_r', 'ctrl_t', 'ctrl_n', 'ctrl_l', 'ctrl_d', 'ctrl_f', 'ctrl_u', 'ctrl_k',
+  'system_meter', 'upload',
+]];
 
 // --- Key ID validation ---
 

@@ -1,7 +1,7 @@
 import { DEFAULT_GESTURE_MAPPING } from './gesture-types';
 import {
   DEFAULT_MOBILE_PAGES, DEFAULT_MOBILE_CUSTOM_KEYS, DEFAULT_MOBILE_CONTAINERS,
-  DEFAULT_DESKTOP_PAGES,
+  DEFAULT_DESKTOP_PAGES, DEFAULT_DESKTOP_CUSTOM_KEYS,
 } from './softkey-types';
 import {
   isProfile, isProfileName,
@@ -39,9 +39,9 @@ export const DEFAULT_DESKTOP_PROFILE: Profile = {
   scrollback: DEFAULT_SCROLLBACK,
   padding: 4,
   softkeySize: 44,
-  softkeys: { pages: DEFAULT_DESKTOP_PAGES.map(p => [...p]), customKeys: [], containers: [] },
+  softkeys: { pages: DEFAULT_DESKTOP_PAGES.map(p => [...p]), customKeys: [...DEFAULT_DESKTOP_CUSTOM_KEYS], containers: [] },
   softkeySettings: { ...DEFAULT_SOFTKEY_SETTINGS },
-  sessionSwitcherHotkey: 'Ctrl+Shift+s',
+  sessionSwitcherHotkey: 'Ctrl+Shift+q',
   copyHotkey: 'default',
   pasteHotkey: 'default',
   imagePasteDir: 'tmp',
@@ -64,7 +64,7 @@ export const DEFAULT_MOBILE_PROFILE: Profile = {
   softkeys: { pages: DEFAULT_MOBILE_PAGES.map(p => [...p]), customKeys: [...DEFAULT_MOBILE_CUSTOM_KEYS], containers: [...DEFAULT_MOBILE_CONTAINERS] },
   gestures: { ...DEFAULT_GESTURE_MAPPING },
   softkeySettings: { ...DEFAULT_SOFTKEY_SETTINGS },
-  sessionSwitcherHotkey: 'Ctrl+Shift+s',
+  sessionSwitcherHotkey: 'Ctrl+Shift+q',
   copyHotkey: 'default',
   pasteHotkey: 'default',
   imagePasteDir: 'tmp',
