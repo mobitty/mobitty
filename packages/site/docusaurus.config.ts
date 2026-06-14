@@ -176,6 +176,11 @@ const config: Config = {
           label: 'Docs',
         },
         {
+          to: '/ios',
+          label: 'iOS',
+          position: 'right',
+        },
+        {
           to: '/pricing',
           label: 'Pricing',
           position: 'right',
