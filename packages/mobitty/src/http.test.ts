@@ -105,7 +105,7 @@ describe('security headers', () => {
     const req = mockReq('/api/profiles');
     const res = mockRes();
     handleHttpRequest(req, res, stubProfileStore, stubThemeStore, stubShellStore, stubRegistry);
-    assert.equal(res._headers.get('content-security-policy'), "default-src 'self'; connect-src 'self' ws: wss:; style-src 'self'");
+    assert.equal(res._headers.get('content-security-policy'), "default-src 'self'; img-src 'self' data:; connect-src 'self' ws: wss:; style-src 'self'");
   });
 
   it('sets X-Frame-Options DENY', () => {
@@ -126,7 +126,7 @@ describe('security headers', () => {
     const req = mockReq('/nonexistent-path');
     const res = mockRes();
     handleHttpRequest(req, res, stubProfileStore, stubThemeStore, stubShellStore, stubRegistry);
-    assert.equal(res._headers.get('content-security-policy'), "default-src 'self'; connect-src 'self' ws: wss:; style-src 'self'");
+    assert.equal(res._headers.get('content-security-policy'), "default-src 'self'; img-src 'self' data:; connect-src 'self' ws: wss:; style-src 'self'");
     assert.equal(res._headers.get('x-frame-options'), 'DENY');
     assert.equal(res._headers.get('x-content-type-options'), 'nosniff');
   });

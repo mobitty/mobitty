@@ -223,7 +223,7 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
   const pathname = new URL(url, 'http://localhost').pathname;
 
   // Security headers — applied to all HTTP responses
-  res.setHeader('Content-Security-Policy', "default-src 'self'; connect-src 'self' ws: wss:; style-src 'self'");
+  res.setHeader('Content-Security-Policy', "default-src 'self'; img-src 'self' data:; connect-src 'self' ws: wss:; style-src 'self'");
   res.setHeader('X-Frame-Options', 'DENY');
   res.setHeader('X-Content-Type-Options', 'nosniff');
 
