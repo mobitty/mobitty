@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import Layout from '@theme/Layout';
 
-const APP_STORE_URL = ''; // fill in once the listing is live
+const APP_STORE_URL = 'https://apps.apple.com/us/app/mobitty/id6762313878';
 
 export default function IOS(): ReactNode {
   return (

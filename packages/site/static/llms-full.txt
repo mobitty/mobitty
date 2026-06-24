@@ -94,7 +94,7 @@ Options for secure remote access:
 
 ## iOS App
 
-A native iOS shell over the same web client. Available on iOS 17+ via TestFlight and the App Store.
+A native iOS shell over the same web client. Available on iOS 17+ on the App Store: https://apps.apple.com/us/app/mobitty/id6762313878
 
 Adds to the browser experience:
 - Native on-screen terminal keyboard with built-in Readline, Tmux, Vim, and Claude Code layouts plus an in-place drag-arrange customizer (define your own layouts on a real grid that doesn't reflow across orientations).

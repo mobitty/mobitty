@@ -12,7 +12,7 @@ real on-screen terminal keyboard, multi-server connection rotation,
 3-finger and edge-swipe gestures, and a touch-friendly selection layer
 with a magnifying loupe.
 
-Available on iOS 17+. Distributed via TestFlight and the App Store.
+Available on iOS 17+. [Download on the App Store](https://apps.apple.com/us/app/mobitty/id6762313878).
 
 ## Sessions and shells
 
