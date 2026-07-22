@@ -1,2 +1,8 @@
 packages:
   - 'packages/*'
+
+# Packages allowed to run install/build lifecycle scripts (native builds).
+# pnpm 10+ reads this from pnpm-workspace.yaml, not the package.json "pnpm" field.
+onlyBuiltDependencies:
+  - esbuild
+  - node-pty

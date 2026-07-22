@@ -22,11 +22,5 @@
     "release": "pnpm --filter @mobitty/build release",
     "site:dev": "pnpm --filter @mobitty/site start",
     "site:build": "pnpm --filter @mobitty/site build"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "esbuild",
-      "node-pty"
-    ]
   }
 }
