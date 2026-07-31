@@ -422,6 +422,7 @@ export class TerminalCore {
     this.registerKeyInterceptor();
     this.registerNativePasteImageHandler();
     this.registerOsc52Handler();
+    this.registerMouseEncodingLogging();
     this.syncPageBackground();
     fitAddon.fit();
 
@@ -1223,6 +1224,35 @@ export class TerminalCore {
       }
       void this.writeClipboardFromTui(text);
       return true;
+    }));
+  }
+
+  /** Passive observer that logs the mouse ENCODING DECSET/DECRSTs
+   *  (1005 UTF-8 / 1006 SGR / 1015 urxvt / 1016 SGR-pixels) the server sends,
+   *  to confirm the encoding now round-trips end-to-end. Before the server-side
+   *  fix, `\x1b[?1006h` never reached the client, so mouse-mode TUIs like
+   *  Copilot CLI garbled on mouse move (client stuck on default X10 encoding).
+   *  Handlers return false so xterm's own mode processing still runs. See
+   *  docs/done-bug-copilot-mouse-sgr-encoding-not-serialized.md. */
+  private registerMouseEncodingLogging(): void {
+    const parser = this.terminal.parser;
+    this.registerTerminal(parser.registerCsiHandler({ prefix: '?', final: 'h' }, (params) => {
+      for (const p of params) {
+        if (p === 1005 || p === 1006 || p === 1015 || p === 1016) {
+          this.logger.debug('mouse-encoding-set', { mode: p });
+          break;
+        }
+      }
+      return false;
+    }));
+    this.registerTerminal(parser.registerCsiHandler({ prefix: '?', final: 'l' }, (params) => {
+      for (const p of params) {
+        if (p === 1005 || p === 1006 || p === 1015 || p === 1016) {
+          this.logger.debug('mouse-encoding-reset', { mode: p });
+          break;
+        }
+      }
+      return false;
     }));
   }
 
