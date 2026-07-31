@@ -611,7 +611,7 @@ export function App() {
           mount here so their `absolute inset-0` is scoped to the terminal
           frame — below the safe-area band #root reserves via
           padding-top: env(safe-area-inset-top), above the softkey bar. */}
-      <div className="flex-1 min-h-0 overflow-hidden relative">
+      <div className="flex-1 min-h-0 relative terminal-frame">
         {!pendingShellSelection && (
           <XtermTerminal
             ref={terminalRef}

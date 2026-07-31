@@ -428,9 +428,13 @@ export class TerminalCore {
     const observer = new ResizeObserver(() => {
       if (document.hidden) return;
       this.fitAddon.fit();
+      // Container shrank (soft keyboard, rotation, softkey-bar change) — make
+      // sure the helper textarea didn't get stranded below the new bottom.
+      this.clampHelperTextarea();
     });
     observer.observe(parent);
-    this.registerTerminal({ dispose: () => observer.disconnect() });
+    this.registerTerminal({ dispose: () => { observer.disconnect(); } });
+    this.registerTerminal(terminal.onResize(() => this.clampHelperTextarea()));
     this.registerRendererVisibility();
     this.registerGestureDetection();
     this.registerTerminal(terminal.onTitleChange(data => {
@@ -1096,6 +1100,35 @@ export class TerminalCore {
     const pasteStr = resolveHotkey(profile.pasteHotkey, 'paste', os);
     this.copyCombo = copyStr === null ? null : parseComboString(copyStr);
     this.pasteCombo = pasteStr === null ? null : parseComboString(pasteStr);
+  }
+
+  /** Keep xterm's hidden helper textarea inside the terminal's visible area.
+   *
+   *  xterm parks the textarea on the cursor cell (`top = cursorRow *
+   *  cellHeight`) in `_syncTextArea()`, which only runs on **cursor move** and
+   *  returns early while an IME composition is active — iOS soft keyboards
+   *  compose constantly, and an interrupted composition (no `compositionend`)
+   *  blocks it until a page reload. `onResize` never repositions it at all.
+   *  So shrinking the terminal (soft keyboard opening: 63 rows -> 27) can
+   *  strand the textarea far below the new bottom edge. Being absolutely
+   *  positioned it then makes `.xterm` overflow its frame, turning the frame
+   *  into a scroll container that the browser's Space page-scroll default
+   *  (never cancelled on the iOS soft-keyboard input path) scrolls to its max
+   *  — jumping the terminal a full screen and hiding the prompt.
+   *  See docs/todo-bug-ios-pwa-space-scrolls-terminal.md. */
+  private clampHelperTextarea(): void {
+    const ta = this.terminal?.textarea;
+    const el = this.terminal?.element;
+    if (!ta || !el) return;
+    const cellHeight = ta.offsetHeight;
+    if (cellHeight <= 0) return;
+    const maxTop = el.clientHeight - cellHeight;
+    if (maxTop < 0 || ta.offsetTop <= maxTop) return;
+    // Mirror xterm's own math so the textarea lands where the next
+    // _syncTextArea() would put it (verified against captured geometry:
+    // top === cursorY * cellHeight in the healthy state).
+    const wanted = (this.terminal?.buffer.active.cursorY ?? 0) * cellHeight;
+    ta.style.top = `${Math.max(0, Math.min(wanted, maxTop))}px`;
   }
 
   private registerKeyInterceptor() {

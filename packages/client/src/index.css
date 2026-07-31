@@ -129,6 +129,22 @@ html, body {
   padding-top: env(safe-area-inset-top);
 }
 
+/* Terminal frame: clip, never hidden.
+   `overflow: hidden` still creates a *scroll container* — one the browser can
+   scroll programmatically even though the user can't drag it. So a stray
+   absolutely-positioned descendant (xterm's helper textarea stranded below the
+   fold after a soft-keyboard resize) makes the frame scrollable, and the Space
+   key's page-scroll default — which xterm never cancels on the iOS soft-keyboard
+   input path — shoves the terminal a full screen out of view.
+   `overflow: clip` clips identically but creates no scroll container at all, so
+   there is nothing for any key or scroll-into-view to scroll. The `hidden` line
+   above it is the fallback for Safari < 16.
+   See docs/todo-bug-ios-pwa-space-scrolls-terminal.md */
+.terminal-frame {
+  overflow: hidden;
+  overflow: clip;
+}
+
 /* xterm overrides */
 .xterm .xterm-helper-textarea {
   caret-color: transparent !important;
