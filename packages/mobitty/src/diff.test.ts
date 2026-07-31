@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import headlessPkg from '@xterm/headless';
 const { Terminal } = headlessPkg;
 import { blankSnapshot, captureSnapshot, generateDiff, serializeFullState, compareSnapshots } from './diff.ts';
+import { trackMouseEncoding } from './mouse-encoding.ts';
 
 describe('blankSnapshot', () => {
   it('creates correct dimensions and defaults', () => {
@@ -377,6 +378,76 @@ describe('serializeFullState', () => {
 
     src.dispose();
     dst.dispose();
+  });
+
+  it('trackMouseEncoding follows encoding DECSET/DECRST and resets', async () => {
+    const term = new Terminal({ cols: 40, rows: 5, allowProposedApi: true });
+    const tracker = trackMouseEncoding(term);
+    assert.equal(tracker.encoding, 'default', 'default (X10) encoding initially');
+
+    await writeAndWait(term, '\x1b[?1006h');
+    assert.equal(tracker.encoding, 'sgr', 'SGR after ?1006h');
+
+    await writeAndWait(term, '\x1b[?1006l');
+    assert.equal(tracker.encoding, 'default', 'back to default after ?1006l');
+
+    await writeAndWait(term, '\x1b[?1005h');
+    assert.equal(tracker.encoding, 'utf8', 'UTF-8 after ?1005h');
+
+    await writeAndWait(term, '\x1bc'); // RIS
+    assert.equal(tracker.encoding, 'default', 'RIS resets encoding to default');
+
+    tracker.dispose();
+    term.dispose();
+  });
+
+  it('serializes SGR mouse encoding so it survives a STATE_FULL round-trip', async () => {
+    // Mirrors the client STATE_FULL reset prefix (terminal-core.ts). It clears
+    // 1006 before the snapshot; the snapshot must re-emit ?1006h or the client
+    // falls back to X10 while the TUI expects SGR (the Copilot garble bug).
+    const FULL_PREFIX =
+      '\x1b[?1049l' +
+      '\x1b[?9l\x1b[?1000l\x1b[?1002l\x1b[?1003l' +
+      '\x1b[?1004l' +
+      '\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?1016l' +
+      '\x1b[?2004l' +
+      '\x1b[3J';
+    // Source: a TUI (e.g. Copilot CLI) enables any-motion tracking + SGR encoding.
+    const src = new Terminal({ cols: 40, rows: 5, allowProposedApi: true });
+    const srcTracker = trackMouseEncoding(src);
+    await writeAndWait(src, '\x1b[?1003h\x1b[?1006h');
+    assert.equal(srcTracker.encoding, 'sgr', 'precondition: source tracked SGR');
+
+    const vt = serializeFullState(src, '', false, srcTracker.encoding);
+    assert.ok(vt.includes('\x1b[?1006h'), 'full snapshot must re-emit SGR encoding');
+    assert.ok(vt.includes('\x1b[?1003h'), 'full snapshot must re-emit any-motion tracking');
+
+    // Client applies the reset prefix (clears 1006) then the snapshot restores it.
+    const dst = new Terminal({ cols: 40, rows: 5, allowProposedApi: true });
+    const dstTracker = trackMouseEncoding(dst);
+    await writeAndWait(dst, FULL_PREFIX + vt);
+    assert.equal(dstTracker.encoding, 'sgr', 'client ends in SGR after reset-then-restore');
+    assert.equal(dst.modes.mouseTrackingMode, 'any', 'client tracking restored');
+
+    srcTracker.dispose();
+    dstTracker.dispose();
+    src.dispose();
+    dst.dispose();
+  });
+
+  it('emits mouse encoding transitions in STATE_UPDATE diffs', () => {
+    const prev = blankSnapshot(80, 24);
+    const curr = blankSnapshot(80, 24);
+    curr.modes.mouseEncoding = 'sgr';
+    const setDiff = generateDiff(prev, curr);
+    assert.ok(setDiff !== null);
+    assert.ok(setDiff.includes('\x1b[?1006h'), 'enabling SGR should emit ?1006h');
+
+    const back = blankSnapshot(80, 24);
+    back.modes.mouseEncoding = 'default';
+    const resetDiff = generateDiff(curr, back);
+    assert.ok(resetDiff !== null);
+    assert.ok(resetDiff.includes('\x1b[?1006l'), 'disabling SGR should emit ?1006l');
   });
 
   it('preserves wrapped-line groups across replay', async () => {

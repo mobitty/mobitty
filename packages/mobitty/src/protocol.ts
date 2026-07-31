@@ -129,7 +129,8 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
     // Send STATE_FULL immediately on attach
     const title = registry.getTitle(sid);
     const cursorHidden = registry.getCursorHidden(sid);
-    const vtFull = serializeFullState(headless, title, cursorHidden);
+    const mouseEncoding = registry.getMouseEncoding(sid);
+    const vtFull = serializeFullState(headless, title, cursorHidden, mouseEncoding);
     socketLogger.info('state-full sent', {
       stats: bufferStats(headless),
       samples: sampleBufferLines(headless, 4, 60),
@@ -138,7 +139,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       payload: summarizeBytes(vtFull, 200),
     });
     ws.send(Buffer.from(String.fromCharCode(STATE_FULL) + vtFull));
-    lastSnapshot = captureSnapshot(headless, title, cursorHidden, registry.getScrollCount(sid));
+    lastSnapshot = captureSnapshot(headless, title, cursorHidden, registry.getScrollCount(sid), mouseEncoding);
 
     // --- Verification terminal (when MOBITTY_VERIFY_DIFF=1) ---
     let verifyTerm: InstanceType<typeof HeadlessTerminal> | null = null;
@@ -163,7 +164,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
     function runVerifyComparison(expectedSnapshot: FrameSnapshot): void {
       if (!verifyTerm || !socketLogger) return;
 
-      const verifySnapshot = captureSnapshot(verifyTerm, expectedSnapshot.title, expectedSnapshot.cursorHidden, 0);
+      const verifySnapshot = captureSnapshot(verifyTerm, expectedSnapshot.title, expectedSnapshot.cursorHidden, 0, expectedSnapshot.modes.mouseEncoding);
       const mismatches = compareSnapshots(expectedSnapshot, verifySnapshot, 20);
 
       if (mismatches.length > 0) {
@@ -181,9 +182,10 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         if (h && ws.readyState === 1) {
           const t = registry.getTitle(sid);
           const ch = registry.getCursorHidden(sid);
-          const healVt = serializeFullState(h, t, ch);
+          const enc = registry.getMouseEncoding(sid);
+          const healVt = serializeFullState(h, t, ch, enc);
           ws.send(Buffer.from(String.fromCharCode(STATE_FULL) + healVt));
-          lastSnapshot = captureSnapshot(h, t, ch, registry.getScrollCount(sid));
+          lastSnapshot = captureSnapshot(h, t, ch, registry.getScrollCount(sid), enc);
           verifyTerm.write('\x1b[3J' + healVt);
         }
       }
@@ -205,20 +207,21 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       if (!h) { stopSync(); return; }
 
       const ch = registry.getCursorHidden(sid);
-      const curr = captureSnapshot(h, t, ch, registry.getScrollCount(sid));
+      const enc = registry.getMouseEncoding(sid);
+      const curr = captureSnapshot(h, t, ch, registry.getScrollCount(sid), enc);
       const prevSnapshot = lastSnapshot;
 
       let vtPayload = '';
       let wasFull = false;
 
       if (!prevSnapshot || curr.bufferType !== prevSnapshot.bufferType) {
-        vtPayload = serializeFullState(h, t, ch);
+        vtPayload = serializeFullState(h, t, ch, enc);
         ws.send(Buffer.from(String.fromCharCode(STATE_FULL) + vtPayload));
         wasFull = true;
       } else {
         const diff = generateDiff(prevSnapshot, curr);
         if (diff === null) {
-          vtPayload = serializeFullState(h, t, ch);
+          vtPayload = serializeFullState(h, t, ch, enc);
           ws.send(Buffer.from(String.fromCharCode(STATE_FULL) + vtPayload));
           wasFull = true;
         } else if (diff !== '') {

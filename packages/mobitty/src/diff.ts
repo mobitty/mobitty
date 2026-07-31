@@ -42,12 +42,20 @@ function readUriForUrlId(terminal: Terminal, urlId: number): string | undefined 
   return (terminal as unknown as InternalTerminal)._core?._oscLinkService?.getLinkData(urlId)?.uri;
 }
 
+// Mouse report encoding (DEC private modes 1005/1006/1015/1016). xterm.js's
+// public `terminal.modes` does NOT expose this, so it can't be read the way
+// `mouseTrackingMode` is — it's tracked out-of-band by `mouse-encoding.ts` and
+// threaded in. 'default' is the legacy X10 encoding. See
+// docs/done-bug-copilot-mouse-sgr-encoding-not-serialized.md.
+export type MouseEncoding = 'default' | 'utf8' | 'sgr' | 'urxvt' | 'sgr-pixels';
+
 interface TerminalModes {
   applicationCursorKeysMode: boolean;
   applicationKeypadMode: boolean;
   bracketedPasteMode: boolean;
   insertMode: boolean;
   mouseTrackingMode: 'none' | 'x10' | 'vt200' | 'drag' | 'any';
+  mouseEncoding: MouseEncoding;
   originMode: boolean;
   reverseWraparoundMode: boolean;
   sendFocusMode: boolean;
@@ -101,6 +109,7 @@ function defaultModes(): TerminalModes {
     bracketedPasteMode: false,
     insertMode: false,
     mouseTrackingMode: 'none',
+    mouseEncoding: 'default',
     originMode: false,
     reverseWraparoundMode: false,
     sendFocusMode: false,
@@ -108,7 +117,7 @@ function defaultModes(): TerminalModes {
   };
 }
 
-function readModes(terminal: Terminal): TerminalModes {
+function readModes(terminal: Terminal, mouseEncoding: MouseEncoding = 'default'): TerminalModes {
   const m = terminal.modes;
   const mouseMap: Record<string, TerminalModes['mouseTrackingMode']> = {
     none: 'none', x10: 'x10', vt200: 'vt200', drag: 'drag', any: 'any',
@@ -119,6 +128,7 @@ function readModes(terminal: Terminal): TerminalModes {
     bracketedPasteMode: m.bracketedPasteMode,
     insertMode: m.insertMode,
     mouseTrackingMode: mouseMap[m.mouseTrackingMode] ?? 'none',
+    mouseEncoding,
     originMode: m.originMode,
     reverseWraparoundMode: m.reverseWraparoundMode,
     sendFocusMode: m.sendFocusMode,
@@ -126,7 +136,7 @@ function readModes(terminal: Terminal): TerminalModes {
   };
 }
 
-export function captureSnapshot(terminal: Terminal, title: string, cursorHidden: boolean, scrollCount: number): FrameSnapshot {
+export function captureSnapshot(terminal: Terminal, title: string, cursorHidden: boolean, scrollCount: number, mouseEncoding: MouseEncoding = 'default'): FrameSnapshot {
   const buf = terminal.buffer.active;
   const cols = terminal.cols;
   const rows = terminal.rows;
@@ -183,7 +193,7 @@ export function captureSnapshot(terminal: Terminal, title: string, cursorHidden:
     baseY,
     scrollCount,
     title,
-    modes: readModes(terminal),
+    modes: readModes(terminal, mouseEncoding),
     urlIdToUri,
   };
 }
@@ -295,6 +305,19 @@ function emitModeChanges(prev: TerminalModes, curr: TerminalModes): string {
     const oldCode = mouseOff[prev.mouseTrackingMode];
     if (oldCode) out += `\x1b[?${oldCode}l`;
     const newCode = mouseOff[curr.mouseTrackingMode];
+    if (newCode) out += `\x1b[?${newCode}h`;
+  }
+
+  // Mouse report encoding (SGR/UTF-8/urxvt/SGR-pixels). Not exposed on
+  // terminal.modes, so tracked out-of-band and diffed here — without this a
+  // TUI's `\x1b[?1006h` (e.g. Copilot CLI) never reaches the client and its
+  // mouse reports arrive as garbled X10 bytes. See
+  // docs/done-bug-copilot-mouse-sgr-encoding-not-serialized.md.
+  if (prev.mouseEncoding !== curr.mouseEncoding) {
+    const encCode: Record<string, number> = { utf8: 1005, sgr: 1006, urxvt: 1015, 'sgr-pixels': 1016 };
+    const oldCode = encCode[prev.mouseEncoding];
+    if (oldCode) out += `\x1b[?${oldCode}l`;
+    const newCode = encCode[curr.mouseEncoding];
     if (newCode) out += `\x1b[?${newCode}h`;
   }
 
@@ -646,6 +669,12 @@ function serializeModes(modes: TerminalModes): string {
     case 'drag': out += '\x1b[?1002h'; break;
     case 'any': out += '\x1b[?1003h'; break;
   }
+  switch (modes.mouseEncoding) {
+    case 'utf8': out += '\x1b[?1005h'; break;
+    case 'sgr': out += '\x1b[?1006h'; break;
+    case 'urxvt': out += '\x1b[?1015h'; break;
+    case 'sgr-pixels': out += '\x1b[?1016h'; break;
+  }
   return out;
 }
 
@@ -654,7 +683,7 @@ function serializeModes(modes: TerminalModes): string {
 // previous `@xterm/addon-serialize`-based path (`addon-serialize` 0.14 has no
 // OSC 8 support — markdown URLs from Claude Code lost their link attribute
 // before reaching the client; only the underline + color survived).
-export function serializeFullState(terminal: Terminal, title: string, cursorHidden: boolean): string {
+export function serializeFullState(terminal: Terminal, title: string, cursorHidden: boolean, mouseEncoding: MouseEncoding = 'default'): string {
   // Hide cursor for the duration of the client's write to prevent flicker.
   // Reset SGR + clear screen + home cursor before the buffer payload so the
   // client starts from a known-clean slate. SGR reset MUST precede `\x1b[2J`:
@@ -676,7 +705,7 @@ export function serializeFullState(terminal: Terminal, title: string, cursorHidd
     out += serializeBufferOf(terminal, terminal.buffer.active, /* isAlt */ false);
   }
 
-  out += serializeModes(readModes(terminal));
+  out += serializeModes(readModes(terminal, mouseEncoding));
 
   const buf = terminal.buffer.active;
   const cursorRow = buf.cursorY + 1;

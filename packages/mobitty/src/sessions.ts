@@ -12,6 +12,8 @@ import serializePkg from '@xterm/addon-serialize';
 const { SerializeAddon } = serializePkg;
 import { trackCursorVisibility } from './cursor-visibility.ts';
 import type { CursorVisibilityTracker } from './cursor-visibility.ts';
+import { trackMouseEncoding } from './mouse-encoding.ts';
+import type { MouseEncodingTracker } from './mouse-encoding.ts';
 import { registerNotificationHandlers } from './osc-notifications.ts';
 import { registerCwdHandler } from './osc-cwd.ts';
 import { registerColorQueryHandlers } from './osc-color-query.ts';
@@ -19,6 +21,7 @@ import type { OscColorQueryTracker, OscColorConfig } from './osc-color-query.ts'
 import { BUILTIN_THEMES } from './themes.ts';
 import { normalizeSgrColors } from './sgr-normalize.ts';
 import { bufferStats, summarizeBytes, sampleBufferLines, sampleAltBuffer, detectLineRepetition } from './diff.ts';
+import type { MouseEncoding } from './diff.ts';
 import { getProcessCwd } from './clipboard.ts';
 
 const HOME = homedir();
@@ -37,6 +40,7 @@ interface SessionEntry {
   serializeAddon: InstanceType<typeof SerializeAddon> | null;
   cursorTracker: CursorVisibilityTracker | null;
   colorTracker: OscColorQueryTracker | null;
+  mouseEncodingTracker: MouseEncodingTracker | null;
   title: string;
   hasAlert: boolean;
   /** Last-known absolute CWD reported via OSC 7. Empty until a shell reports it. */
@@ -134,6 +138,7 @@ export class SessionRegistry {
         serializeAddon: null,
         cursorTracker: null,
         colorTracker: null,
+        mouseEncodingTracker: null,
         title: '',
         hasAlert: false,
         reportedCwd: '',
@@ -206,6 +211,19 @@ export class SessionRegistry {
     };
 
     const cursorTracker = trackCursorVisibility(headless, notifyChange);
+
+    // Mouse report encoding isn't on xterm's public `terminal.modes`, so the
+    // diff/serialize layer can't read it — track it here and thread it into
+    // captureSnapshot/serializeFullState via getMouseEncoding(). Without this a
+    // TUI's SGR mouse mode (`\x1b[?1006h`, e.g. Copilot CLI) never reaches the
+    // client and mouse-move reports arrive as garbled X10 bytes. See
+    // docs/done-bug-copilot-mouse-sgr-encoding-not-serialized.md.
+    const mouseEncodingTracker = trackMouseEncoding(headless, (encoding) => {
+      if (this.logger.isEnabled('debug')) {
+        this.logger.debug('mouse-encoding-change', { sessionId, encoding });
+      }
+      notifyChange();
+    });
 
     headless.onCursorMove(notifyChange);
     headless.onLineFeed(notifyChange);
@@ -299,6 +317,7 @@ export class SessionRegistry {
       serializeAddon,
       cursorTracker,
       colorTracker,
+      mouseEncodingTracker,
       title,
       hasAlert: false,
       reportedCwd: '',
@@ -373,6 +392,10 @@ export class SessionRegistry {
     return this.sessions.get(sessionId)?.cursorTracker?.cursorHidden ?? false;
   }
 
+  getMouseEncoding(sessionId: string): MouseEncoding {
+    return this.sessions.get(sessionId)?.mouseEncodingTracker?.encoding ?? 'default';
+  }
+
   updateSessionThemeColors(sessionId: string, fg: string, bg: string): void {
     const entry = this.sessions.get(sessionId);
     entry?.colorTracker?.updateColors(fg, bg, fg);
@@ -443,6 +466,10 @@ export class SessionRegistry {
       entry.colorTracker.dispose();
       entry.colorTracker = null;
     }
+    if (entry.mouseEncodingTracker) {
+      entry.mouseEncodingTracker.dispose();
+      entry.mouseEncodingTracker = null;
+    }
     if (entry.serializeAddon) {
       entry.serializeAddon.dispose();
       entry.serializeAddon = null;
@@ -472,6 +499,10 @@ export class SessionRegistry {
       if (entry.colorTracker) {
         entry.colorTracker.dispose();
         entry.colorTracker = null;
+      }
+      if (entry.mouseEncodingTracker) {
+        entry.mouseEncodingTracker.dispose();
+        entry.mouseEncodingTracker = null;
       }
       if (entry.serializeAddon) {
         entry.serializeAddon.dispose();
