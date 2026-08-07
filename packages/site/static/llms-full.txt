@@ -204,7 +204,7 @@ Session panel: Up/Down to navigate, Enter to switch, Escape to close, N for new,
 
 Remote editor: Ctrl+S / Cmd+S to save.
 
-Clipboard: Ctrl+Shift+C copies selection (no-op if no selection), Ctrl+Shift+V pastes. On macOS, Cmd+C and Cmd+V work natively.
+Clipboard: on Windows, Ctrl+Shift+Z copies the selection (no-op if no selection) and Ctrl+Shift+X pastes; both configurable in Settings. On macOS/Linux nothing is bound by default — Cmd+C / Cmd+V and the browser's native copy/paste work.
 
 ## Gestures
 
@@ -220,12 +220,17 @@ Selection actions: select_line, select_visible, select_all — can be mapped to 
 
 ### Copying text
 - Mobile: tap and hold to start selection, drag handles to adjust, tap Copy
-- Desktop: click and drag to select, then Ctrl+Shift+C (Linux/Windows) or Cmd+C (macOS)
+- Desktop (Windows): click and drag to select, then Ctrl+Shift+Z. Ctrl+Shift+X pastes. Both configurable in Settings.
+- Desktop (macOS/Linux): no shortcut bound by default — use the browser's native copy, or Copy on Select
 - Copy on Select: enable in Settings to auto-copy on selection
+
+### Copying from full-screen apps (OSC 52)
+Programs with mouse tracking (Claude Code, vim, tmux, lazygit) own the selection themselves and do their own copying. When such a program emits OSC 52, Mobitty puts the text on the *client device's* clipboard and shows a "Copied from session" toast. tmux needs `set -g set-clipboard on`; Neovim needs `g:clipboard = 'osc52'`. Requires HTTPS or localhost (browsers block clipboard writes on plain HTTP). Clipboard *reads* via OSC 52 are refused for privacy.
 
 ### Pasting text
 - Mobile: floating edit menu, paste soft key, or native OS gesture
-- Desktop: Ctrl+Shift+V (Linux/Windows) or Cmd+V (macOS)
+- Desktop (Windows): Ctrl+Shift+X
+- Desktop (macOS/Linux): Cmd+V or Ctrl+Shift+V (native browser paste)
 
 ### Pasting images
 Paste images (screenshots, photos) directly into the terminal for AI agents. The image is either copied to the server's clipboard or saved as a file (if Image Paste Directory is configured). Supported formats: PNG, JPEG, GIF, WebP, BMP. Max size: 25 MB.

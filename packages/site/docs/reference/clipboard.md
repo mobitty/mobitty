@@ -16,11 +16,44 @@ A brief scissors icon confirms the copy succeeded.
 
 ### Desktop
 
-Click and drag to select text, then press **Ctrl+Shift+C** (Linux/Windows) or **Cmd+C** (macOS) to copy. If no text is selected, Ctrl+Shift+C is a no-op.
+Click and drag to select text, then copy with your platform's shortcut:
+
+- **Windows:** **Ctrl+Shift+Z** copies the selection and **Ctrl+Shift+X** pastes. (Browsers reserve Ctrl+C / Ctrl+Shift+C, so Mobitty binds keys they leave alone.)
+- **macOS / Linux:** no shortcut is bound by default — use your browser's native copy, or turn on Copy on Select below.
+
+If nothing is selected, the copy shortcut does nothing.
+
+Both shortcuts are configurable: **Settings → Copy Hotkey / Paste Hotkey**. Set a field to blank to unbind it.
 
 ### Copy on select
 
 You can enable **Copy on Select** in Settings so that any text you select is automatically copied to the clipboard — no extra tap or shortcut needed. This works on both mobile and desktop.
+
+### Copying from full-screen apps
+
+Programs that take over the screen and track the mouse — Claude Code, vim, tmux, lazygit — receive your click-and-drag themselves, so the selection belongs to the program, not to Mobitty. Those programs do their own copying.
+
+When such a program copies, it can hand the text to your terminal using a standard escape sequence (OSC 52). Mobitty understands it and puts the text on **your device's** clipboard, confirming with a brief *Copied from session* message. This works from any session, including one running on a remote server.
+
+Some programs need this turned on:
+
+- **tmux:** `set -g set-clipboard on`
+- **Neovim:** `let g:clipboard = 'osc52'` (see `:help clipboard-osc52`)
+- **Claude Code, lazygit:** works out of the box
+
+To check it end to end, run this inside a session — `hello` should land on your clipboard:
+
+```sh
+printf '\033]52;c;%s\a' "$(printf hello | base64)"
+```
+
+:::note
+This needs a secure page: `https://` or `localhost`. Over plain `http://` the browser blocks clipboard writes and you'll see *Copy failed* instead.
+:::
+
+Programs may also copy to the clipboard of the machine running the Mobitty server, if that machine has one. Claude Code, for example, does both. That's the program's own behavior, not something Mobitty controls.
+
+For privacy, Mobitty never lets a program *read* your clipboard this way — only write to it.
 
 ## Pasting text
 
@@ -37,7 +70,10 @@ The platform's native paste gesture still works too:
 
 ### Desktop
 
-Press **Ctrl+Shift+V** (Linux/Windows) or **Cmd+V** (macOS) to paste from the clipboard.
+- **Windows:** press **Ctrl+Shift+X**.
+- **macOS / Linux:** use your browser's native paste — **Cmd+V** or **Ctrl+Shift+V**.
+
+As with copy, the shortcut is configurable in **Settings → Paste Hotkey**.
 
 ## Pasting images
 
