@@ -29,10 +29,6 @@ export interface MobittyNativeBridge {
   // Optional: present only on iOS shells that ship the backdrop-color
   // bridge. Callers must guard with `?.()` before invoking.
   setBackdropColor?: (color: string) => void;
-  // Optional: present only on iOS shells that ship the body-bg-color
-  // bridge. The shell paints this into the top safe-area strip so the
-  // status-bar background blends with the terminal area below it.
-  setBodyBgColor?: (color: string) => void;
   registerForPush: (payload: unknown) => void;
   /// Ask the iOS shell to present its native server-management dialog.
   /// The list, edit form, and connection retry/rollback all live on the
