@@ -16,6 +16,7 @@ import { trackMouseEncoding } from './mouse-encoding.ts';
 import type { MouseEncodingTracker } from './mouse-encoding.ts';
 import { registerNotificationHandlers } from './osc-notifications.ts';
 import { registerCwdHandler } from './osc-cwd.ts';
+import { registerClipboardHandler } from './osc-clipboard.ts';
 import { registerColorQueryHandlers } from './osc-color-query.ts';
 import type { OscColorQueryTracker, OscColorConfig } from './osc-color-query.ts';
 import { BUILTIN_THEMES } from './themes.ts';
@@ -58,6 +59,10 @@ interface SessionEntry {
   } | null;
   editorSender: ((filePath: string, content: string, contentType?: string) => void) | null;
   downloadSender: ((fileName: string, fileSize: number, token: string) => void) | null;
+  /** Set by the attached connection; relays OSC 52 clipboard writes to it.
+   *  `null` text means the payload blew the size cap — the client surfaces
+   *  that rather than dropping the copy silently. */
+  clipboardSender: ((text: string | null) => void) | null;
   scrollCount: number;
 }
 
@@ -149,6 +154,7 @@ export class SessionRegistry {
         editorPending: null,
         editorSender: null,
         downloadSender: null,
+        clipboardSender: null,
         scrollCount: 0,
       });
     }
@@ -260,6 +266,25 @@ export class SessionRegistry {
       notifyChange();
     });
 
+    // OSC 52 — a program in the session asks to put text on the *user's*
+    // clipboard. Nothing downstream forwards raw PTY bytes to the browser
+    // (docs/done-design-ssp.md), so relay the decoded text to whichever client
+    // is attached. Sessions with no attached client drop it rather than
+    // hijacking the clipboard of a user looking at another session.
+    registerClipboardHandler(headless, (text) => {
+      if (!entry.clipboardSender) {
+        this.logger.debug('osc52-no-client', { sessionId, length: text.length });
+        return;
+      }
+      this.logger.debug('osc52-relay', { sessionId, length: text.length });
+      entry.clipboardSender(text);
+    }, (reason, payloadLength) => {
+      this.logger.debug('osc52-dropped', { sessionId, reason, payloadLength });
+      // Over-cap copies are the one drop worth surfacing — the user asked for
+      // a copy and would otherwise see nothing happen.
+      if (reason === 'too-large') entry.clipboardSender?.(null);
+    });
+
     // OSC 10/11/12 color query handlers — respond with the session's theme
     // colors so programs (e.g. nvim) can detect dark/light background.
     const defaultTheme = BUILTIN_THEMES.get('default-dark')!;
@@ -328,6 +353,7 @@ export class SessionRegistry {
       editorPending: null,
       editorSender: null,
       downloadSender: null,
+      clipboardSender: null,
       scrollCount: 0,
     };
 
@@ -569,9 +595,12 @@ export class SessionRegistry {
     if (entry) entry.editorSender = fn;
   }
 
-  clearEditorSender(sessionId: string): void {
+  /** Clear only if `fn` is still the registered sender. A disconnecting client
+   *  must not wipe callbacks a newer connection already registered for the
+   *  same session — its close handler can run after the reconnect's handshake. */
+  clearEditorSender(sessionId: string, fn: (filePath: string, content: string, contentType?: string) => void): void {
     const entry = this.sessions.get(sessionId);
-    if (entry) entry.editorSender = null;
+    if (entry?.editorSender === fn) entry.editorSender = null;
   }
 
   getEditorPending(sessionId: string): { filePath: string; content: string; contentType?: string } | undefined {
@@ -616,13 +645,27 @@ export class SessionRegistry {
     if (entry) entry.downloadSender = fn;
   }
 
-  clearDownloadSender(sessionId: string): void {
+  /** Clear only if `fn` is still the registered sender — see clearEditorSender. */
+  clearDownloadSender(sessionId: string, fn: (fileName: string, fileSize: number, token: string) => void): void {
     const entry = this.sessions.get(sessionId);
-    if (entry) entry.downloadSender = null;
+    if (entry?.downloadSender === fn) entry.downloadSender = null;
   }
 
   getDownloadSender(sessionId: string): ((fileName: string, fileSize: number, token: string) => void) | null {
     return this.sessions.get(sessionId)?.downloadSender ?? null;
+  }
+
+  // ── Clipboard (OSC 52) ───────────────────────────────────────────────────
+
+  setClipboardSender(sessionId: string, fn: (text: string | null) => void): void {
+    const entry = this.sessions.get(sessionId);
+    if (entry) entry.clipboardSender = fn;
+  }
+
+  /** Clear only if `fn` is still the registered sender — see clearEditorSender. */
+  clearClipboardSender(sessionId: string, fn: (text: string | null) => void): void {
+    const entry = this.sessions.get(sessionId);
+    if (entry?.clipboardSender === fn) entry.clipboardSender = null;
   }
 
   private cancelPendingEdit(entry: SessionEntry): void {

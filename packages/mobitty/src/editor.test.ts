@@ -37,8 +37,9 @@ describe('SessionRegistry editor methods', () => {
 
   it('setEditorSender / clearEditorSender are no-ops for unknown session', () => {
     // Should not throw
-    registry.setEditorSender('nonexistent', (_filePath: string, _content: string, _contentType?: string) => {});
-    registry.clearEditorSender('nonexistent');
+    const fn = (_filePath: string, _content: string, _contentType?: string) => {};
+    registry.setEditorSender('nonexistent', fn);
+    registry.clearEditorSender('nonexistent', fn);
   });
 
   it('requestEdit rejects for unknown session with contentType', async () => {
@@ -55,7 +56,8 @@ describe('SessionRegistry editor methods', () => {
 
   it('setDownloadSender / clearDownloadSender are no-ops for unknown session', () => {
     // Should not throw
-    registry.setDownloadSender('nonexistent', (_fileName: string, _fileSize: number, _token: string) => {});
-    registry.clearDownloadSender('nonexistent');
+    const fn = (_fileName: string, _fileSize: number, _token: string) => {};
+    registry.setDownloadSender('nonexistent', fn);
+    registry.clearDownloadSender('nonexistent', fn);
   });
 });

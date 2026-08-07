@@ -270,4 +270,59 @@ describe('SessionRegistry', () => {
     registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
     assert.equal(registry.aliveSessionCount(), 2);
   });
+
+  it('relays an OSC 52 clipboard write to the attached client', async () => {
+    const { info } = registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
+    const copies: Array<string | null> = [];
+    registry.setClipboardSender(info.sessionId, text => copies.push(text));
+
+    const headless = registry.getHeadless(info.sessionId)!;
+    const payload = Buffer.from('from-the-session', 'utf-8').toString('base64');
+    await new Promise<void>(resolve => { headless.write(`\x1b]52;c;${payload}\x07`, resolve); });
+
+    assert.deepEqual(copies, ['from-the-session']);
+  });
+
+  it('drops an OSC 52 write when no client is attached', async () => {
+    const { info } = registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
+    const headless = registry.getHeadless(info.sessionId)!;
+    const payload = Buffer.from('nobody-listening', 'utf-8').toString('base64');
+    // Must not throw — a background session has no sender registered.
+    await new Promise<void>(resolve => { headless.write(`\x1b]52;c;${payload}\x07`, resolve); });
+  });
+
+  it('clearing a sender is a no-op once a newer connection owns the session', async () => {
+    const { info } = registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
+
+    const oldSender = (_text: string | null) => {};
+    const fresh: Array<string | null> = [];
+    const newSender = (text: string | null) => { fresh.push(text); };
+
+    // Reconnect: the new connection registers during its handshake, then the
+    // old socket's close handler fires and tries to clear.
+    registry.setClipboardSender(info.sessionId, oldSender);
+    registry.setClipboardSender(info.sessionId, newSender);
+    registry.clearClipboardSender(info.sessionId, oldSender);
+
+    const payload = Buffer.from('still-here', 'utf-8').toString('base64');
+    const headless = registry.getHeadless(info.sessionId)!;
+    await new Promise<void>(resolve => { headless.write(`\x1b]52;c;${payload}\x07`, resolve); });
+
+    assert.deepEqual(fresh, ['still-here'], 'new connection keeps its sender');
+  });
+
+  it('clearing a sender with the owning function detaches it', async () => {
+    const { info } = registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
+    const seen: Array<string | null> = [];
+    const sender = (text: string | null) => { seen.push(text); };
+
+    registry.setClipboardSender(info.sessionId, sender);
+    registry.clearClipboardSender(info.sessionId, sender);
+
+    const payload = Buffer.from('gone', 'utf-8').toString('base64');
+    const headless = registry.getHeadless(info.sessionId)!;
+    await new Promise<void>(resolve => { headless.write(`\x1b]52;c;${payload}\x07`, resolve); });
+
+    assert.deepEqual(seen, []);
+  });
 });

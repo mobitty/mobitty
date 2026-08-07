@@ -15,6 +15,7 @@ export const SESSION_NOTIFICATION = 0x3a; // ':' — rich notification: {session
 export const EDITOR_OPEN = 0x3b;         // ';' — remote editor: open file for editing
 export const DOWNLOAD_START = 0x3c;      // '<' — file download: {fileName, fileSize, token}
 export const FILE_UPLOAD_ACK = 0x3d;     // '=' — file upload ACK: {requestId, status, savedName|errorJson}
+export const CLIPBOARD_WRITE = 0x3e;     // '>' — TUI clipboard write (OSC 52 relay): [status:1][text:utf8]
 
 // Client -> Server
 export const INPUT = 0x30;             // '0'

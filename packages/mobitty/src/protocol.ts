@@ -5,7 +5,7 @@ import {
   STATE_UPDATE, STATE_FULL,
   INPUT, RESIZE_TERMINAL, UPDATE_SETTINGS, JSON_DATA, CLIENT_LOG,
   CLIPBOARD_IMAGE, CLIPBOARD_IMAGE_ACK, RTT_REPORT, SESSION_ALERT, SESSION_NOTIFICATION,
-  EDITOR_OPEN, EDITOR_DONE, DOWNLOAD_START,
+  EDITOR_OPEN, EDITOR_DONE, DOWNLOAD_START, CLIPBOARD_WRITE,
   FILE_UPLOAD, FILE_UPLOAD_ACK,
   HEARTBEAT_INTERVAL_MS, HEARTBEAT_TIMEOUT_MS,
   isResizeMessage, isHandshakeMessage, isUpdateSettingsMessage,
@@ -74,6 +74,17 @@ function sendFileUploadAck(ws: WebSocket, requestId: number, status: number, tra
   ws.send(buf);
 }
 
+/** Relay an OSC 52 clipboard write to the browser. `text === null` means the
+ *  payload exceeded the size cap; the client toasts instead of copying. */
+function sendClipboardWrite(ws: WebSocket, text: string | null): void {
+  const textBytes = text === null ? Buffer.alloc(0) : Buffer.from(text, 'utf-8');
+  const buf = Buffer.allocUnsafe(2 + textBytes.length);
+  buf[0] = CLIPBOARD_WRITE;
+  buf[1] = text === null ? 1 : 0;
+  if (textBytes.length > 0) textBytes.copy(buf, 2);
+  ws.send(buf);
+}
+
 export function handleConnection(ws: WebSocket, req: IncomingMessage, state: ServerState, registry: SessionRegistry, shellStore: ShellStore, logger: Logger): void {
   const address = req.socket.remoteAddress ?? 'unknown';
   const socketLogger = logger.child({ address });
@@ -121,6 +132,25 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       }));
     }
   });
+
+  // Per-session senders, defined once per connection so `close` can clear them
+  // by identity. A reconnect for the same session (session switch, replaced
+  // client) registers its own senders during its handshake, which can happen
+  // *before* the old socket's close handler runs — clearing unconditionally
+  // would wipe the live connection's callbacks and silently break the remote
+  // editor, downloads and clipboard for it. Same hazard the `close` handler
+  // already documents for detachSession().
+  const editorSender = (filePath: string, content: string, contentType?: string): void => {
+    const payload: Record<string, string> = { filePath, content };
+    if (contentType) payload['contentType'] = contentType;
+    sendBinary(ws, EDITOR_OPEN, JSON.stringify(payload));
+  };
+  const downloadSender = (fileName: string, fileSize: number, token: string): void => {
+    sendBinary(ws, DOWNLOAD_START, JSON.stringify({ fileName, fileSize, token }));
+  };
+  const clipboardSender = (text: string | null): void => {
+    sendClipboardWrite(ws, text);
+  };
 
   function startSync(sid: string): void {
     const headless = registry.getHeadless(sid);
@@ -461,20 +491,17 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
             startSync(sessionId);
 
             // Register editor sender and re-send pending edit if any
-            registry.setEditorSender(sessionId, (filePath, content, contentType) => {
-              const payload: Record<string, string> = { filePath, content };
-              if (contentType) payload['contentType'] = contentType;
-              sendBinary(ws, EDITOR_OPEN, JSON.stringify(payload));
-            });
+            registry.setEditorSender(sessionId, editorSender);
             const pending = registry.getEditorPending(sessionId);
             if (pending) {
               sendBinary(ws, EDITOR_OPEN, JSON.stringify(pending));
             }
 
             // Register download sender
-            registry.setDownloadSender(sessionId, (fileName, fileSize, token) => {
-              sendBinary(ws, DOWNLOAD_START, JSON.stringify({ fileName, fileSize, token }));
-            });
+            registry.setDownloadSender(sessionId, downloadSender);
+
+            // Register clipboard sender (OSC 52 from a TUI in this session)
+            registry.setClipboardSender(sessionId, clipboardSender);
 
             lastPingSentAt = Date.now(); ws.ping();
 
@@ -532,16 +559,13 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         startSync(sessionId);
 
         // Register editor sender for newly created session
-        registry.setEditorSender(sessionId, (filePath, content, contentType) => {
-          const payload: Record<string, string> = { filePath, content };
-          if (contentType) payload['contentType'] = contentType;
-          sendBinary(ws, EDITOR_OPEN, JSON.stringify(payload));
-        });
+        registry.setEditorSender(sessionId, editorSender);
 
         // Register download sender for newly created session
-        registry.setDownloadSender(sessionId, (fileName, fileSize, token) => {
-          sendBinary(ws, DOWNLOAD_START, JSON.stringify({ fileName, fileSize, token }));
-        });
+        registry.setDownloadSender(sessionId, downloadSender);
+
+        // Register clipboard sender for newly created session
+        registry.setClipboardSender(sessionId, clipboardSender);
 
         lastPingSentAt = Date.now(); ws.ping();
 
@@ -756,8 +780,10 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
     unsubAlert();
     unsubNotification();
     if (sessionId !== null) {
-      registry.clearEditorSender(sessionId);
-      registry.clearDownloadSender(sessionId);
+      // Identity-checked: a newer connection may already own this session.
+      registry.clearEditorSender(sessionId, editorSender);
+      registry.clearDownloadSender(sessionId, downloadSender);
+      registry.clearClipboardSender(sessionId, clipboardSender);
     }
     state.clientCount--;
     socketLogger.info('WS closed', { clientCount: state.clientCount });
