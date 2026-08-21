@@ -2,7 +2,7 @@ import { writeFile, unlink, mkdir, rename } from 'node:fs/promises';
 import { readlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { execFile, execFileSync } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { randomBytes, randomUUID } from 'node:crypto';
 
 interface ClipboardWriteResult {
@@ -139,17 +139,35 @@ export async function writeImageToSystemClipboard(imageData: Buffer, mimeType: s
   }
 }
 
+/** Upper bound on the macOS `lsof` probe. `lsof` walks the whole kernel file
+ *  table regardless of `-p`, so on a busy host (thousands of processes, heavy
+ *  swap) a single call can take seconds. */
+const LSOF_TIMEOUT_MS = 5000;
+
 // Returns the cwd of `pid`, or '' if it cannot be determined on this platform.
 // Callers (sessions.ts:resolveCwd) translate '' into "hide the cwd" — we never
 // fall back to the server's own cwd, which would be a confident lie.
-export function getProcessCwd(pid: number): string {
+//
+// MUST stay async. This used to be `execFileSync`, which froze the whole event
+// loop for up to the timeout, once per session, on every connect and session
+// switch. See docs/done-bug-lsof-cwd-blocks-connect.md.
+export async function getProcessCwd(pid: number): Promise<string> {
   try {
     if (process.platform === 'linux') {
       return readlinkSync(`/proc/${pid}/cwd`);
     }
     if (process.platform === 'darwin') {
-      const out = execFileSync('lsof', ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'],
-        { timeout: 3000, encoding: 'utf-8' });
+      const out = await new Promise<string>((resolvePath, reject) => {
+        execFile(
+          'lsof',
+          ['-a', '-p', String(pid), '-d', 'cwd', '-Fn'],
+          { timeout: LSOF_TIMEOUT_MS, encoding: 'utf-8' },
+          (error, stdout) => {
+            if (error) reject(error);
+            else resolvePath(stdout);
+          },
+        );
+      });
       for (const line of out.split('\n')) {
         if (line.startsWith('n')) return line.slice(1);
       }

@@ -26,7 +26,10 @@ import type { MouseEncoding } from './diff.ts';
 import { getProcessCwd } from './clipboard.ts';
 
 const HOME = homedir();
-const CWD_FALLBACK_TTL_MS = 2000;
+/** Lifetime of a cached `getProcessCwd` result. Must comfortably exceed the
+ *  cost of the probe itself (macOS `lsof` can take seconds on a busy host),
+ *  otherwise every session-list build re-runs it. */
+const CWD_FALLBACK_TTL_MS = 30_000;
 
 interface SessionEntry {
   sessionId: string;
@@ -48,6 +51,9 @@ interface SessionEntry {
   reportedCwd: string;
   /** Cached fallback (getProcessCwd) value with expiry, used when no OSC 7 yet. */
   fallbackCwd: { value: string; expiresAt: number } | null;
+  /** True while a background getProcessCwd probe is in flight, so a burst of
+   *  session-list builds triggers at most one subprocess. */
+  fallbackCwdPending: boolean;
   onExitCallbacks: Array<() => void>;
   onDetachCallbacks: Array<() => void>;
   onChangeCallbacks: Array<() => void>;
@@ -148,6 +154,7 @@ export class SessionRegistry {
         hasAlert: false,
         reportedCwd: '',
         fallbackCwd: null,
+        fallbackCwdPending: false,
         onExitCallbacks: [],
         onDetachCallbacks: [],
         onChangeCallbacks: [],
@@ -347,6 +354,7 @@ export class SessionRegistry {
       hasAlert: false,
       reportedCwd: '',
       fallbackCwd: null,
+      fallbackCwdPending: false,
       onExitCallbacks,
       onDetachCallbacks,
       onChangeCallbacks,
@@ -675,6 +683,31 @@ export class SessionRegistry {
     }
   }
 
+  /** Kick off a background cwd probe for `entry`. Never awaited by callers —
+   *  `resolveCwd` stays synchronous and non-blocking, and the resolved value is
+   *  published to clients via the entry's change callbacks. */
+  private refreshFallbackCwd(entry: SessionEntry): void {
+    if (entry.fallbackCwdPending || !entry.alive) return;
+    entry.fallbackCwdPending = true;
+    const pid = entry.pid;
+    getProcessCwd(pid).then(
+      value => {
+        entry.fallbackCwdPending = false;
+        const previous = entry.fallbackCwd?.value ?? '';
+        entry.fallbackCwd = { value, expiresAt: Date.now() + CWD_FALLBACK_TTL_MS };
+        // Only wake clients when the answer actually changed, so a steady
+        // stream of refreshes doesn't force needless frames.
+        if (value !== previous) {
+          for (const cb of entry.onChangeCallbacks) cb();
+        }
+      },
+      () => {
+        entry.fallbackCwdPending = false;
+        entry.fallbackCwd = { value: '', expiresAt: Date.now() + CWD_FALLBACK_TTL_MS };
+      },
+    );
+  }
+
   private resolveCwd(entry: SessionEntry): string {
     let raw = entry.reportedCwd;
     if (!raw) {
@@ -682,10 +715,12 @@ export class SessionRegistry {
       const now = Date.now();
       if (cached && cached.expiresAt > now) {
         raw = cached.value;
-      } else if (entry.alive) {
-        raw = getProcessCwd(entry.pid);
-        entry.fallbackCwd = { value: raw, expiresAt: now + CWD_FALLBACK_TTL_MS };
       } else {
+        // Serve the stale value (or '') immediately and refresh out of band.
+        // This MUST NOT block: it runs once per session per session-list build,
+        // on the connect and session-switch paths.
+        // See docs/done-bug-lsof-cwd-blocks-connect.md.
+        this.refreshFallbackCwd(entry);
         raw = cached?.value ?? '';
       }
     }

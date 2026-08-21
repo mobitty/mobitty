@@ -630,7 +630,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         sendClipboardImageAck(ws, requestId, 1);
         return;
       }
-      writeImageToSystemClipboard(imageData, mimeType).then(clipResult => {
+      writeImageToSystemClipboard(imageData, mimeType).then(async clipResult => {
         if (clipResult.success) {
           sendClipboardImageAck(ws, requestId, 0);
           return;
@@ -645,7 +645,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
           return;
         }
 
-        const cwd = getProcessCwd(handle.pid);
+        const cwd = await getProcessCwd(handle.pid);
         const dirPath = resolve(cwd, imagePasteDir);
         const rel = relative(cwd, dirPath);
         if (rel.startsWith('..') || isAbsolute(rel)) {
@@ -692,8 +692,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       const filename = buf.subarray(7, 7 + filenameLen).toString('utf-8');
       const fileData = buf.subarray(7 + filenameLen);
 
-      const cwd = getProcessCwd(handle.pid);
-      writeUploadToCwd(fileData, filename, cwd).then(result => {
+      getProcessCwd(handle.pid).then(cwd => writeUploadToCwd(fileData, filename, cwd).then(result => {
         if (result.success && result.savedName) {
           socketLogger.info('file uploaded to cwd', { name: result.savedName, bytes: fileData.length, cwd });
           writePty(handle, './' + shellQuoteForBash(result.savedName) + ' ');
@@ -702,7 +701,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
           socketLogger.warn('file upload failed', { name: filename, error: result.error });
           sendFileUploadAck(ws, requestId, 1, JSON.stringify({ error: result.error }));
         }
-      }).catch((err: unknown) => {
+      })).catch((err: unknown) => {
         const msg = err instanceof Error ? err.message : String(err);
         socketLogger.error('file upload handler failed', { error: msg });
         sendFileUploadAck(ws, requestId, 1, JSON.stringify({ error: msg }));

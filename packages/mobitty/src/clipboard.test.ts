@@ -125,14 +125,14 @@ describe('writeImageToFile', () => {
 describe('getProcessCwd', () => {
   const supported = process.platform === 'linux' || process.platform === 'darwin';
 
-  it('returns the cwd for the current process on supported platforms', { skip: !supported }, () => {
-    const cwd = getProcessCwd(process.pid);
+  it('returns the cwd for the current process on supported platforms', { skip: !supported }, async () => {
+    const cwd = await getProcessCwd(process.pid);
     assert.equal(typeof cwd, 'string');
     assert.ok(cwd.length > 0);
   });
 
-  it('returns "" for a non-existent PID', () => {
-    const cwd = getProcessCwd(999999999);
+  it('returns "" for a non-existent PID', async () => {
+    const cwd = await getProcessCwd(999999999);
     assert.equal(cwd, '');
   });
 });

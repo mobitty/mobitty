@@ -32,9 +32,11 @@ export interface ShellInfo extends Shell {
 
 export class ShellStore {
   private shellsDir: string;
+  private dataFolder: string;
   private discovered: DiscoveredShell[] = [];
 
   constructor(dataFolder: string) {
+    this.dataFolder = dataFolder;
     this.shellsDir = join(dataFolder, 'shells');
   }
 
@@ -43,7 +45,7 @@ export class ShellStore {
   }
 
   rediscover(): void {
-    this.discovered = discoverShells();
+    this.discovered = discoverShells(this.dataFolder);
   }
 
   private loadSaved(): Shell[] {
@@ -98,7 +100,7 @@ export class ShellStore {
 
     for (const d of this.discovered) {
       if (savedNames.has(d.name)) continue;
-      result.push({ name: d.name, argv: d.argv, source: 'discovered' });
+      result.push({ name: d.name, argv: d.argv, ...(d.env ? { env: d.env } : {}), source: 'discovered' });
     }
 
     return result;
@@ -141,7 +143,7 @@ export class ShellStore {
 
     // Check discovered
     const found = this.discovered.find(d => d.name === name);
-    if (found) return { name: found.name, argv: found.argv, source: 'discovered' };
+    if (found) return { name: found.name, argv: found.argv, ...(found.env ? { env: found.env } : {}), source: 'discovered' };
 
     return undefined;
   }
