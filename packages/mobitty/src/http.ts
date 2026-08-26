@@ -492,9 +492,17 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
           sessionEditorPath,
           filePath,
           content,
-          (cleanup) => { req.on('close', cleanup); },
+          // Hook the *response*, not the request. Since Node 16 an
+          // IncomingMessage emits 'close' as soon as the request is complete —
+          // and this callback runs after `readBody` already drained it, so
+          // `req.on('close', …)` would never fire and a dead CLI would leak
+          // `editorPending` forever (every later edit → 409). The response is
+          // held open for the long-poll, so its 'close' is the real signal.
+          // See docs/done-bug-remote-editor-random-exit-1.md.
+          (cleanup) => { res.on('close', cleanup); },
           contentType,
         );
+        if (res.writableEnded || res.destroyed) return; // CLI already gone
         jsonResponse(res, 200, result);
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

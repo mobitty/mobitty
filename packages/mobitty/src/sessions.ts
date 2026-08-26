@@ -628,10 +628,15 @@ export class SessionRegistry {
       entry.editorPending = { filePath, content, contentType, resolve };
       entry.editorSender!(filePath, content, contentType);
 
-      // If the HTTP request from the CLI drops, clean up
+      // If the HTTP request from the CLI drops, clean up. The identity check
+      // matters: `onAbort` also fires on normal completion, and by then
+      // `editorPending` may already belong to a *newer* edit.
       const cleanup = () => {
         if (entry.editorPending?.resolve === resolve) {
           entry.editorPending = null;
+          // Settle so the HTTP handler's `await` doesn't hang forever holding
+          // this closure. Nobody is listening — the CLI is gone.
+          resolve({ content, cancelled: true });
         }
       };
       onAbort(cleanup);
