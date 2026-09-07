@@ -33,6 +33,7 @@ const CMD_SESSION_NOTIFICATION = 0x3a;
 const CMD_UPDATE_SETTINGS = 0x32;
 const CMD_EDITOR_OPEN = 0x3b;
 const CMD_EDITOR_DONE = 0x3a;
+const CMD_EDITOR_ACK = 0x3b;   // client → server (0x3b is EDITOR_OPEN the other way)
 const CMD_DOWNLOAD_START = 0x3c;
 const CMD_FILE_UPLOAD = 0x3d;
 const CMD_FILE_UPLOAD_ACK = 0x3d;
@@ -138,7 +139,7 @@ export interface TerminalCoreCallbacks {
   onSessionAlert?: (sessionId: string) => void;
   onSessionNotification?: (sessionId: string, title: string, body: string, sessionName: string, sessionTitle: string, sessionCwd: string) => void;
   onImagePasteError?: (error: ImagePasteErrorInfo) => void;
-  onEditorOpen?: (filePath: string, content: string, contentType?: string) => void;
+  onEditorOpen?: (editId: number, filePath: string, content: string, contentType?: string) => void;
   onDownloadStart?: (fileName: string, fileSize: number, token: string) => void;
 }
 
@@ -242,6 +243,9 @@ export class TerminalCore {
   private imagePasteDir?: string;
   private notificationMode: 'iterm' | 'kitty' | 'ghostty' | 'off' = 'ghostty';
   private remoteEditor = false;
+  /** EDITOR_DONE that could not be sent because the socket was down. Flushed on
+   *  the next open socket for the same session — see flushPendingEditorDone. */
+  private pendingEditorDone: { sessionId: string | null; editId?: number; content: string; cancelled: boolean } | undefined;
   private copyOnSelect = false;
   private copyCombo: ComboStep | null = null;
   private pasteCombo: ComboStep | null = null;
@@ -348,14 +352,74 @@ export class TerminalCore {
     this.logger.debug('term-diag', { reason, ...this.getDiagnostics() });
   }
 
-  sendEditorDone(content: string, cancelled: boolean) {
-    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) return;
-    const payload = JSON.stringify({ content, cancelled });
+  sendEditorDone(content: string, cancelled: boolean, editId?: number) {
+    const sessionId = this.options.sessionId ?? null;
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      // Dropping this silently strands the CLI: the server keeps `editorPending`
+      // and `mobitty-cli-edit` blocks forever, so the user's Save/Cancel has no
+      // visible effect. The socket is closed for ~50ms on every session switch
+      // and much longer on a reconnect — queue and flush on the next open
+      // socket for the same session.
+      this.pendingEditorDone = { sessionId, editId, content, cancelled };
+      this.logger.warn('editor done queued — socket not open', {
+        sessionId, editId: editId ?? null, cancelled, readyState: this.socket?.readyState ?? null,
+      });
+      return;
+    }
+    this.writeEditorDone(content, cancelled, editId);
+    this.logger.info('editor done sent', { sessionId, editId: editId ?? null, cancelled, bytes: content.length });
+  }
+
+  /** Tell the server the editor panel is actually on screen. The server only
+   *  knows its EDITOR_OPEN left the socket; without this it cannot tell a user
+   *  typing for five minutes from a panel that never rendered. */
+  sendEditorAck(editId: number) {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      this.logger.warn('editor ack not sent — socket not open', {
+        editId, readyState: this.socket?.readyState ?? null,
+      });
+      return;
+    }
+    const encoded = this.textEncoder.encode(JSON.stringify({ editId }));
+    const msg = new Uint8Array(1 + encoded.length);
+    msg[0] = CMD_EDITOR_ACK;
+    msg.set(encoded, 1);
+    this.socket.send(msg);
+    this.logger.info('editor ack sent', { editId, sessionId: this.options.sessionId ?? null });
+  }
+
+  private writeEditorDone(content: string, cancelled: boolean, editId?: number) {
+    const payload = JSON.stringify(editId === undefined ? { content, cancelled } : { editId, content, cancelled });
     const encoded = this.textEncoder.encode(payload);
     const msg = new Uint8Array(1 + encoded.length);
     msg[0] = CMD_EDITOR_DONE;
     msg.set(encoded, 1);
-    this.socket.send(msg);
+    this.socket?.send(msg);
+  }
+
+  /** Send an EDITOR_DONE that was queued while the socket was down. Called
+   *  right after the handshake so the server has already attached the session
+   *  (WebSocket ordering guarantees the handshake is processed first). */
+  private flushPendingEditorDone() {
+    const queued = this.pendingEditorDone;
+    if (!queued) return;
+    this.pendingEditorDone = undefined;
+    const sessionId = this.options.sessionId ?? null;
+    if (queued.sessionId !== sessionId) {
+      // Would complete the wrong session's edit. The original session keeps its
+      // pending edit; switching back replays EDITOR_OPEN so the user can retry.
+      this.logger.warn('editor done dropped — session changed', {
+        queuedSessionId: queued.sessionId, sessionId, editId: queued.editId ?? null,
+      });
+      return;
+    }
+    // The edit id makes this safe even if a *new* edit started in this session
+    // while the socket was down — the server rejects the stale id rather than
+    // resolving the new edit with old content.
+    this.writeEditorDone(queued.content, queued.cancelled, queued.editId);
+    this.logger.info('editor done flushed after reconnect', {
+      sessionId, editId: queued.editId ?? null, cancelled: queued.cancelled, bytes: queued.content.length,
+    });
   }
 
   private sendUpdateSettings() {
@@ -1517,6 +1581,7 @@ export class TerminalCore {
         dims: this.clientDimSnapshot(),
       });
       this.socket?.send(textEncoder.encode(JSON.stringify(handshake)));
+      this.flushPendingEditorDone();
 
       terminal.focus();
     });
@@ -1781,7 +1846,16 @@ export class TerminalCore {
           const r = parsed as Record<string, unknown>;
           if (typeof r['filePath'] === 'string' && typeof r['content'] === 'string') {
             const contentType = typeof r['contentType'] === 'string' ? r['contentType'] : undefined;
-            this.callbacks.onEditorOpen?.(r['filePath'], r['content'], contentType);
+            const editId = typeof r['editId'] === 'number' ? r['editId'] : 0;
+            this.logger.info('editor open received', {
+              editId,
+              filePath: r['filePath'],
+              bytes: r['content'].length,
+              contentType: contentType ?? null,
+              sessionId: this.options.sessionId ?? null,
+              handled: this.callbacks.onEditorOpen !== undefined,
+            });
+            this.callbacks.onEditorOpen?.(editId, r['filePath'], r['content'], contentType);
           }
         }
       } catch { this.logger.debug('EDITOR_OPEN parse failed'); }

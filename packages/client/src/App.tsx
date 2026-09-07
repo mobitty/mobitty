@@ -113,6 +113,11 @@ export function App() {
   const [editorFilePath, setEditorFilePath] = useState('');
   const [editorContent, setEditorContent] = useState('');
   const [editorContentType, setEditorContentType] = useState<string | undefined>();
+  /** Server-assigned id of the edit the panel is showing, and a counter bumped
+   *  on every EDITOR_OPEN received. The counter is what lets a *re-sent*
+   *  EDITOR_OPEN (same edit id) produce a fresh ack. */
+  const [editorEditId, setEditorEditId] = useState(0);
+  const [editorOpenSeq, setEditorOpenSeq] = useState(0);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
 
   const refreshSessions = useCallback(async () => {
@@ -123,6 +128,9 @@ export function App() {
 
   const terminalRef = useRef<XtermTerminalHandle>(null);
   const currentSessionIdRef = useRef<string | undefined>(undefined);
+  /** Mirrors `editorOpen` (as the open file's path, or null) so the
+   *  session-switch effect can report what it closed without re-running. */
+  const editorOpenRef = useRef<string | null>(null);
   const metricsRef = useRef(new SystemMetrics());
   const softkeyBarRef = useRef<SoftkeyBarHandle>(null);
 
@@ -144,8 +152,16 @@ export function App() {
   // Do NOT call sendEditorDone — server-side pending state must survive so
   // switching back replays the editor with the localStorage draft restored.
   useEffect(() => {
+    if (editorOpenRef.current !== null) {
+      terminalRef.current?.core?.clientLogger.info('editor panel hidden on session switch', {
+        sessionId: currentSessionId ?? null,
+        filePath: editorOpenRef.current,
+      });
+    }
     setEditorOpen(false);
   }, [currentSessionId]);
+
+  useEffect(() => { editorOpenRef.current = editorOpen ? editorFilePath : null; }, [editorOpen, editorFilePath]);
 
   // Preload lazy dialog chunks once the terminal handshake lands so that the
   // first open of Settings / Connection-Closed / Image-Paste-Error does not
@@ -441,7 +457,12 @@ export function App() {
     },
     onConnectingSlow: () => setConnectingSlow(true),
     onConnected: () => setConnectingSlow(false),
-    onEditorOpen: (filePath: string, content: string, contentType?: string) => {
+    onEditorOpen: (editId: number, filePath: string, content: string, contentType?: string) => {
+      terminalRef.current?.core?.clientLogger.info('editor panel opening', {
+        editId, filePath, bytes: content.length, contentType: contentType ?? null,
+      });
+      setEditorEditId(editId);
+      setEditorOpenSeq(seq => seq + 1);
       setEditorFilePath(filePath);
       setEditorContent(content);
       setEditorContentType(contentType);
@@ -582,19 +603,25 @@ export function App() {
     setPendingShellSelection(false);
   }, []);
 
+  const handleEditorOpened = useCallback(() => {
+    // Identity changes per edit *and* per re-send (editorOpenSeq), so the
+    // panel's mount effect re-fires and the server's retry can be acked.
+    if (editorEditId > 0) terminalRef.current?.core?.sendEditorAck(editorEditId);
+  }, [editorEditId, editorOpenSeq]);
+
   const handleEditorSave = useCallback((content: string) => {
-    terminalRef.current?.core?.sendEditorDone(content, false);
+    terminalRef.current?.core?.sendEditorDone(content, false, editorEditId);
     setEditorOpen(false);
     terminalRef.current?.core?.focus();
-  }, []);
+  }, [editorEditId]);
 
   const handleEditorCancel = useCallback(() => {
     // For images (view-only), send empty content to avoid a multi-MB round-trip
     const isImage = editorContentType?.startsWith('image/') ?? false;
-    terminalRef.current?.core?.sendEditorDone(isImage ? '' : editorContent, true);
+    terminalRef.current?.core?.sendEditorDone(isImage ? '' : editorContent, true, editorEditId);
     setEditorOpen(false);
     terminalRef.current?.core?.focus();
-  }, [editorContent, editorContentType]);
+  }, [editorContent, editorContentType, editorEditId]);
 
   const handleReconnect = useCallback(() => {
     setConnectionClosedReason(null);
@@ -630,6 +657,7 @@ export function App() {
           filePath={editorFilePath}
           content={editorContent}
           contentType={editorContentType}
+          onOpened={handleEditorOpened}
           onSave={handleEditorSave}
           onCancel={handleEditorCancel}
         />

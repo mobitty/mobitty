@@ -14,6 +14,11 @@ interface RemoteEditorPanelProps {
   filePath?: string;
   content?: string;
   contentType?: string;
+  /** Fired once the panel is mounted and on screen. The server uses this to
+   *  tell "the user is looking at the editor" from "EDITOR_OPEN went nowhere" —
+   *  see `done-design-remote-editor.md`. Must be a stable identity that changes
+   *  per edit, otherwise a re-sent EDITOR_OPEN cannot be acked. */
+  onOpened?: () => void;
   onSave: (content: string) => void;
   onCancel: () => void;
 }
@@ -29,6 +34,7 @@ export function RemoteEditorPanel({
   filePath = '',
   content = '',
   contentType,
+  onOpened,
   onSave,
   onCancel,
 }: RemoteEditorPanelProps) {
@@ -58,6 +64,13 @@ export function RemoteEditorPanel({
       textareaRef.current?.focus({ preventScroll: true });
     }, 0);
   }, [open, content, isImage, isFullscreenInput, filePath]);
+
+  // Report that the panel is on screen. Deliberately *not* fired from the
+  // WebSocket handler that parsed EDITOR_OPEN — the point of the ack is to
+  // prove the overlay rendered, not that the bytes arrived.
+  useEffect(() => {
+    if (open) onOpened?.();
+  }, [open, onOpened]);
 
   const handleSave = useCallback(() => {
     if (!isFullscreenInput) clearRemoteEditorDraft(filePath);
