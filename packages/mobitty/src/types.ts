@@ -12,7 +12,7 @@ export const CLIPBOARD_IMAGE_ACK = 0x36; // '6' — clipboard image ACK: {reques
 export const RTT_REPORT = 0x37;          // '7' — RTT in ms (uint16 BE)
 export const SESSION_ALERT = 0x38;       // '8' — session alert: sessionId string
 export const SESSION_NOTIFICATION = 0x3a; // ':' — rich notification: {sessionId, title, body}
-export const EDITOR_OPEN = 0x3b;         // ';' — remote editor: open file for editing
+export const EDITOR_OPEN = 0x3b;         // ';' — remote editor: open file for editing: {editId, filePath, content, contentType?}
 export const DOWNLOAD_START = 0x3c;      // '<' — file download: {fileName, fileSize, token}
 export const FILE_UPLOAD_ACK = 0x3d;     // '=' — file upload ACK: {requestId, status, savedName|errorJson}
 export const CLIPBOARD_WRITE = 0x3e;     // '>' — TUI clipboard write (OSC 52 relay): [status:1][text:utf8]
@@ -23,7 +23,8 @@ export const RESIZE_TERMINAL = 0x31;   // '1'
 export const UPDATE_SETTINGS = 0x32;   // '2' — live settings update: {scrollback?}
 export const CLIPBOARD_IMAGE = 0x36;  // '6' — clipboard image upload: {requestId, mime, data}
 export const CLIENT_LOG = 0x39;       // '9' — client log forwarding: {seq, level, msg, data?}
-export const EDITOR_DONE = 0x3a;      // ':' — remote editor: done editing
+export const EDITOR_DONE = 0x3a;      // ':' — remote editor: done editing: {editId?, content, cancelled}
+export const EDITOR_ACK = 0x3b;       // ';' — remote editor: panel is on screen: {editId}
 export const FILE_UPLOAD = 0x3d;      // '=' — generic file upload: {requestId, filenameLen u16, filename, data}
 export const JSON_DATA = 0x7b;        // '{'
 

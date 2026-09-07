@@ -31,6 +31,18 @@ const HOME = homedir();
  *  otherwise every session-list build re-runs it. */
 const CWD_FALLBACK_TTL_MS = 30_000;
 
+/** Relays EDITOR_OPEN to the attached client. Returns `false` when the
+ *  connection could not take the message (socket no longer open) so
+ *  `requestEdit` can fail the CLI fast instead of blocking it on a message
+ *  nobody will ever see. */
+export type EditorSender = (editId: number, filePath: string, content: string, contentType?: string) => boolean;
+
+/** How long the client has to confirm the editor panel is on screen before the
+ *  server re-sends EDITOR_OPEN, and again before it gives up chasing the ack.
+ *  A successful send only proves the bytes left the server — see
+ *  `todo-bug-remote-editor-hangs-no-panel.md`. */
+const EDITOR_ACK_TIMEOUT_MS = 2000;
+
 interface SessionEntry {
   sessionId: string;
   name: string;
@@ -58,12 +70,16 @@ interface SessionEntry {
   onDetachCallbacks: Array<() => void>;
   onChangeCallbacks: Array<() => void>;
   editorPending: {
+    editId: number;
     filePath: string;
     content: string;
     contentType?: string;
     resolve: (result: EditorResult) => void;
+    /** Set when the client reports the panel is actually on screen. */
+    acked: boolean;
+    ackTimer: NodeJS.Timeout | null;
   } | null;
-  editorSender: ((filePath: string, content: string, contentType?: string) => void) | null;
+  editorSender: EditorSender | null;
   downloadSender: ((fileName: string, fileSize: number, token: string) => void) | null;
   /** Set by the attached connection; relays OSC 52 clipboard writes to it.
    *  `null` text means the payload blew the size cap — the client surfaces
@@ -92,6 +108,9 @@ export class SessionRegistry {
   private notificationListeners = new Set<(sessionId: string, title: string, body: string) => void>();
   private maxSessions: number;
   private startDir: string;
+  /** Monotonic across all sessions, so an edit id is never ambiguous in a log
+   *  line or in an EDITOR_ACK / EDITOR_DONE that arrives on the wrong session. */
+  private nextEditId = 1;
 
   constructor(dataFolder: string, logger: LoggerInterface, maxSessions = 0, startDir = '') {
     this.dataFolder = dataFolder;
@@ -598,7 +617,7 @@ export class SessionRegistry {
 
   // ── Remote Editor ──────────────────────────────────────────────────────────
 
-  setEditorSender(sessionId: string, fn: (filePath: string, content: string, contentType?: string) => void): void {
+  setEditorSender(sessionId: string, fn: EditorSender): void {
     const entry = this.sessions.get(sessionId);
     if (entry) entry.editorSender = fn;
   }
@@ -606,34 +625,62 @@ export class SessionRegistry {
   /** Clear only if `fn` is still the registered sender. A disconnecting client
    *  must not wipe callbacks a newer connection already registered for the
    *  same session — its close handler can run after the reconnect's handshake. */
-  clearEditorSender(sessionId: string, fn: (filePath: string, content: string, contentType?: string) => void): void {
+  clearEditorSender(sessionId: string, fn: EditorSender): void {
     const entry = this.sessions.get(sessionId);
     if (entry?.editorSender === fn) entry.editorSender = null;
   }
 
-  getEditorPending(sessionId: string): { filePath: string; content: string; contentType?: string } | undefined {
+  getEditorPending(sessionId: string): { editId: number; filePath: string; content: string; contentType?: string } | undefined {
     const entry = this.sessions.get(sessionId);
     if (!entry?.editorPending) return undefined;
-    const { filePath, content, contentType } = entry.editorPending;
-    return contentType ? { filePath, content, contentType } : { filePath, content };
+    const { editId, filePath, content, contentType } = entry.editorPending;
+    return contentType ? { editId, filePath, content, contentType } : { editId, filePath, content };
   }
 
   requestEdit(sessionId: string, filePath: string, content: string, onAbort: (cleanup: () => void) => void, contentType?: string): Promise<EditorResult> {
     const entry = this.sessions.get(sessionId);
-    if (!entry) return Promise.reject(new Error('Session not found'));
-    if (entry.editorPending) return Promise.reject(new Error('Edit already in progress'));
-    if (!entry.editorSender) return Promise.reject(new Error('No client connected'));
+    const summary = { sessionId, filePath, bytes: content.length, contentType };
+    this.logger.info('editor requested', summary);
+    if (!entry) {
+      this.logger.warn('editor request rejected', { ...summary, reason: 'session not found' });
+      return Promise.reject(new Error('Session not found'));
+    }
+    if (entry.editorPending) {
+      this.logger.warn('editor request rejected', {
+        ...summary, reason: 'edit already in progress', pendingFilePath: entry.editorPending.filePath,
+      });
+      return Promise.reject(new Error('Edit already in progress'));
+    }
+    if (!entry.editorSender) {
+      this.logger.warn('editor request rejected', { ...summary, reason: 'no editor sender registered' });
+      return Promise.reject(new Error('No client connected'));
+    }
 
-    return new Promise<EditorResult>((resolve) => {
-      entry.editorPending = { filePath, content, contentType, resolve };
-      entry.editorSender!(filePath, content, contentType);
+    const editId = this.nextEditId++;
+    return new Promise<EditorResult>((resolve, reject) => {
+      entry.editorPending = { editId, filePath, content, contentType, resolve, acked: false, ackTimer: null };
+      const sent = entry.editorSender!(editId, filePath, content, contentType);
+      if (!sent) {
+        // A registered sender whose socket is no longer writable used to leave
+        // the CLI blocked forever on an EDITOR_OPEN nobody received: the client
+        // shows no panel, so no EDITOR_DONE is ever sent. Fail fast (503) —
+        // $EDITOR reports an error instead of hanging the caller.
+        entry.editorPending = null;
+        this.logger.warn('editor request rejected', { ...summary, reason: 'send failed' });
+        reject(new Error('No client connected'));
+        return;
+      }
+      this.logger.info('editor open sent', { ...summary, editId });
+      this.armAckTimer(entry, editId, false);
 
       // If the HTTP request from the CLI drops, clean up. The identity check
       // matters: `onAbort` also fires on normal completion, and by then
       // `editorPending` may already belong to a *newer* edit.
       const cleanup = () => {
         if (entry.editorPending?.resolve === resolve) {
+          this.clearAckTimer(entry);
           entry.editorPending = null;
+          this.logger.info('editor request aborted', { sessionId, filePath, editId });
           // Settle so the HTTP handler's `await` doesn't hang forever holding
           // this closure. Nobody is listening — the CLI is gone.
           resolve({ content, cancelled: true });
@@ -643,9 +690,82 @@ export class SessionRegistry {
     });
   }
 
-  completeEdit(sessionId: string, content: string, cancelled: boolean): boolean {
+  /** The client reports its editor panel is on screen. A send that leaves the
+   *  server proves nothing about the UI — this is the only positive signal that
+   *  the user can actually see the editor. */
+  ackEdit(sessionId: string, editId: number): boolean {
     const entry = this.sessions.get(sessionId);
-    if (!entry?.editorPending) return false;
+    if (!entry?.editorPending || entry.editorPending.editId !== editId) {
+      this.logger.warn('editor ack ignored', {
+        sessionId, editId, pendingEditId: entry?.editorPending?.editId ?? null,
+      });
+      return false;
+    }
+    const pending = entry.editorPending;
+    if (pending.acked) return true;
+    pending.acked = true;
+    this.clearAckTimer(entry);
+    this.logger.info('editor panel acked', { sessionId, editId, filePath: pending.filePath });
+    return true;
+  }
+
+  /** Wait for the ack; re-send once, then give up chasing it. The edit stays
+   *  pending either way — a missing ack means "nobody can see this panel", not
+   *  "the user is done", and failing the CLI on a lost ack would break edits
+   *  that are working fine. The log is the payload here. */
+  private armAckTimer(entry: SessionEntry, editId: number, retried: boolean): void {
+    if (!entry.editorPending) return;
+    const timer = setTimeout(() => {
+      const pending = entry.editorPending;
+      if (!pending || pending.editId !== editId || pending.acked) return;
+      pending.ackTimer = null;
+      const context = { sessionId: entry.sessionId, editId, filePath: pending.filePath };
+      if (retried) {
+        this.logger.error('editor panel never acked', { ...context, reason: 'no ack after re-send' });
+        return;
+      }
+      const resent = entry.editorSender?.(editId, pending.filePath, pending.content, pending.contentType) ?? false;
+      this.logger.warn('editor panel not acked — re-sending EDITOR_OPEN', { ...context, resent });
+      if (resent) this.armAckTimer(entry, editId, true);
+    }, EDITOR_ACK_TIMEOUT_MS);
+    // Never hold the process open for an ack.
+    timer.unref();
+    entry.editorPending.ackTimer = timer;
+  }
+
+  private clearAckTimer(entry: SessionEntry): void {
+    const timer = entry.editorPending?.ackTimer;
+    if (timer) clearTimeout(timer);
+    if (entry.editorPending) entry.editorPending.ackTimer = null;
+  }
+
+  /** `editId` is optional so a client that predates it still completes its edit;
+   *  when present it must match, otherwise a stale panel (or an EDITOR_DONE
+   *  queued through a reconnect) would resolve a *newer* edit with old content. */
+  completeEdit(sessionId: string, content: string, cancelled: boolean, editId?: number): boolean {
+    const entry = this.sessions.get(sessionId);
+    if (!entry?.editorPending) {
+      // The client had a panel open for an edit this session no longer owns
+      // (stale panel after a session switch, or the CLI already gave up), so
+      // the user's Save/Cancel does nothing visible. Loud on purpose.
+      this.logger.warn('editor done ignored — no pending edit', { sessionId, editId: editId ?? null, cancelled, bytes: content.length });
+      return false;
+    }
+    if (editId !== undefined && editId !== entry.editorPending.editId) {
+      this.logger.warn('editor done ignored — stale edit id', {
+        sessionId, editId, pendingEditId: entry.editorPending.editId, cancelled,
+      });
+      return false;
+    }
+    this.logger.info('editor completed', {
+      sessionId,
+      editId: entry.editorPending.editId,
+      filePath: entry.editorPending.filePath,
+      cancelled,
+      bytes: content.length,
+      acked: entry.editorPending.acked,
+    });
+    this.clearAckTimer(entry);
     entry.editorPending.resolve({ content, cancelled });
     entry.editorPending = null;
     return true;
@@ -683,6 +803,10 @@ export class SessionRegistry {
 
   private cancelPendingEdit(entry: SessionEntry): void {
     if (entry.editorPending) {
+      this.logger.info('editor cancelled — session gone', {
+        sessionId: entry.sessionId, editId: entry.editorPending.editId, filePath: entry.editorPending.filePath,
+      });
+      this.clearAckTimer(entry);
       entry.editorPending.resolve({ content: entry.editorPending.content, cancelled: true });
       entry.editorPending = null;
     }

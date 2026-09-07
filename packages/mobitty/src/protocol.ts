@@ -5,7 +5,7 @@ import {
   STATE_UPDATE, STATE_FULL,
   INPUT, RESIZE_TERMINAL, UPDATE_SETTINGS, JSON_DATA, CLIENT_LOG,
   CLIPBOARD_IMAGE, CLIPBOARD_IMAGE_ACK, RTT_REPORT, SESSION_ALERT, SESSION_NOTIFICATION,
-  EDITOR_OPEN, EDITOR_DONE, DOWNLOAD_START, CLIPBOARD_WRITE,
+  EDITOR_OPEN, EDITOR_DONE, EDITOR_ACK, DOWNLOAD_START, CLIPBOARD_WRITE,
   FILE_UPLOAD, FILE_UPLOAD_ACK,
   HEARTBEAT_INTERVAL_MS, HEARTBEAT_TIMEOUT_MS,
   isResizeMessage, isHandshakeMessage, isUpdateSettingsMessage,
@@ -140,10 +140,18 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
   // would wipe the live connection's callbacks and silently break the remote
   // editor, downloads and clipboard for it. Same hazard the `close` handler
   // already documents for detachSession().
-  const editorSender = (filePath: string, content: string, contentType?: string): void => {
-    const payload: Record<string, string> = { filePath, content };
+  const editorSender = (editId: number, filePath: string, content: string, contentType?: string): boolean => {
+    if (ws.readyState !== 1) {
+      // Registered but no longer writable. Report it so requestEdit can 503 the
+      // CLI instead of leaving it blocked on a message that went nowhere.
+      socketLogger.warn('EDITOR_OPEN not sent — socket not open', { editId, filePath, readyState: ws.readyState });
+      return false;
+    }
+    const payload: Record<string, string | number> = { editId, filePath, content };
     if (contentType) payload['contentType'] = contentType;
     sendBinary(ws, EDITOR_OPEN, JSON.stringify(payload));
+    socketLogger.info('EDITOR_OPEN sent', { editId, filePath, bytes: content.length, contentType: contentType ?? null });
+    return true;
   };
   const downloadSender = (fileName: string, fileSize: number, token: string): void => {
     sendBinary(ws, DOWNLOAD_START, JSON.stringify({ fileName, fileSize, token }));
@@ -494,6 +502,9 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
             registry.setEditorSender(sessionId, editorSender);
             const pending = registry.getEditorPending(sessionId);
             if (pending) {
+              socketLogger.info('EDITOR_OPEN replayed on attach', {
+                editId: pending.editId, filePath: pending.filePath, bytes: pending.content.length,
+              });
               sendBinary(ws, EDITOR_OPEN, JSON.stringify(pending));
             }
 
@@ -768,7 +779,27 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       if (typeof parsed !== 'object' || parsed === null) return;
       const r = parsed as Record<string, unknown>;
       if (typeof r['content'] !== 'string' || typeof r['cancelled'] !== 'boolean') return;
-      registry.completeEdit(sessionId, r['content'], r['cancelled']);
+      const editId = typeof r['editId'] === 'number' ? r['editId'] : undefined;
+      const matched = registry.completeEdit(sessionId, r['content'], r['cancelled'], editId);
+      socketLogger.info('EDITOR_DONE received', {
+        editId: editId ?? null, cancelled: r['cancelled'], bytes: r['content'].length, matched,
+      });
+      return;
+    }
+
+    if (command === EDITOR_ACK) {
+      if (sessionId === null) return;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(buf.subarray(1).toString('utf-8'));
+      } catch {
+        socketLogger.debug('EDITOR_ACK parse failed');
+        return;
+      }
+      if (typeof parsed !== 'object' || parsed === null) return;
+      const editId = (parsed as Record<string, unknown>)['editId'];
+      if (typeof editId !== 'number') return;
+      registry.ackEdit(sessionId, editId);
       return;
     }
   });
