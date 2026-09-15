@@ -26,6 +26,8 @@ import { fetchShells, type ShellInfo } from '@/shells';
 import { openExternalUrl } from '@/open-external-url';
 import { ShellSelectionPanel } from '@/components/ShellSelectionPanel';
 import { RemoteEditorPanel } from '@/components/RemoteEditorPanel';
+import { takeStaleRemoteEditorDrafts } from '@/remote-editor-storage';
+import { pushEditorHistory } from '@/editor-history';
 import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
 
@@ -33,6 +35,12 @@ const SettingsDialog = lazy(() => import('@/components/SettingsDialog').then(m =
 const ConnectionClosedDialog = lazy(() => import('@/components/ConnectionClosedDialog').then(m => ({ default: m.ConnectionClosedDialog })));
 const ConnectionSlowOverlay = lazy(() => import('@/components/ConnectionSlowOverlay').then(m => ({ default: m.ConnectionSlowOverlay })));
 const ImagePasteErrorDialog = lazy(() => import('@/components/ImagePasteErrorDialog').then(m => ({ default: m.ImagePasteErrorDialog })));
+
+/** A remote-editor draft untouched for this long is treated as abandoned and
+ *  swept into the editor history ring. Comfortably longer than a reload or a
+ *  reconnect, which is what the per-path draft exists to survive. */
+const STALE_DRAFT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
+
 const defaultTheme: ITheme = {
   foreground: '#d2d2d2',
   background: '#2b2b2b',
@@ -162,6 +170,27 @@ export function App() {
   }, [currentSessionId]);
 
   useEffect(() => { editorOpenRef.current = editorOpen ? editorFilePath : null; }, [editorOpen, editorFilePath]);
+
+  /** Label for history entries captured in the active session. */
+  const currentSessionLabel = useMemo(() => {
+    const s = sessions.find(x => x.sessionId === currentSessionId);
+    return s === undefined ? '' : (s.title || s.name);
+  }, [sessions, currentSessionId]);
+
+  // Collect abandoned editor drafts once per load. Claude Code's Ctrl+G uses a
+  // fresh temp path per invocation, so a draft whose edit never reached Save or
+  // Cancel strands a key nothing will read again. Moving it into the history
+  // ring both bounds localStorage growth and keeps the content recoverable.
+  useEffect(() => {
+    for (const stale of takeStaleRemoteEditorDrafts(STALE_DRAFT_MAX_AGE_MS)) {
+      pushEditorHistory({
+        text: stale.text,
+        fileName: stale.filePath.split(/[/\\]/).pop() ?? stale.filePath,
+        sessionLabel: '',
+        outcome: 'cancelled',
+      });
+    }
+  }, []);
 
   // Preload lazy dialog chunks once the terminal handshake lands so that the
   // first open of Settings / Connection-Closed / Image-Paste-Error does not
@@ -657,6 +686,7 @@ export function App() {
           filePath={editorFilePath}
           content={editorContent}
           contentType={editorContentType}
+          sessionLabel={currentSessionLabel}
           onOpened={handleEditorOpened}
           onSave={handleEditorSave}
           onCancel={handleEditorCancel}
