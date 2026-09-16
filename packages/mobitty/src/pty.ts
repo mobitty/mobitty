@@ -45,18 +45,27 @@ export function spawnPty(options: SpawnOptions, callbacks: PtyCallbacks): PtyHan
     env,
   });
 
-  shell.onData(callbacks.onData);
-  shell.onExit(({ exitCode, signal }) => {
-    callbacks.onExit(exitCode, signal);
-  });
-
-  return {
+  const handle: PtyHandle = {
     pid: shell.pid,
     pty: shell,
     paused: false,
     columns: options.columns,
     rows: options.rows,
+    exited: false,
+    killTimer: null,
   };
+
+  shell.onData(callbacks.onData);
+  shell.onExit(({ exitCode, signal }) => {
+    handle.exited = true;
+    if (handle.killTimer) {
+      clearTimeout(handle.killTimer);
+      handle.killTimer = null;
+    }
+    callbacks.onExit(exitCode, signal);
+  });
+
+  return handle;
 }
 
 export function writePty(handle: PtyHandle, data: string): void {
@@ -106,6 +115,31 @@ export function resumePty(handle: PtyHandle): void {
   handle.pty.resume();
 }
 
-export function killPty(handle: PtyHandle): void {
+/**
+ * Grace period between the polite SIGHUP and the SIGKILL that guarantees the
+ * child is gone.
+ */
+export const KILL_ESCALATION_MS = 2000;
+
+/**
+ * Terminate a session's child process.
+ *
+ * SIGHUP alone is not a guarantee. A shell can ignore it outright (`trap "" HUP`),
+ * and node-pty's `kill()` is fire-and-forget against a pid that may still be
+ * mid-exec, so under load the signal is occasionally lost entirely. A survivor
+ * keeps node-pty's master-fd read stream open, which keeps the host's event loop
+ * alive forever — that is what wedges `node --test` with no output. So escalate:
+ * SIGHUP first so the shell can run its exit traps, SIGKILL after a grace period
+ * if it is still there. The timer is unref'd so it never by itself delays exit,
+ * and it is gated on `exited` so a recycled pid can never be hit.
+ */
+export function killPty(handle: PtyHandle, escalationMs = KILL_ESCALATION_MS): void {
+  if (handle.exited || handle.killTimer) return;
   handle.pty.kill();
+  handle.killTimer = setTimeout(() => {
+    handle.killTimer = null;
+    if (handle.exited) return;
+    handle.pty.kill('SIGKILL');
+  }, escalationMs);
+  handle.killTimer.unref();
 }

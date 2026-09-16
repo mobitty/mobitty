@@ -125,6 +125,10 @@ export interface PtyHandle {
   paused: boolean;
   columns: number;
   rows: number;
+  /** Set once the child process has been reaped. Gates the SIGKILL escalation. */
+  exited: boolean;
+  /** Pending SIGKILL escalation armed by `killPty`, cleared on exit. */
+  killTimer: NodeJS.Timeout | null;
 }
 
 export interface ClientState {
