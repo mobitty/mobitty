@@ -386,6 +386,17 @@ export class TerminalCore {
     msg.set(encoded, 1);
     this.socket.send(msg);
     this.logger.info('editor ack sent', { editId, sessionId: this.options.sessionId ?? null });
+
+    // The ack proves React committed the overlay into the DOM, not that WebKit
+    // painted it. One rAF separates the two: if this never logs, the commit
+    // landed but the compositor never ran, and the user is still looking at a
+    // stale screen — a different bug from the one the ack was built to catch.
+    const ackedAt = performance.now();
+    requestAnimationFrame(() => {
+      this.logger.info('editor panel painted', {
+        editId, ms: Math.round(performance.now() - ackedAt),
+      });
+    });
   }
 
   private writeEditorDone(content: string, cancelled: boolean, editId?: number) {

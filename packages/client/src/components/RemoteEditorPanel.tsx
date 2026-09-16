@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Save, X, Minimize2, History } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -81,7 +81,13 @@ export function RemoteEditorPanel({
   // Report that the panel is on screen. Deliberately *not* fired from the
   // WebSocket handler that parsed EDITOR_OPEN — the point of the ack is to
   // prove the overlay rendered, not that the bytes arrived.
-  useEffect(() => {
+  //
+  // useLayoutEffect, not useEffect: passive effects are flushed by React's
+  // scheduler, which is the thing that stalled for 12.2 s in the WKWebView and
+  // swallowed both the commit and the ack. A layout effect runs synchronously
+  // inside the commit, so a missing ack now means "React never committed"
+  // rather than "the effect queue is backed up".
+  useLayoutEffect(() => {
     if (open) onOpened?.();
   }, [open, onOpened]);
 

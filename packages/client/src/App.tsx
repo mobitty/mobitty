@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useMemo, useCallback, lazy, Suspense } from 'react';
+import { flushSync } from 'react-dom';
 import type { ITerminalOptions, ITheme } from '@xterm/xterm';
 import { XtermTerminal, type XtermTerminalHandle } from '@/components/XtermTerminal';
 import { SoftkeyBar, type SoftkeyBarHandle } from '@/components/SoftkeyBar';
@@ -487,15 +488,29 @@ export function App() {
     onConnectingSlow: () => setConnectingSlow(true),
     onConnected: () => setConnectingSlow(false),
     onEditorOpen: (editId: number, filePath: string, content: string, contentType?: string) => {
+      const startedAt = performance.now();
       terminalRef.current?.core?.clientLogger.info('editor panel opening', {
         editId, filePath, bytes: content.length, contentType: contentType ?? null,
+        visibility: document.visibilityState,
       });
-      setEditorEditId(editId);
-      setEditorOpenSeq(seq => seq + 1);
-      setEditorFilePath(filePath);
-      setEditorContent(content);
-      setEditorContentType(contentType);
-      setEditorOpen(true);
+      // Commit in *this* task rather than handing the work to React's scheduler.
+      // A PTY process is blocked on this overlay, so the update is discrete by
+      // nature — and the scheduler is exactly what failed: on 2026-09-16 a
+      // WKWebView starved React's MessageChannel work loop for 12.2 s (no
+      // commit, so no panel; no passive effect, so no ack) while setTimeout and
+      // WebSocket delivery carried on normally. An unrelated tap released it.
+      // See todo-bug-remote-editor-hangs-no-panel.md.
+      flushSync(() => {
+        setEditorEditId(editId);
+        setEditorOpenSeq(seq => seq + 1);
+        setEditorFilePath(filePath);
+        setEditorContent(content);
+        setEditorContentType(contentType);
+        setEditorOpen(true);
+      });
+      terminalRef.current?.core?.clientLogger.info('editor panel committed', {
+        editId, ms: Math.round(performance.now() - startedAt),
+      });
     },
     onDownloadStart: (_fileName: string, _fileSize: number, token: string) => {
       const a = document.createElement('a');
@@ -633,8 +648,12 @@ export function App() {
   }, []);
 
   const handleEditorOpened = useCallback(() => {
-    // Identity changes per edit *and* per re-send (editorOpenSeq), so the
-    // panel's mount effect re-fires and the server's retry can be acked.
+    // `editorOpenSeq` is read, not just listed as a dep: this callback's
+    // identity is what re-fires the panel's ack effect, so a re-sent
+    // EDITOR_OPEN (same editId) must still produce a fresh one. As an unused
+    // dep, lint autofix or the React Compiler's own dependency analysis would
+    // drop it and silently un-ack every retry.
+    void editorOpenSeq;
     if (editorEditId > 0) terminalRef.current?.core?.sendEditorAck(editorEditId);
   }, [editorEditId, editorOpenSeq]);
 
