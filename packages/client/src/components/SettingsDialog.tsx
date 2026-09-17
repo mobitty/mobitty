@@ -134,6 +134,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
   const [remoteEditor, setRemoteEditor] = useState(false);
   const [copyOnSelect, setCopyOnSelect] = useState(false);
   const [hideSoftkeyBar, setHideSoftkeyBar] = useState(false);
+  const [autocorrect, setAutocorrect] = useState(true);
   const [hotkeyError, setHotkeyError] = useState<string | undefined>();
   const [status, setStatus] = useState('');
   const [fieldErrors, setFieldErrors] = useState<ProfileFieldErrors>(new Map());
@@ -208,6 +209,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
     setRemoteEditor(profile.remoteEditor);
     setCopyOnSelect(profile.copyOnSelect);
     setHideSoftkeyBar(profile.hideSoftkeyBar ?? false);
+    setAutocorrect(profile.autocorrect ?? true);
     setHotkeyError(undefined);
     setFieldErrors(new Map());
   }, []);
@@ -266,6 +268,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
       remoteEditor,
       copyOnSelect,
       hideSoftkeyBar,
+      autocorrect,
     };
     if (Object.keys(gestures).length > 0) {
       candidate['gestures'] = gestures;
@@ -793,6 +796,16 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
               <Switch
                 checked={copyOnSelect}
                 onCheckedChange={setCopyOnSelect}
+              />
+            </div>
+
+            {/* Autocorrect */}
+            <div className="flex items-center gap-2">
+              <Label className="min-w-[100px] text-xs text-muted-foreground">Autocorrect</Label>
+              <HelpTip>Autocorrect, autocapitalize and spellcheck the text boxes — inline input, input panel and editor. Also enables smart quotes and dashes, which shells do not understand, so turn it off for commands, paths and flags. Typing straight into the terminal is never autocorrected. Each text box has a button to flip this for the current session.</HelpTip>
+              <Switch
+                checked={autocorrect}
+                onCheckedChange={setAutocorrect}
               />
             </div>
 

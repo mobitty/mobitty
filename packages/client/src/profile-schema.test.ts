@@ -129,6 +129,24 @@ describe('validateProfileFields', () => {
     assert.equal(validateProfileFields(c).get('softkeySize'), 'Must be between 28 and 60');
   });
 
+  // autocorrect — optional so profiles predating the field keep validating,
+  // and it defaults on.
+  it('skips optional autocorrect when absent', () => {
+    const c = validCandidate();
+    assert.equal(validateProfileFields(c).has('autocorrect'), false);
+    assert.equal(isProfile(c), true);
+  });
+
+  it('defaults autocorrect to true', () => {
+    assert.equal(PROFILE_FIELD_RULES['autocorrect']?.default, true);
+  });
+
+  it('errors on non-boolean autocorrect', () => {
+    const c = validCandidate();
+    c['autocorrect'] = 'yes';
+    assert.equal(validateProfileFields(c).get('autocorrect'), 'Must be true or false');
+  });
+
   // multiple errors
   it('returns multiple errors simultaneously', () => {
     const c = validCandidate();

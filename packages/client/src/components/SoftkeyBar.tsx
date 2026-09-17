@@ -10,8 +10,10 @@ import { getBatchInputDraft, setBatchInputDraft } from '@/batch-input-storage';
 import { getNativeBridge, type KeyboardMode } from '@/native-bridge';
 import { useBackdropColorSync } from '@/hooks/use-backdrop-color-sync';
 import { usePressLongPress } from '@/hooks/use-press-long-press';
-import { ArrowUp, Keyboard, Menu } from 'lucide-react';
+import { useAutocorrectToggle } from '@/hooks/use-autocorrect-toggle';
+import { ArrowUp, Keyboard, Menu, SpellCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { autocorrectAttrs } from '@/lib/autocorrect';
 
 // --- SoftkeyBar handle ---
 
@@ -31,6 +33,8 @@ interface SoftkeyBarProps {
   hasAlerts?: boolean;
   isMobile?: boolean;
   isNativeApp?: boolean;
+  autocorrect: boolean;
+  onAutocorrectToggle: () => void;
   onSessionsOpen: () => void;
   onMeterToggle: () => void;
   onAction: (action: KeyBehavior, modifiers: ModifierFlags) => void;
@@ -47,13 +51,16 @@ interface SoftkeyBarProps {
 
 interface InlineInputProps {
   softkeySize: number;
+  autocorrect: boolean;
+  onAutocorrectToggle: () => void;
   onSubmit: (text: string) => void;
   onKeepFocus?: () => void;
 }
 
-function InlineInput({ softkeySize, onSubmit, onKeepFocus }: InlineInputProps) {
+function InlineInput({ softkeySize, autocorrect, onAutocorrectToggle, onSubmit, onKeepFocus }: InlineInputProps) {
   const [draft, setDraft] = useState(() => getBatchInputDraft());
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const handleAutocorrectToggle = useAutocorrectToggle(textareaRef, onAutocorrectToggle);
 
   const handleChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
     const val = e.target.value;
@@ -83,11 +90,28 @@ function InlineInput({ softkeySize, onSubmit, onKeepFocus }: InlineInputProps) {
         value={draft}
         onChange={handleChange}
         onKeyDown={handleKeyDown}
-        spellCheck={false}
-        autoCapitalize="off"
-        autoCorrect="off"
+        {...autocorrectAttrs(autocorrect)}
         aria-label="Inline input"
       />
+      <button
+        type="button"
+        data-autocorrect-toggle
+        className={cn(
+          'flex items-center justify-center rounded-md shrink-0',
+          'transition-colors touch-manipulation select-none',
+          autocorrect
+            ? 'text-foreground bg-accent'
+            : 'text-muted-foreground hover:text-foreground hover:bg-accent',
+        )}
+        style={{ width: softkeySize, height: softkeySize }}
+        tabIndex={-1}
+        aria-pressed={autocorrect}
+        aria-label={autocorrect ? 'Autocorrect on' : 'Autocorrect off'}
+        title={autocorrect ? 'Autocorrect on' : 'Autocorrect off'}
+        onPointerUp={handleAutocorrectToggle}
+      >
+        <SpellCheck className="w-4 h-4" />
+      </button>
       <button
         type="button"
         className={cn(
@@ -109,7 +133,7 @@ function InlineInput({ softkeySize, onSubmit, onKeepFocus }: InlineInputProps) {
 // --- SoftkeyBar ---
 
 export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
-  function SoftkeyBar({ pages, customKeys, containers, activeContainerId, batchInputOpen, softkeySize = 44, hasAlerts, isMobile, isNativeApp, onSessionsOpen, onMeterToggle, onAction, onPaste, onFileUpload, onBatchInputToggle, onBatchSubmit, onContainerToggle, onKeepFocus, onModifiersChange }, ref) {
+  function SoftkeyBar({ pages, customKeys, containers, activeContainerId, batchInputOpen, softkeySize = 44, hasAlerts, isMobile, isNativeApp, autocorrect, onAutocorrectToggle, onSessionsOpen, onMeterToggle, onAction, onPaste, onFileUpload, onBatchInputToggle, onBatchSubmit, onContainerToggle, onKeepFocus, onModifiersChange }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     useBackdropColorSync(containerRef);
     const [currentPage, setCurrentPage] = useState(0);
@@ -150,6 +174,14 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
       if (!el) return;
       const preventFocusSteal = (e: Event) => {
         const target = e.target as HTMLElement;
+        // The autocorrect toggle sits inside [data-inline-input] but needs the
+        // opposite treatment from the textarea it accompanies: stop the browser
+        // blurring the field (Layer 1) but skip Layer 2, which would hand focus
+        // to the terminal. The toggle re-focuses the textarea itself.
+        if (target.closest('[data-autocorrect-toggle]')) {
+          e.preventDefault();
+          return;
+        }
         if (target.closest('[data-inline-input]')) return;
         if (target.closest('[data-softkey-scroll]')) {
           const isTouchStart = e.type === 'touchstart';
@@ -334,6 +366,8 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
           <InlineInput
             key={`${keyId}-${idx}`}
             softkeySize={softkeySize}
+            autocorrect={autocorrect}
+            onAutocorrectToggle={onAutocorrectToggle}
             onSubmit={onBatchSubmit}
             onKeepFocus={onKeepFocus}
           />

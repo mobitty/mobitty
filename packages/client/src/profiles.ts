@@ -50,6 +50,7 @@ export const DEFAULT_DESKTOP_PROFILE: Profile = {
   remoteEditor: false,
   copyOnSelect: false,
   hideSoftkeyBar: false,
+  autocorrect: true,
 };
 
 export const DEFAULT_MOBILE_PROFILE: Profile = {
@@ -72,6 +73,7 @@ export const DEFAULT_MOBILE_PROFILE: Profile = {
   notificationMode: 'ghostty',
   remoteEditor: true,
   copyOnSelect: false,
+  autocorrect: true,
 };
 
 // ── localStorage ─────────────────────────────────────────────────────────────

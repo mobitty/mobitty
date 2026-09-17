@@ -69,6 +69,9 @@ export interface Profile {
   remoteEditor: boolean;
   copyOnSelect: boolean;
   hideSoftkeyBar?: boolean;
+  // Optional so profiles written before this field existed keep validating;
+  // every read site defaults it to true. See lib/autocorrect.ts.
+  autocorrect?: boolean;
 }
 
 // ── Declarative Field Schema ─────────────────────────────────────────────────
@@ -249,6 +252,14 @@ export const PROFILE_FIELD_RULES: Readonly<Record<string, FieldRule>> = {
   hideSoftkeyBar: {
     type: 'boolean',
     default: false,
+    optional: true,
+    errors: {
+      type: 'Must be true or false',
+    },
+  },
+  autocorrect: {
+    type: 'boolean',
+    default: true,
     optional: true,
     errors: {
       type: 'Must be true or false',

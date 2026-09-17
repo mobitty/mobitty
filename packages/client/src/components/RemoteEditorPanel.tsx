@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
-import { Save, X, Minimize2, History } from 'lucide-react';
+import { Save, X, Minimize2, History, SpellCheck } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { autocorrectAttrs } from '@/lib/autocorrect';
 import { useShakeToUndoOnFocus } from '@/hooks/use-shake-to-undo-on-focus';
+import { useAutocorrectToggle } from '@/hooks/use-autocorrect-toggle';
 import { getRemoteEditorDraft, setRemoteEditorDraft, clearRemoteEditorDraft } from '@/remote-editor-storage';
 import { getBatchInputDraft, setBatchInputDraft } from '@/batch-input-storage';
 import {
@@ -21,6 +23,8 @@ interface RemoteEditorPanelProps {
   contentType?: string;
   /** Session title/name recorded alongside history entries, for display. */
   sessionLabel?: string;
+  autocorrect: boolean;
+  onAutocorrectToggle: () => void;
   /** Fired once the panel is mounted and on screen. The server uses this to
    *  tell "the user is looking at the editor" from "EDITOR_OPEN went nowhere" —
    *  see `done-design-remote-editor.md`. Must be a stable identity that changes
@@ -42,6 +46,8 @@ export function RemoteEditorPanel({
   content = '',
   contentType,
   sessionLabel = '',
+  autocorrect,
+  onAutocorrectToggle,
   onOpened,
   onSave,
   onCancel,
@@ -57,6 +63,7 @@ export function RemoteEditorPanel({
   const historyEnabled = !isFullscreenInput && !isImage;
 
   useShakeToUndoOnFocus(textareaRef);
+  const handleAutocorrectToggle = useAutocorrectToggle(textareaRef, onAutocorrectToggle);
 
   const imageDataUrl = useMemo(() => {
     if (!isImage || !content) return '';
@@ -182,6 +189,27 @@ export function RemoteEditorPanel({
         <span className="flex-1 font-mono text-sm truncate text-muted-foreground" title={isFullscreenInput ? 'Input' : filePath}>
           {isFullscreenInput ? 'Input' : basename(filePath)}
         </span>
+        {!isImage && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className={cn(
+              autocorrect
+                ? 'text-foreground bg-accent'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+            onClick={handleAutocorrectToggle}
+            // Keep the textarea focused: the toggle does its own blur/focus
+            // dance and a browser-initiated blur here would race it.
+            onPointerDown={e => e.preventDefault()}
+            tabIndex={-1}
+            aria-pressed={autocorrect}
+            aria-label={autocorrect ? 'Autocorrect on' : 'Autocorrect off'}
+            title={autocorrect ? 'Autocorrect on' : 'Autocorrect off'}
+          >
+            <SpellCheck className="h-4 w-4" />
+          </Button>
+        )}
         {historyEnabled && history.length > 0 && (
           <Button
             variant="ghost"
@@ -256,11 +284,8 @@ export function RemoteEditorPanel({
               setRemoteEditorDraft(filePath, val);
             }
           }}
-          spellCheck={false}
-          autoCapitalize="off"
-          autoCorrect="off"
-          aria-label={isFullscreenInput ? 'Fullscreen input' : 'Remote editor'}
-        />
+          {...autocorrectAttrs(autocorrect)}
+          aria-label={isFullscreenInput ? 'Fullscreen input' : 'Remote editor'}        />
       )}
 
       {historyEnabled && historyOpen && (

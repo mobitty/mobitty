@@ -105,6 +105,9 @@ export function App() {
   const [connectingSlow, setConnectingSlow] = useState(false);
   const [batchInputOpen, setBatchInputOpen] = useState(false);
   const [batchInputFullscreen, setBatchInputFullscreen] = useState(false);
+  // null = follow the profile setting. Set by the per-surface toggle buttons and
+  // shared by all three text boxes, so flipping one flips them all.
+  const [autocorrectOverride, setAutocorrectOverride] = useState<boolean | null>(null);
   const [sessionPanelOpen, setSessionPanelOpen] = useState(false);
   const [currentSessionId, setCurrentSessionId] = useState<string | undefined>();
   const [isMobile] = useState(isTouchDevice);
@@ -400,6 +403,21 @@ export function App() {
 
   const softkeySize = profile?.softkeySize ?? 44;
 
+  // The single `?? true` read site for the profile field — absent on profiles
+  // written before the setting existed, and the default is on.
+  const autocorrectDefault = profile?.autocorrect ?? true;
+  const autocorrect = autocorrectOverride ?? autocorrectDefault;
+
+  // Toggling back to whatever the profile says drops the override entirely, so
+  // a later settings change is authoritative again rather than shadowed by a
+  // stale override that happens to agree with it.
+  const handleAutocorrectToggle = useCallback(() => {
+    setAutocorrectOverride(prev => {
+      const next = !(prev ?? autocorrectDefault);
+      return next === autocorrectDefault ? null : next;
+    });
+  }, [autocorrectDefault]);
+
   // Derive gesture mapping from profile
   const gestureMapping = useMemo((): GestureMapping => {
     return profile?.gestures ?? DEFAULT_GESTURE_MAPPING;
@@ -539,6 +557,10 @@ export function App() {
       const option = findFontOption(p.fontFamily);
       if (option) await loadFont(option);
       setProfile(p);
+      // An explicit save in settings restates the user's intent, so it wins over
+      // a session toggle. Deliberately not done on the background profile
+      // reconcile above, which replaces `profile` with no user action behind it.
+      setAutocorrectOverride(null);
     }
   }, [isMobile]);
 
@@ -706,6 +728,8 @@ export function App() {
           content={editorContent}
           contentType={editorContentType}
           sessionLabel={currentSessionLabel}
+          autocorrect={autocorrect}
+          onAutocorrectToggle={handleAutocorrectToggle}
           onOpened={handleEditorOpened}
           onSave={handleEditorSave}
           onCancel={handleEditorCancel}
@@ -714,6 +738,8 @@ export function App() {
         <RemoteEditorPanel
           open={batchInputFullscreen}
           mode="fullscreen-input"
+          autocorrect={autocorrect}
+          onAutocorrectToggle={handleAutocorrectToggle}
           onSave={() => setBatchInputFullscreen(false)}
           onCancel={() => setBatchInputFullscreen(false)}
         />
@@ -753,6 +779,8 @@ export function App() {
       <BatchInputPanel
         open={batchInputOpen}
         fullscreen={batchInputFullscreen}
+        autocorrect={autocorrect}
+        onAutocorrectToggle={handleAutocorrectToggle}
         onSubmit={handleBatchSubmit}
         onClose={() => { setBatchInputOpen(false); terminalRef.current?.core?.focus(); }}
         onFullscreenToggle={() => setBatchInputFullscreen(true)}
@@ -780,6 +808,8 @@ export function App() {
           hasAlerts={alertedSessionIds.size > 0}
           isMobile={isMobile}
           isNativeApp={isNativeApp()}
+          autocorrect={autocorrect}
+          onAutocorrectToggle={handleAutocorrectToggle}
           onSessionsOpen={() => setSessionPanelOpen(true)}
           onMeterToggle={() => setMeterOpen(prev => !prev)}
           onAction={(action, mods) => terminalRef.current?.core?.handleSoftkeyAction(action, mods)}
