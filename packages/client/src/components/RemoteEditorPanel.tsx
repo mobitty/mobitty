@@ -25,11 +25,12 @@ interface RemoteEditorPanelProps {
   sessionLabel?: string;
   autocorrect: boolean;
   onAutocorrectToggle: () => void;
-  /** Fired once the panel is mounted and on screen. The server uses this to
-   *  tell "the user is looking at the editor" from "EDITOR_OPEN went nowhere" —
-   *  see `done-design-remote-editor.md`. Must be a stable identity that changes
+  /** Fired once the panel is mounted and on screen, with the number of
+   *  characters loaded into the textarea. The server uses this to tell "the
+   *  user is looking at the editor" from "EDITOR_OPEN went nowhere" — see
+   *  `done-design-remote-editor.md`. Must be a stable identity that changes
    *  per edit, otherwise a re-sent EDITOR_OPEN cannot be acked. */
-  onOpened?: () => void;
+  onOpened?: (draftBytes: number) => void;
   onSave: (content: string) => void;
   onCancel: () => void;
 }
@@ -55,12 +56,47 @@ export function RemoteEditorPanel({
   const [draft, setDraft] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<EditorHistoryEntry[]>([]);
+  /** Identity of the edit whose text is currently in `draft`; null while the
+   *  panel is closed or showing an image. */
+  const [loadedKey, setLoadedKey] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const isFullscreenInput = mode === 'fullscreen-input';
   const isImage = !isFullscreenInput && (contentType?.startsWith('image/') ?? false);
   /** History only makes sense for the $EDITOR path: the fullscreen-input draft
    *  already persists forever under its own key, and images are view-only. */
   const historyEnabled = !isFullscreenInput && !isImage;
+  /** Reported with the ack, so the log can separate "the panel is up" from
+   *  "the panel is up *with the file in it*". Kept in a ref because the ack
+   *  effect must not re-fire on every keystroke. */
+  const loadedBytesRef = useRef(0);
+
+  // The text is derived during *render*, not assigned by an effect. This
+  // component never unmounts (`open` is a prop), so `draft` carries the
+  // previous edit's text across opens — and an effect-assigned value lands one
+  // or more frames after the commit that `onEditorOpen`'s flushSync put on
+  // screen. Every Ctrl+G therefore painted stale (or, on the first open of a
+  // page load, empty) text until React got around to flushing passive effects,
+  // which is the same scheduler that was observed starving for 12.2 s in a
+  // WKWebView — and why tapping any button "fixed" it: React flushes pending
+  // passive effects before a discrete event. Deriving it here puts the content
+  // in the same commit as the panel, so there is no queue left to starve.
+  // See `todo-bug-remote-editor-stale-content.md`.
+  const openKey = open && !isImage ? `${mode}\u0000${filePath}` : null;
+  if (openKey !== loadedKey) {
+    const initial = openKey === null
+      ? ''
+      : isFullscreenInput
+        ? getBatchInputDraft()
+        // localStorage draft wins over server content so in-progress edits
+        // survive session switch / reconnect.
+        : getRemoteEditorDraft(filePath) ?? content;
+    loadedBytesRef.current = initial.length;
+    setLoadedKey(openKey);
+    setDraft(initial);
+    // A history list left up when the last edit ended must not be what the
+    // next one opens into.
+    setHistoryOpen(false);
+  }
 
   useShakeToUndoOnFocus(textareaRef);
   const handleAutocorrectToggle = useAutocorrectToggle(textareaRef, onAutocorrectToggle);
@@ -70,20 +106,17 @@ export function RemoteEditorPanel({
     return `data:${contentType};base64,${content}`;
   }, [isImage, content, contentType]);
 
-  // localStorage draft wins over server content so in-progress edits
-  // survive session switch / reconnect. Fullscreen-input mode shares the
-  // mobitty-batch-input key with the inline BatchInputPanel.
-  useEffect(() => {
-    if (!open || isImage) return;
-    if (isFullscreenInput) {
-      setDraft(getBatchInputDraft());
-    } else {
-      setDraft(getRemoteEditorDraft(filePath) ?? content);
-    }
-    setTimeout(() => {
+  // Focus is the one part of opening that needs the DOM, so it stays an
+  // effect — a layout one, for the same reason the ack is: the passive queue
+  // is not something a blocked PTY should wait on. The timeout defers the
+  // focus past the commit, which mobile WebKit needs to raise the keyboard.
+  useLayoutEffect(() => {
+    if (openKey === null) return;
+    const id = setTimeout(() => {
       textareaRef.current?.focus({ preventScroll: true });
     }, 0);
-  }, [open, content, isImage, isFullscreenInput, filePath]);
+    return () => clearTimeout(id);
+  }, [openKey]);
 
   // Report that the panel is on screen. Deliberately *not* fired from the
   // WebSocket handler that parsed EDITOR_OPEN — the point of the ack is to
@@ -95,16 +128,18 @@ export function RemoteEditorPanel({
   // inside the commit, so a missing ack now means "React never committed"
   // rather than "the effect queue is backed up".
   useLayoutEffect(() => {
-    if (open) onOpened?.();
+    if (open) onOpened?.(loadedBytesRef.current);
   }, [open, onOpened]);
 
   // Re-read the ring whenever the panel opens — or when a back-to-back edit
   // swaps the file underneath an already-open panel. A sibling tab or the
   // App-level stale-draft sweep may have added entries since the last render.
+  // Deliberately left on the passive queue: this parses up to 1.5 MB of JSON
+  // and only decides whether a History button is drawn, which is not worth
+  // holding the paint of an overlay a PTY process is blocked on.
   useEffect(() => {
     if (!open || !historyEnabled) return;
     setHistory(listEditorHistory());
-    setHistoryOpen(false);
   }, [open, historyEnabled, filePath]);
 
   /** Record `text` so it can be brought back later. `baseline` is the

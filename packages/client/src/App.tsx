@@ -669,14 +669,23 @@ export function App() {
     setPendingShellSelection(false);
   }, []);
 
-  const handleEditorOpened = useCallback(() => {
+  const handleEditorOpened = useCallback((draftBytes: number) => {
     // `editorOpenSeq` is read, not just listed as a dep: this callback's
     // identity is what re-fires the panel's ack effect, so a re-sent
     // EDITOR_OPEN (same editId) must still produce a fresh one. As an unused
     // dep, lint autofix or the React Compiler's own dependency analysis would
     // drop it and silently un-ack every retry.
     void editorOpenSeq;
-    if (editorEditId > 0) terminalRef.current?.core?.sendEditorAck(editorEditId);
+    if (editorEditId > 0) {
+      // `draftBytes` is what the textarea actually renders, against the
+      // `bytes` on `editor panel opening` — the two disagreeing is the
+      // signature of a panel that is up but showing the wrong text.
+      // See todo-bug-remote-editor-stale-content.md.
+      terminalRef.current?.core?.clientLogger.info('editor draft loaded', {
+        editId: editorEditId, draftBytes,
+      });
+      terminalRef.current?.core?.sendEditorAck(editorEditId);
+    }
   }, [editorEditId, editorOpenSeq]);
 
   const handleEditorSave = useCallback((content: string) => {
