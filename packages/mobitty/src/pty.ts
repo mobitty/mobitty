@@ -63,10 +63,35 @@ export function writePty(handle: PtyHandle, data: string): void {
   handle.pty.write(data);
 }
 
-export function resizePty(handle: PtyHandle, columns: number, rows: number): void {
+/** A resize that lost the race with the child's death: node-pty knows the pty
+ *  is gone but has not told us yet. ConPTY throws on the exit code it already
+ *  recorded; POSIX fails the ioctl because the master fd is closed. */
+function isExitedPtyError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : '';
+  return message.includes('already exited')     // Windows (ConPTY)
+    || message.includes('ioctl(2) failed');     // POSIX (closed master fd)
+}
+
+/** Resize the pty. Returns false if the child had already exited.
+ *
+ *  node-pty learns of the exit before it emits `exit` — on Windows the event
+ *  waits for the conpty data pipe to drain and close, which lags the exit and
+ *  for some shells never happens at all. Resizing inside that window throws
+ *  synchronously in whichever socket handler asked for the resize, which is an
+ *  uncaught exception that kills the server. Checking liveness first cannot
+ *  close the race (the child can exit between the check and the syscall), so
+ *  the failure is reported to the caller instead: it means the session is
+ *  dead, which is news the caller is expected to act on. */
+export function resizePty(handle: PtyHandle, columns: number, rows: number): boolean {
   handle.columns = columns;
   handle.rows = rows;
-  handle.pty.resize(columns, rows);
+  try {
+    handle.pty.resize(columns, rows);
+    return true;
+  } catch (error) {
+    if (isExitedPtyError(error)) return false;
+    throw error;
+  }
 }
 
 export function pausePty(handle: PtyHandle): void {

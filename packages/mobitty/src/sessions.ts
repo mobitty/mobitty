@@ -342,15 +342,7 @@ export class SessionRegistry {
           headless.write(normalizeSgrColors(data)); notifyChange();
         },
         onExit: () => {
-          const entry = this.sessions.get(sessionId);
-          if (entry) {
-            entry.alive = false;
-            entry.handle = null;
-            this.persist();
-            this.logger.info('session process exited', { sessionId, name });
-            for (const cb of entry.onExitCallbacks) cb();
-            entry.onExitCallbacks.length = 0;
-          }
+          this.markExited(sessionId, 'pty exit event');
         },
       },
     );
@@ -570,6 +562,20 @@ export class SessionRegistry {
     this.persist();
   }
 
+  /** Run a session's exit path once: drop the handle and notify whoever is
+   *  attached. Called from node-pty's `exit` event, and from anywhere else
+   *  that learns the child is gone before that event arrives. */
+  private markExited(sessionId: string, reason: string): void {
+    const entry = this.sessions.get(sessionId);
+    if (!entry || !entry.alive) return;
+    entry.alive = false;
+    entry.handle = null;
+    this.persist();
+    this.logger.info('session process exited', { sessionId, name: entry.name, reason });
+    for (const cb of entry.onExitCallbacks) cb();
+    entry.onExitCallbacks.length = 0;
+  }
+
   resizeSession(sessionId: string, columns: number, rows: number): void {
     const entry = this.sessions.get(sessionId);
     if (!entry?.handle) return;
@@ -581,7 +587,13 @@ export class SessionRegistry {
     const beforeAltSamples = entry.headless ? sampleAltBuffer(entry.headless, 4, 60) : null;
     const beforeRepeat = entry.headless ? detectLineRepetition(entry.headless) : null;
 
-    resizePty(entry.handle, columns, rows);
+    if (!resizePty(entry.handle, columns, rows)) {
+      // The pty outlived its child: node-pty had not emitted `exit` yet, so the
+      // session still looked alive. This resize is the earliest — sometimes the
+      // only — notice we get, so treat it as the exit event.
+      this.markExited(sessionId, 'resize on exited pty');
+      return;
+    }
     if (entry.headless) {
       entry.headless.resize(columns, rows);
     }

@@ -174,6 +174,28 @@ describe('SessionRegistry', () => {
     assert.equal(headless.rows, 40);
   });
 
+  it('resizeSession survives a pty that exited before node-pty reported it', () => {
+    const { info, handle } = registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
+    let exited = false;
+    registry.attachSession(info.sessionId, () => { exited = true; }, () => {});
+    // node-pty knows the child is gone but has not emitted `exit` yet: resize
+    // throws instead of returning.
+    handle.pty.resize = () => { throw new Error('Cannot resize a pty that has already exited'); };
+
+    registry.resizeSession(info.sessionId, 120, 40);
+
+    assert.ok(exited, 'the failed resize should be reported as the session exit');
+    assert.equal(registry.getSession(info.sessionId)?.info.alive, false);
+    assert.equal(registry.getHandle(info.sessionId), null);
+  });
+
+  it('resizeSession propagates resize failures that are not an exited pty', () => {
+    const { info, handle } = registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
+    handle.pty.resize = () => { throw new Error('something else went wrong'); };
+    assert.throws(() => registry.resizeSession(info.sessionId, 120, 40), /something else went wrong/);
+    assert.equal(registry.getSession(info.sessionId)?.info.alive, true);
+  });
+
   it('destroyAll kills all sessions', () => {
     registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
     registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
