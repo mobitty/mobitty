@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { SessionRegistry } from './sessions.ts';
+import { killPty } from './pty.ts';
 
 const noopLogger = {
   debug() {},
@@ -182,11 +183,18 @@ describe('SessionRegistry', () => {
     // throws instead of returning.
     handle.pty.resize = () => { throw new Error('Cannot resize a pty that has already exited'); };
 
-    registry.resizeSession(info.sessionId, 120, 40);
+    try {
+      registry.resizeSession(info.sessionId, 120, 40);
 
-    assert.ok(exited, 'the failed resize should be reported as the session exit');
-    assert.equal(registry.getSession(info.sessionId)?.info.alive, false);
-    assert.equal(registry.getHandle(info.sessionId), null);
+      assert.ok(exited, 'the failed resize should be reported as the session exit');
+      assert.equal(registry.getSession(info.sessionId)?.info.alive, false);
+      assert.equal(registry.getHandle(info.sessionId), null);
+    } finally {
+      // The exit was faked, so the shell is still running, and the registry
+      // dropped the handle, so destroyAll() cannot reach it. Reap it here or
+      // its pty keeps this file's event loop alive and the suite never exits.
+      killPty(handle);
+    }
   });
 
   it('resizeSession propagates resize failures that are not an exited pty', () => {
