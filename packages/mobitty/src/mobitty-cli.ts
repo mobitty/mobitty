@@ -4,7 +4,7 @@
 //
 // Subcommands:
 //   edit <path>      Open file in browser editor
-//   view <path>      View image in browser (read-only)
+//   view <path>      View a file or folder in the browser (read-only)
 //   download <path>  Download file to browser
 //
 // For use as $EDITOR/$VISUAL, the dedicated `mobitty-cli-edit` bin is set

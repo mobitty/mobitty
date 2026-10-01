@@ -3,6 +3,8 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { release, homedir } from 'node:os';
 import type { PtyHandle, SessionInfo, EditorResult } from './types.ts';
+import { VIEWER_CLOSE, VIEWER_OPEN } from './types.ts';
+import type { ViewEntry } from './viewer.ts';
 import { spawnPty, writePty, resizePty, killPty } from './pty.ts';
 import { generateUniqueSessionName } from './session-names.ts';
 import type { LoggerInterface } from './types.ts';
@@ -43,6 +45,21 @@ export type EditorSender = (editId: number, filePath: string, content: string, c
  *  `todo-bug-remote-editor-hangs-no-panel.md`. */
 const EDITOR_ACK_TIMEOUT_MS = 2000;
 
+/** The VIEWER_OPEN payload — kept whole so it can be replayed on attach.
+ *  See docs/todo-design-file-viewer.md. */
+export interface ViewerOpenPayload {
+  viewId: number;
+  root: string;
+  isDir: boolean;
+  entries: ViewEntry[];
+  truncated: boolean;
+  initial?: string;
+}
+
+/** Sends one viewer frame (`cmd` + JSON) to the attached client. Returns
+ *  `false` when the socket could not take it — same contract as EditorSender. */
+export type ViewerSender = (cmd: number, json: string) => boolean;
+
 interface SessionEntry {
   sessionId: string;
   name: string;
@@ -80,6 +97,11 @@ interface SessionEntry {
     ackTimer: NodeJS.Timeout | null;
   } | null;
   editorSender: EditorSender | null;
+  viewerPending: {
+    open: ViewerOpenPayload;
+    resolve: () => void;
+  } | null;
+  viewerSender: ViewerSender | null;
   downloadSender: ((fileName: string, fileSize: number, token: string) => void) | null;
   /** Set by the attached connection; relays OSC 52 clipboard writes to it.
    *  `null` text means the payload blew the size cap — the client surfaces
@@ -111,6 +133,8 @@ export class SessionRegistry {
   /** Monotonic across all sessions, so an edit id is never ambiguous in a log
    *  line or in an EDITOR_ACK / EDITOR_DONE that arrives on the wrong session. */
   private nextEditId = 1;
+  /** Monotonic across all sessions, for the same reason as `nextEditId`. */
+  private nextViewId = 1;
 
   constructor(dataFolder: string, logger: LoggerInterface, maxSessions = 0, startDir = '') {
     this.dataFolder = dataFolder;
@@ -179,6 +203,8 @@ export class SessionRegistry {
         onChangeCallbacks: [],
         editorPending: null,
         editorSender: null,
+        viewerPending: null,
+        viewerSender: null,
         downloadSender: null,
         clipboardSender: null,
         scrollCount: 0,
@@ -371,6 +397,8 @@ export class SessionRegistry {
       onChangeCallbacks,
       editorPending: null,
       editorSender: null,
+      viewerPending: null,
+      viewerSender: null,
       downloadSender: null,
       clipboardSender: null,
       scrollCount: 0,
@@ -499,6 +527,7 @@ export class SessionRegistry {
     const entry = this.sessions.get(sessionId);
     if (!entry) return false;
     this.cancelPendingEdit(entry);
+    this.cancelPendingView(entry);
     if (entry.alive && entry.handle) {
       killPty(entry.handle);
       entry.alive = false;
@@ -533,6 +562,7 @@ export class SessionRegistry {
     this.logger.info('destroying all sessions', { count: this.sessions.size });
     for (const entry of this.sessions.values()) {
       this.cancelPendingEdit(entry);
+      this.cancelPendingView(entry);
       if (entry.alive && entry.handle) {
         killPty(entry.handle);
         entry.alive = false;
@@ -781,6 +811,102 @@ export class SessionRegistry {
     entry.editorPending.resolve({ content, cancelled });
     entry.editorPending = null;
     return true;
+  }
+
+  // ── File Viewer ──────────────────────────────────────────────────────────
+
+  setViewerSender(sessionId: string, fn: ViewerSender): void {
+    const entry = this.sessions.get(sessionId);
+    if (entry) entry.viewerSender = fn;
+  }
+
+  /** Clear only if `fn` is still the registered sender — see clearEditorSender. */
+  clearViewerSender(sessionId: string, fn: ViewerSender): void {
+    const entry = this.sessions.get(sessionId);
+    if (entry?.viewerSender === fn) entry.viewerSender = null;
+  }
+
+  /** The open view's VIEWER_OPEN payload, for replay on attach and for
+   *  validating VIEWER_REQUEST / VIEWER_DONE. */
+  getViewerPending(sessionId: string): ViewerOpenPayload | undefined {
+    return this.sessions.get(sessionId)?.viewerPending?.open;
+  }
+
+  /** Open a viewer and resolve when the user closes it. At most one per
+   *  session. `onAbort` hooks the CLI's HTTP response: if the CLI goes away the
+   *  view is dropped and the client told to close it. */
+  requestView(
+    sessionId: string,
+    listing: Omit<ViewerOpenPayload, 'viewId'>,
+    onAbort: (cleanup: () => void) => void,
+  ): Promise<void> {
+    const entry = this.sessions.get(sessionId);
+    const summary = {
+      sessionId, root: listing.root, isDir: listing.isDir,
+      entries: listing.entries.length, truncated: listing.truncated,
+    };
+    this.logger.info('viewer requested', summary);
+    if (!entry) return Promise.reject(new Error('Session not found'));
+    if (entry.viewerPending) {
+      this.logger.warn('viewer request rejected', {
+        ...summary, reason: 'view already open', openRoot: entry.viewerPending.open.root,
+      });
+      return Promise.reject(new Error('View already open'));
+    }
+    if (!entry.viewerSender) {
+      this.logger.warn('viewer request rejected', { ...summary, reason: 'no viewer sender registered' });
+      return Promise.reject(new Error('No client connected'));
+    }
+
+    const open: ViewerOpenPayload = { viewId: this.nextViewId++, ...listing };
+    return new Promise<void>((resolve, reject) => {
+      entry.viewerPending = { open, resolve };
+      if (!entry.viewerSender!(VIEWER_OPEN, JSON.stringify(open))) {
+        entry.viewerPending = null;
+        this.logger.warn('viewer request rejected', { ...summary, reason: 'send failed' });
+        reject(new Error('No client connected'));
+        return;
+      }
+      this.logger.info('viewer open sent', { ...summary, viewId: open.viewId });
+
+      // Identity check: `onAbort` also fires after a normal close, by which
+      // time `viewerPending` may belong to a newer view.
+      onAbort(() => {
+        if (entry.viewerPending?.resolve !== resolve) return;
+        entry.viewerPending = null;
+        this.logger.info('viewer aborted — CLI gone', { sessionId, viewId: open.viewId });
+        entry.viewerSender?.(VIEWER_CLOSE, JSON.stringify({ viewId: open.viewId }));
+        resolve();
+      });
+    });
+  }
+
+  /** Send a viewer frame to whichever connection currently owns the session. */
+  sendViewer(sessionId: string, cmd: number, json: string): boolean {
+    return this.sessions.get(sessionId)?.viewerSender?.(cmd, json) ?? false;
+  }
+
+  /** The user closed the viewer. Ignored unless `viewId` is the open view. */
+  completeView(sessionId: string, viewId: number): boolean {
+    const entry = this.sessions.get(sessionId);
+    const pending = entry?.viewerPending;
+    if (!entry || !pending || pending.open.viewId !== viewId) {
+      this.logger.warn('viewer done ignored', { sessionId, viewId, openViewId: pending?.open.viewId ?? null });
+      return false;
+    }
+    entry.viewerPending = null;
+    this.logger.info('viewer closed', { sessionId, viewId });
+    pending.resolve();
+    return true;
+  }
+
+  private cancelPendingView(entry: SessionEntry): void {
+    if (!entry.viewerPending) return;
+    this.logger.info('viewer closed — session gone', {
+      sessionId: entry.sessionId, viewId: entry.viewerPending.open.viewId,
+    });
+    entry.viewerPending.resolve();
+    entry.viewerPending = null;
   }
 
   // ── File Download ────────────────────────────────────────────────────────

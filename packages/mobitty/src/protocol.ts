@@ -7,6 +7,7 @@ import {
   CLIPBOARD_IMAGE, CLIPBOARD_IMAGE_ACK, RTT_REPORT, SESSION_ALERT, SESSION_NOTIFICATION,
   EDITOR_OPEN, EDITOR_DONE, EDITOR_ACK, DOWNLOAD_START, CLIPBOARD_WRITE,
   FILE_UPLOAD, FILE_UPLOAD_ACK,
+  VIEWER_OPEN, VIEWER_FILE, VIEWER_NOTICE, VIEWER_REQUEST, VIEWER_DONE,
   HEARTBEAT_INTERVAL_MS, HEARTBEAT_TIMEOUT_MS,
   isResizeMessage, isHandshakeMessage, isUpdateSettingsMessage,
   isClientLogBatch,
@@ -23,6 +24,8 @@ import type { Logger } from './logger.ts';
 import { captureSnapshot, generateDiff, serializeFullState, compareSnapshots, bufferStats, summarizeBytes, sampleBufferLines, sampleAltBuffer, detectLineRepetition } from './diff.ts';
 import type { FrameSnapshot } from './diff.ts';
 import { resolveCliBin, ensureCliBinShim } from './cli-bin.ts';
+import { readViewFile, resolveInRoot } from './viewer.ts';
+import { writeFile } from 'node:fs/promises';
 
 import headlessPkg from '@xterm/headless';
 const { Terminal: HeadlessTerminal } = headlessPkg;
@@ -151,6 +154,14 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
     if (contentType) payload['contentType'] = contentType;
     sendBinary(ws, EDITOR_OPEN, JSON.stringify(payload));
     socketLogger.info('EDITOR_OPEN sent', { editId, filePath, bytes: content.length, contentType: contentType ?? null });
+    return true;
+  };
+  const viewerSender = (cmd: number, json: string): boolean => {
+    if (ws.readyState !== 1) {
+      socketLogger.warn('viewer frame not sent — socket not open', { cmd, readyState: ws.readyState });
+      return false;
+    }
+    sendBinary(ws, cmd, json);
     return true;
   };
   const downloadSender = (fileName: string, fileSize: number, token: string): void => {
@@ -508,6 +519,14 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
               sendBinary(ws, EDITOR_OPEN, JSON.stringify(pending));
             }
 
+            // Register viewer sender and re-send the open view if any
+            registry.setViewerSender(sessionId, viewerSender);
+            const view = registry.getViewerPending(sessionId);
+            if (view) {
+              socketLogger.info('VIEWER_OPEN replayed on attach', { viewId: view.viewId, root: view.root });
+              sendBinary(ws, VIEWER_OPEN, JSON.stringify(view));
+            }
+
             // Register download sender
             registry.setDownloadSender(sessionId, downloadSender);
 
@@ -571,6 +590,8 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
 
         // Register editor sender for newly created session
         registry.setEditorSender(sessionId, editorSender);
+
+        registry.setViewerSender(sessionId, viewerSender);
 
         // Register download sender for newly created session
         registry.setDownloadSender(sessionId, downloadSender);
@@ -787,6 +808,44 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       return;
     }
 
+    if (command === VIEWER_REQUEST || command === VIEWER_DONE) {
+      if (sessionId === null) return;
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(buf.subarray(1).toString('utf-8'));
+      } catch {
+        socketLogger.debug('viewer message parse failed', { command });
+        return;
+      }
+      if (typeof parsed !== 'object' || parsed === null) return;
+      const r = parsed as Record<string, unknown>;
+      const viewId = r['viewId'];
+      if (typeof viewId !== 'number') return;
+      if (command === VIEWER_DONE) {
+        registry.completeView(sessionId, viewId);
+        return;
+      }
+      const action = r['action'];
+      const relPath = r['path'];
+      if ((action !== 'read' && action !== 'edit') || typeof relPath !== 'string') return;
+      const view = registry.getViewerPending(sessionId);
+      if (!view || view.viewId !== viewId) {
+        socketLogger.warn('VIEWER_REQUEST ignored — not the open view', {
+          viewId, openViewId: view?.viewId ?? null, action,
+        });
+        return;
+      }
+      if (action === 'read') {
+        void readViewFile(view.root, relPath).then(file => {
+          viewerSender(VIEWER_FILE, JSON.stringify({ viewId, ...file }));
+          socketLogger.debug('VIEWER_FILE sent', { viewId, path: relPath, kind: file.kind, size: file.size });
+        });
+      } else {
+        void editFromViewer(sessionId, viewId, view.root, relPath);
+      }
+      return;
+    }
+
     if (command === EDITOR_ACK) {
       if (sessionId === null) return;
       let parsed: unknown;
@@ -804,6 +863,41 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
     }
   });
 
+  /** Edit a viewed file through the regular remote-editor flow, then write it
+   *  and refresh the preview. Replies go through the registry, not this
+   *  socket: the save can land on a later connection. */
+  async function editFromViewer(sid: string, viewId: number, root: string, relPath: string): Promise<void> {
+    const notice = (message: string): void => {
+      registry.sendViewer(sid, VIEWER_NOTICE, JSON.stringify({ viewId, message }));
+    };
+    const abs = resolveInRoot(root, relPath);
+    const file = await readViewFile(root, relPath);
+    if (abs === null || file.kind !== 'text' || file.content === undefined) {
+      notice(file.kind === 'error' ? `Cannot edit: ${file.error ?? 'unreadable'}` : `Cannot edit a ${file.kind} file`);
+      return;
+    }
+    let result;
+    try {
+      // No abort hook: nothing HTTP is waiting on this edit.
+      result = await registry.requestEdit(sid, abs, file.content, () => {});
+    } catch (err) {
+      notice(`Cannot edit: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    if (result.cancelled) return;
+    try {
+      await writeFile(abs, result.content);
+    } catch (err) {
+      socketLogger.warn('viewer edit write failed', { viewId, path: relPath, error: String(err) });
+      notice(`Save failed: ${err instanceof Error ? err.message : String(err)}`);
+      return;
+    }
+    socketLogger.info('viewer edit saved', { viewId, path: relPath, bytes: result.content.length });
+    if (registry.getViewerPending(sid)?.viewId !== viewId) return;
+    const fresh = await readViewFile(root, relPath);
+    registry.sendViewer(sid, VIEWER_FILE, JSON.stringify({ viewId, ...fresh }));
+  }
+
   ws.on('close', () => {
     clearInterval(heartbeatInterval);
     stopSync();
@@ -812,6 +906,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
     if (sessionId !== null) {
       // Identity-checked: a newer connection may already own this session.
       registry.clearEditorSender(sessionId, editorSender);
+      registry.clearViewerSender(sessionId, viewerSender);
       registry.clearDownloadSender(sessionId, downloadSender);
       registry.clearClipboardSender(sessionId, clipboardSender);
     }

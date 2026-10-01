@@ -7,7 +7,7 @@
 import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
-import { extname, basename } from 'node:path';
+import { extname, basename, resolve } from 'node:path';
 
 export const IMAGE_EXTENSIONS: Record<string, string> = {
   '.png': 'image/png',
@@ -119,20 +119,20 @@ export async function runEdit(env: CliEnv, prefix: string, filePath: string): Pr
   }
 }
 
-export async function runView(env: CliEnv, prefix: string, filePath: string): Promise<void> {
-  if (!existsSync(filePath)) fail(prefix, 'file not found');
-  const ext = extname(filePath).toLowerCase();
-  const contentType = IMAGE_EXTENSIONS[ext] ?? 'application/octet-stream';
-  const content = readFileSync(filePath).toString('base64');
+/** Open the file viewer on a file or folder and block until the user closes
+ *  it, like a pager. The server lists and reads; see
+ *  docs/todo-design-file-viewer.md. */
+export async function runView(env: CliEnv, prefix: string, targetPath: string): Promise<void> {
+  const absPath = resolve(targetPath);
+  if (!existsSync(absPath)) fail(prefix, `not found: ${targetPath}`);
 
   const result = await httpPost(
     env,
-    `/api/sessions/${encodeURIComponent(env.sessionId)}/editor`,
-    JSON.stringify({ filePath, content, contentType }),
+    `/api/sessions/${encodeURIComponent(env.sessionId)}/viewer`,
+    JSON.stringify({ path: absPath }),
   );
 
   if (result.status !== 200) fail(prefix, `server error ${result.status}: ${result.body}`);
-  // View is read-only — never write back
 }
 
 export async function runDownload(env: CliEnv, prefix: string, filePath: string): Promise<void> {

@@ -8,6 +8,7 @@ import { type ProfileStore, DEFAULT_PROFILE_NAMES } from './profiles.ts';
 import { type ThemeStore, BUILTIN_THEME_NAMES } from './themes.ts';
 import type { ShellStore } from './shells.ts';
 import type { SessionRegistry } from './sessions.ts';
+import { listViewTree } from './viewer.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -201,6 +202,12 @@ function parseSessionOrderPath(pathname: string): string | undefined {
 
 function parseSessionEditorPath(pathname: string): string | undefined {
   const match = /^\/api\/sessions\/([a-f0-9-]{36})\/editor$/.exec(pathname);
+  if (match) return match[1];
+  return undefined;
+}
+
+function parseSessionViewerPath(pathname: string): string | undefined {
+  const match = /^\/api\/sessions\/([a-f0-9-]{36})\/viewer$/.exec(pathname);
   if (match) return match[1];
   return undefined;
 }
@@ -509,6 +516,75 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
         if (msg === 'Session not found') {
           jsonResponse(res, 404, { error: msg });
         } else if (msg === 'Edit already in progress') {
+          jsonResponse(res, 409, { error: msg });
+        } else if (msg === 'No client connected') {
+          jsonResponse(res, 503, { error: msg });
+        } else {
+          jsonResponse(res, 500, { error: msg });
+        }
+      }
+    }).catch(() => {
+      jsonResponse(res, 400, { error: 'Failed to read request body' });
+    });
+    return;
+  }
+
+  // `mobitty-cli view <path>` — held open until the user closes the viewer.
+  // See docs/todo-design-file-viewer.md.
+  const sessionViewerPath = parseSessionViewerPath(pathname);
+  if (sessionViewerPath !== undefined && method === 'POST') {
+    readBody(req).then(async body => {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(body);
+      } catch {
+        jsonResponse(res, 400, { error: 'Invalid JSON' });
+        return;
+      }
+      if (typeof parsed !== 'object' || parsed === null) {
+        jsonResponse(res, 400, { error: 'Invalid body' });
+        return;
+      }
+      const target = (parsed as Record<string, unknown>)['path'];
+      if (typeof target !== 'string' || !isAbsolute(target)) {
+        jsonResponse(res, 400, { error: 'path must be absolute' });
+        return;
+      }
+
+      let isDir: boolean;
+      let fileSize: number;
+      try {
+        const st = statSync(target);
+        if (!st.isDirectory() && !st.isFile()) {
+          jsonResponse(res, 400, { error: 'Not a file or directory' });
+          return;
+        }
+        isDir = st.isDirectory();
+        fileSize = st.size;
+      } catch {
+        jsonResponse(res, 404, { error: 'Path not found or not accessible' });
+        return;
+      }
+
+      // A file view is rooted at its parent so relative Markdown images resolve.
+      const listing = isDir
+        ? { root: target, isDir, ...(await listViewTree(target)) }
+        : {
+            root: dirname(target), isDir, truncated: false,
+            entries: [[basename(target), fileSize] as [string, number]],
+            initial: basename(target),
+          };
+
+      try {
+        // Hook the response, not the request — see the /editor route above.
+        await registry.requestView(sessionViewerPath, listing, (cleanup) => { res.on('close', cleanup); });
+        if (res.writableEnded || res.destroyed) return; // CLI already gone
+        jsonResponse(res, 200, { ok: true });
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg === 'Session not found') {
+          jsonResponse(res, 404, { error: msg });
+        } else if (msg === 'View already open') {
           jsonResponse(res, 409, { error: msg });
         } else if (msg === 'No client connected') {
           jsonResponse(res, 503, { error: msg });

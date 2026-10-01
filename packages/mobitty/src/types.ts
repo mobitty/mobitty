@@ -16,6 +16,10 @@ export const EDITOR_OPEN = 0x3b;         // ';' — remote editor: open file for
 export const DOWNLOAD_START = 0x3c;      // '<' — file download: {fileName, fileSize, token}
 export const FILE_UPLOAD_ACK = 0x3d;     // '=' — file upload ACK: {requestId, status, savedName|errorJson}
 export const CLIPBOARD_WRITE = 0x3e;     // '>' — TUI clipboard write (OSC 52 relay): [status:1][text:utf8]
+export const VIEWER_OPEN = 0x3f;         // '?' — file viewer: {viewId, root, isDir, entries, truncated, initial?}
+export const VIEWER_FILE = 0x40;         // '@' — file viewer: {viewId, path, kind, size, mtimeMs, content?, contentType?, error?}
+export const VIEWER_CLOSE = 0x41;        // 'A' — file viewer: the CLI went away: {viewId}
+export const VIEWER_NOTICE = 0x42;       // 'B' — file viewer: user-facing message: {viewId, message}
 
 // Client -> Server
 export const INPUT = 0x30;             // '0'
@@ -26,6 +30,8 @@ export const CLIENT_LOG = 0x39;       // '9' — client log forwarding: {seq, le
 export const EDITOR_DONE = 0x3a;      // ':' — remote editor: done editing: {editId?, content, cancelled}
 export const EDITOR_ACK = 0x3b;       // ';' — remote editor: panel is on screen: {editId}
 export const FILE_UPLOAD = 0x3d;      // '=' — generic file upload: {requestId, filenameLen u16, filename, data}
+export const VIEWER_REQUEST = 0x3f;   // '?' — file viewer: {viewId, action: 'read'|'edit', path}
+export const VIEWER_DONE = 0x40;      // '@' — file viewer: closed by the user: {viewId}
 export const JSON_DATA = 0x7b;        // '{'
 
 // Logging types
