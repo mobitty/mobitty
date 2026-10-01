@@ -11,7 +11,7 @@ interface ShellSelectionPanelProps {
 export function ShellSelectionPanel({ shells, onSelect }: ShellSelectionPanelProps) {
   const [focusedIndex, setFocusedIndex] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
-  const focusedRef = useRef<HTMLDivElement>(null);
+  const focusedRef = useRef<HTMLButtonElement>(null);
 
   // Keyboard navigation
   useEffect(() => {
@@ -52,20 +52,22 @@ export function ShellSelectionPanel({ shells, onSelect }: ShellSelectionPanelPro
         {shells.map((shell, index) => {
           const isFocused = index === focusedIndex;
           return (
-            <div
+            <button
+              type="button"
               key={shell.name}
               ref={isFocused ? focusedRef : undefined}
-              className={`flex items-center gap-2 px-3 py-2 rounded-md border border-border cursor-pointer hover:bg-accent ${isFocused ? 'ring-2 ring-primary' : ''}`}
+              className={`w-full text-left flex items-center gap-2 px-3 py-2 rounded-md border border-border cursor-pointer hover:bg-accent ${isFocused ? 'ring-2 ring-primary' : ''}`}
+              onFocus={() => setFocusedIndex(index)}
               onClick={() => onSelect(shell.name)}
             >
-              <div className="flex-1 min-w-0">
-                <span className="text-sm font-medium">{shell.name}</span>
-                <div className="text-xs text-muted-foreground truncate">{shell.command ?? shell.argv.join(' ')}</div>
-              </div>
+              <span className="flex-1 min-w-0">
+                <span className="block text-sm font-medium">{shell.name}</span>
+                <span className="block text-xs text-muted-foreground truncate">{shell.command ?? shell.argv.join(' ')}</span>
+              </span>
               <Badge variant={shell.source === 'saved' ? 'default' : 'outline'} className="shrink-0 text-xs">
                 {shell.source === 'saved' ? 'saved' : 'auto'}
               </Badge>
-            </div>
+            </button>
           );
         })}
       </div>

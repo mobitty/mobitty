@@ -40,7 +40,7 @@ export function SessionPanel({ open, onClose, sessions, onRefreshSessions, curre
   const [shells, setShells] = useState<ShellInfo[]>([]);
   const [shellsLoading, setShellsLoading] = useState(false);
   const [shellFocusedIndex, setShellFocusedIndex] = useState(0);
-  const shellFocusedRef = useRef<HTMLDivElement>(null);
+  const shellFocusedRef = useRef<HTMLButtonElement>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [openSwipe, setOpenSwipe] = useState<{ id: string; side: 'left' | 'right' } | null>(null);
@@ -300,20 +300,22 @@ export function SessionPanel({ open, onClose, sessions, onRefreshSessions, curre
             {shells.map((shell, index) => {
               const isFocused = index === shellFocusedIndex;
               return (
-                <div
+                <button
+                  type="button"
                   key={shell.name}
                   ref={isFocused ? shellFocusedRef : undefined}
-                  className={`flex items-center gap-2 px-3 py-2 rounded-md border border-border cursor-pointer hover:bg-accent ${isFocused ? 'ring-2 ring-primary' : ''}`}
+                  className={`w-full text-left flex items-center gap-2 px-3 py-2 rounded-md border border-border cursor-pointer hover:bg-accent ${isFocused ? 'ring-2 ring-primary' : ''}`}
+                  onFocus={() => setShellFocusedIndex(index)}
                   onClick={() => handleShellSelect(shell.name)}
                 >
-                  <div className="flex-1 min-w-0">
-                    <span className="text-sm font-medium">{shell.name}</span>
-                    <div className="text-xs text-muted-foreground truncate">{shell.command ?? shell.argv.join(' ')}</div>
-                  </div>
+                  <span className="flex-1 min-w-0">
+                    <span className="block text-sm font-medium">{shell.name}</span>
+                    <span className="block text-xs text-muted-foreground truncate">{shell.command ?? shell.argv.join(' ')}</span>
+                  </span>
                   <Badge variant={shell.source === 'saved' ? 'default' : 'outline'} className="shrink-0 text-xs">
                     {shell.source === 'saved' ? 'saved' : 'auto'}
                   </Badge>
-                </div>
+                </button>
               );
             })}
           </>
