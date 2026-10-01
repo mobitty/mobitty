@@ -23,7 +23,7 @@ import type { ShellStore } from './shells.ts';
 import type { Logger } from './logger.ts';
 import { captureSnapshot, generateDiff, serializeFullState, compareSnapshots, bufferStats, summarizeBytes, sampleBufferLines, sampleAltBuffer, detectLineRepetition } from './diff.ts';
 import type { FrameSnapshot } from './diff.ts';
-import { resolveCliBin, ensureCliBinShim } from './cli-bin.ts';
+import { resolveCliBin, ensureCliBinShim, ownCliScript } from './cli-bin.ts';
 import { readViewFile, resolveInRoot } from './viewer.ts';
 import { writeFile } from 'node:fs/promises';
 
@@ -33,6 +33,7 @@ const { Terminal: HeadlessTerminal } = headlessPkg;
 const VERIFY_DIFF = process.env['MOBITTY_VERIFY_DIFF'] === '1';
 const CLI_BIN = resolveCliBin('mobitty-cli');
 const CLI_EDIT_BIN = resolveCliBin('mobitty-cli-edit');
+const CLI_SCRIPT = ownCliScript('mobitty-cli');
 
 /** Update EMA-smoothed RTT and decide sync interval.
  *  < 20ms → 60fps (16ms), 20–50ms → dead zone, 50–100ms → 30fps (33ms),
@@ -458,6 +459,13 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         cliEnv['MOBITTY_CLI_HOST'] = state.config.host;
         if (state.config.tls) {
           cliEnv['MOBITTY_CLI_TLS'] = '1';
+        }
+        if (CLI_SCRIPT) {
+          // Whichever mobitty-cli the shell's PATH finds re-execs this one
+          // when it is a different install (cli-shared.ts delegateToSessionCli):
+          // rc files routinely rebuild PATH, so prepending to it is not enough.
+          cliEnv['MOBITTY_CLI_NODE'] = CLI_SCRIPT.nodePath;
+          cliEnv['MOBITTY_CLI_SCRIPT'] = CLI_SCRIPT.scriptPath;
         }
         if (remoteEditor && CLI_EDIT_BIN) {
           // Use the dedicated mobitty-cli-edit bin (no " edit" suffix) so

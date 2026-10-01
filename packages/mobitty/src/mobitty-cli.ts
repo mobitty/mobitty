@@ -12,9 +12,11 @@
 // var (e.g. GitHub Copilot) can exec it as a single binary path.
 
 import { resolve } from 'node:path';
-import { fail, readCliEnv, runEdit, runView, runDownload } from './cli-shared.ts';
+import { delegateToSessionCli, fail, readCliEnv, runEdit, runView, runDownload } from './cli-shared.ts';
 
 const PREFIX = 'mobitty-cli';
+
+delegateToSessionCli(import.meta.url);
 
 const subcommand = process.argv[2] ?? '';
 const rawPath = process.argv[3];

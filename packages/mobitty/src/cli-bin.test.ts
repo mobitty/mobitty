@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { resolveCliBin, ensureCliBinShim } from './cli-bin.ts';
+import { resolveCliBin, ensureCliBinShim, ownCliScript } from './cli-bin.ts';
 import type { CliBin } from './cli-bin.ts';
 
 // Windows' default Node install path — the case that broke the original
@@ -84,5 +84,18 @@ describe('resolveCliBin', () => {
       assert.equal(bin.nodePath, process.execPath);
       assert.ok(bin.scriptPath.length > 0);
     }
+  });
+});
+
+describe('ownCliScript', () => {
+  it('names the entry script next to this module, under this node', () => {
+    const bin = ownCliScript('mobitty-cli');
+    assert.ok(bin);
+    assert.equal(bin.nodePath, process.execPath);
+    assert.equal(bin.scriptPath, join(import.meta.dirname, 'mobitty-cli.ts'));
+  });
+
+  it('returns null for a bin this install does not ship', () => {
+    assert.equal(ownCliScript('mobitty-cli-nonexistent'), null);
   });
 });

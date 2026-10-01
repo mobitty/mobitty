@@ -52,18 +52,20 @@ export function resolveCliBin(binName: string): CliBin | null {
     dir = parent;
   }
 
-  // 2. Fall back to source file invocation (dev mode)
-  const sourceFile = join(thisDir, `${binName}.ts`);
-  if (existsSync(sourceFile)) {
-    return { kind: 'node', nodePath: process.execPath, scriptPath: sourceFile };
-  }
+  // 2. Fall back to invoking the entry script directly
+  return ownCliScript(binName);
+}
 
-  // 3. Try compiled .js (release output)
-  const compiledFile = join(thisDir, `${binName}.js`);
-  if (existsSync(compiledFile)) {
-    return { kind: 'node', nodePath: process.execPath, scriptPath: compiledFile };
+/** The entry script for `binName` that ships alongside this module — source
+ *  (dev) or compiled (release) — run under this process's node. Unlike an
+ *  installed shim, this is always *this* install's copy, so it identifies
+ *  which mobitty a session belongs to. */
+export function ownCliScript(binName: string): Extract<CliBin, { kind: 'node' }> | null {
+  const thisDir = dirname(fileURLToPath(import.meta.url));
+  for (const ext of ['.ts', '.js']) {
+    const scriptPath = join(thisDir, `${binName}${ext}`);
+    if (existsSync(scriptPath)) return { kind: 'node', nodePath: process.execPath, scriptPath };
   }
-
   return null;
 }
 

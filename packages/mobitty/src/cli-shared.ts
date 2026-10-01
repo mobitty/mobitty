@@ -4,7 +4,9 @@
 // per-action implementations. Each bin entry parses its own argv and invokes
 // the appropriate run* function.
 
-import { readFileSync, writeFileSync, existsSync, statSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, statSync, realpathSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { extname, basename, resolve } from 'node:path';
@@ -22,6 +24,32 @@ export const IMAGE_EXTENSIONS: Record<string, string> = {
 export function fail(prefix: string, msg: string): never {
   process.stderr.write(`${prefix}: ${msg}\n`);
   process.exit(1);
+}
+
+/** If the session names a different mobitty-cli than `selfUrl` (the
+ *  caller's import.meta.url), run that one with the same arguments and exit
+ *  with its status. The server that owns the session sets
+ *  MOBITTY_CLI_SCRIPT to its own copy, so a stale global install found
+ *  first on PATH still talks to the server through matching code. Returns
+ *  normally when this already is the session's CLI, or none is named. */
+export function delegateToSessionCli(selfUrl: string): void {
+  const script = process.env['MOBITTY_CLI_SCRIPT'];
+  if (!script) return;
+  try {
+    if (realpathSync(script) === realpathSync(fileURLToPath(selfUrl))) return;
+  } catch {
+    return; // named script is gone — fall back to running this copy
+  }
+  const node = process.env['MOBITTY_CLI_NODE'] || process.execPath;
+  // Ctrl-C reaches the child through the terminal's process group; it decides
+  // how to exit, and this process reports that.
+  process.on('SIGINT', () => {});
+  const result = spawnSync(node, [script, ...process.argv.slice(2)], { stdio: 'inherit' });
+  if (result.error) {
+    process.stderr.write(`mobitty-cli: cannot run ${script}: ${result.error.message}\n`);
+    process.exit(1);
+  }
+  process.exit(result.status ?? 1);
 }
 
 export interface CliEnv {
