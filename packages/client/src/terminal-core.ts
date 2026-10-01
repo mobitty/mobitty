@@ -24,6 +24,7 @@ import type { SessionInfo } from './sessions';
 import { findFontOption, loadFont } from './fonts';
 import { openExternalUrl } from './open-external-url';
 import { getNativeBridge } from './native-bridge';
+import type { ViewerAction, ViewerFileKind, ViewerFilePayload, ViewerOpenPayload } from './file-viewer/types';
 
 const CMD_CLIPBOARD_IMAGE = 0x36;
 const CMD_CLIPBOARD_IMAGE_ACK = 0x36;
@@ -38,6 +39,14 @@ const CMD_DOWNLOAD_START = 0x3c;
 const CMD_FILE_UPLOAD = 0x3d;
 const CMD_FILE_UPLOAD_ACK = 0x3d;
 const CMD_CLIPBOARD_WRITE = 0x3e;
+// File viewer (`mobitty-cli view`) — docs/todo-design-file-viewer.md.
+const CMD_VIEWER_OPEN = 0x3f;     // server → client
+const CMD_VIEWER_FILE = 0x40;     // server → client
+const CMD_VIEWER_CLOSE = 0x41;    // server → client
+const CMD_VIEWER_NOTICE = 0x42;   // server → client
+const CMD_VIEWER_REQUEST = 0x3f;  // client → server (0x3f is VIEWER_OPEN the other way)
+const CMD_VIEWER_DONE = 0x40;     // client → server (0x40 is VIEWER_FILE the other way)
+const VIEWER_FILE_KINDS: ReadonlySet<string> = new Set<ViewerFileKind>(['text', 'image', 'binary', 'too-large', 'error']);
 
 const MAX_PASTE_IMAGE_BYTES = 25 * 1024 * 1024; // 25 MB
 
@@ -141,6 +150,10 @@ export interface TerminalCoreCallbacks {
   onImagePasteError?: (error: ImagePasteErrorInfo) => void;
   onEditorOpen?: (editId: number, filePath: string, content: string, contentType?: string) => void;
   onDownloadStart?: (fileName: string, fileSize: number, token: string) => void;
+  onViewerOpen?: (view: ViewerOpenPayload) => void;
+  onViewerFile?: (file: ViewerFilePayload) => void;
+  onViewerClose?: (viewId: number) => void;
+  onViewerNotice?: (viewId: number, message: string) => void;
 }
 
 export interface TerminalCoreOptions {
@@ -397,6 +410,44 @@ export class TerminalCore {
         editId, ms: Math.round(performance.now() - ackedAt),
       });
     });
+  }
+
+  /** Ask the server for a file's contents, or to open it in the remote editor.
+   *  Returns false when the socket is not open: the request is dropped, not
+   *  queued — the viewer re-requests its selected file when VIEWER_OPEN is
+   *  replayed on the next attach. */
+  sendViewerRequest(viewId: number, action: ViewerAction, path: string): boolean {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      this.logger.warn('viewer request not sent — socket not open', {
+        viewId, action, path, readyState: this.socket?.readyState ?? null,
+      });
+      return false;
+    }
+    this.sendViewerMessage(CMD_VIEWER_REQUEST, { viewId, action, path });
+    this.logger.debug('viewer request sent', { viewId, action, path });
+    return true;
+  }
+
+  /** The user closed the viewer. If this is dropped, the CLI stays blocked
+   *  and the server replays VIEWER_OPEN on the next attach, so the user can
+   *  close it again. */
+  sendViewerDone(viewId: number): void {
+    if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
+      this.logger.warn('viewer done not sent — socket not open', {
+        viewId, readyState: this.socket?.readyState ?? null,
+      });
+      return;
+    }
+    this.sendViewerMessage(CMD_VIEWER_DONE, { viewId });
+    this.logger.info('viewer done sent', { viewId, sessionId: this.options.sessionId ?? null });
+  }
+
+  private sendViewerMessage(cmd: number, payload: Record<string, unknown>): void {
+    const encoded = this.textEncoder.encode(JSON.stringify(payload));
+    const msg = new Uint8Array(1 + encoded.length);
+    msg[0] = cmd;
+    msg.set(encoded, 1);
+    this.socket?.send(msg);
   }
 
   private writeEditorDone(content: string, cancelled: boolean, editId?: number) {
@@ -1313,6 +1364,85 @@ export class TerminalCore {
     this.overlayAddon?.showOverlay('Copy failed', 800);
   }
 
+  /** VIEWER_OPEN / VIEWER_FILE / VIEWER_CLOSE / VIEWER_NOTICE — the file
+   *  viewer's server → client messages. Malformed payloads are dropped with a
+   *  debug line, like the other JSON commands. */
+  private handleViewerMessage(cmd: number, jsonStr: string): void {
+    let r: Record<string, unknown>;
+    try {
+      const parsed: unknown = JSON.parse(jsonStr);
+      if (typeof parsed !== 'object' || parsed === null) throw new Error('not an object');
+      r = parsed as Record<string, unknown>;
+    } catch {
+      this.logger.debug('viewer message parse failed', { cmd });
+      return;
+    }
+    const viewId = r['viewId'];
+    if (typeof viewId !== 'number') {
+      this.logger.debug('viewer message missing viewId', { cmd });
+      return;
+    }
+
+    if (cmd === CMD_VIEWER_OPEN) {
+      if (typeof r['root'] !== 'string' || !Array.isArray(r['entries'])) {
+        this.logger.debug('VIEWER_OPEN malformed', { viewId });
+        return;
+      }
+      const entries: Array<[string, number]> = [];
+      for (const e of r['entries'] as unknown[]) {
+        if (Array.isArray(e) && typeof e[0] === 'string' && typeof e[1] === 'number') entries.push([e[0], e[1]]);
+      }
+      const view: ViewerOpenPayload = {
+        viewId,
+        root: r['root'],
+        isDir: r['isDir'] === true,
+        entries,
+        truncated: r['truncated'] === true,
+        ...(typeof r['initial'] === 'string' ? { initial: r['initial'] } : {}),
+      };
+      this.logger.info('viewer open received', {
+        viewId, root: view.root, isDir: view.isDir, entries: entries.length, truncated: view.truncated,
+        sessionId: this.options.sessionId ?? null,
+      });
+      this.callbacks.onViewerOpen?.(view);
+      return;
+    }
+
+    if (cmd === CMD_VIEWER_FILE) {
+      const kind = r['kind'];
+      if (typeof r['path'] !== 'string' || typeof kind !== 'string' || !VIEWER_FILE_KINDS.has(kind)) {
+        this.logger.debug('VIEWER_FILE malformed', { viewId });
+        return;
+      }
+      const file: ViewerFilePayload = {
+        viewId,
+        path: r['path'],
+        kind: kind as ViewerFileKind,
+        size: typeof r['size'] === 'number' ? r['size'] : 0,
+        mtimeMs: typeof r['mtimeMs'] === 'number' ? r['mtimeMs'] : 0,
+        ...(typeof r['content'] === 'string' ? { content: r['content'] } : {}),
+        ...(typeof r['contentType'] === 'string' ? { contentType: r['contentType'] } : {}),
+        ...(typeof r['error'] === 'string' ? { error: r['error'] } : {}),
+      };
+      this.logger.debug('viewer file received', {
+        viewId, path: file.path, kind: file.kind, size: file.size, chars: file.content?.length ?? 0,
+      });
+      this.callbacks.onViewerFile?.(file);
+      return;
+    }
+
+    if (cmd === CMD_VIEWER_CLOSE) {
+      this.logger.info('viewer close received', { viewId });
+      this.callbacks.onViewerClose?.(viewId);
+      return;
+    }
+
+    if (typeof r['message'] === 'string') {
+      this.logger.info('viewer notice received', { viewId, message: r['message'] });
+      this.callbacks.onViewerNotice?.(viewId, r['message']);
+    }
+  }
+
   /** Capture-phase paste listener: intercepts images from native paste events. */
   private registerNativePasteImageHandler(): void {
     const el = this.terminal?.element;
@@ -1870,6 +2000,12 @@ export class TerminalCore {
           }
         }
       } catch { this.logger.debug('EDITOR_OPEN parse failed'); }
+      return;
+    }
+
+    if ((cmd === CMD_VIEWER_OPEN || cmd === CMD_VIEWER_FILE || cmd === CMD_VIEWER_CLOSE || cmd === CMD_VIEWER_NOTICE)
+      && rawData.byteLength > 1) {
+      this.handleViewerMessage(cmd, this.textDecoder.decode(new Uint8Array(rawData, 1)));
       return;
     }
 

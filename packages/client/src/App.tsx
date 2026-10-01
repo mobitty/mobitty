@@ -31,10 +31,13 @@ import { takeStaleRemoteEditorDrafts } from '@/remote-editor-storage';
 import { pushEditorHistory } from '@/editor-history';
 import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
+import { ViewerFileCache } from '@/file-viewer/cache';
+import type { ViewerFilePayload, ViewerOpenPayload } from '@/file-viewer/types';
 
 const SettingsDialog = lazy(() => import('@/components/SettingsDialog').then(m => ({ default: m.SettingsDialog })));
 const ConnectionClosedDialog = lazy(() => import('@/components/ConnectionClosedDialog').then(m => ({ default: m.ConnectionClosedDialog })));
 const ConnectionSlowOverlay = lazy(() => import('@/components/ConnectionSlowOverlay').then(m => ({ default: m.ConnectionSlowOverlay })));
+const FileViewerPanel = lazy(() => import('@/components/FileViewerPanel'));
 const ImagePasteErrorDialog = lazy(() => import('@/components/ImagePasteErrorDialog').then(m => ({ default: m.ImagePasteErrorDialog })));
 
 /** A remote-editor draft untouched for this long is treated as abandoned and
@@ -130,6 +133,11 @@ export function App() {
    *  EDITOR_OPEN (same edit id) produce a fresh ack. */
   const [editorEditId, setEditorEditId] = useState(0);
   const [editorOpenSeq, setEditorOpenSeq] = useState(0);
+  /** The open file view (`mobitty-cli view`), kept while hidden by a session
+   *  switch so the replayed VIEWER_OPEN finds its cache and selection intact. */
+  const [viewer, setViewer] = useState<ViewerOpenPayload | null>(null);
+  const [viewerOpen, setViewerOpen] = useState(false);
+  const [viewerFilesVersion, setViewerFilesVersion] = useState(0);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
 
   const refreshSessions = useCallback(async () => {
@@ -143,6 +151,10 @@ export function App() {
   /** Mirrors `editorOpen` (as the open file's path, or null) so the
    *  session-switch effect can report what it closed without re-running. */
   const editorOpenRef = useRef<string | null>(null);
+  const viewerRef = useRef<ViewerOpenPayload | null>(null);
+  const viewerCacheRef = useRef(new ViewerFileCache());
+  /** Paths with a VIEWER_REQUEST read outstanding, so re-renders don't re-send. */
+  const viewerInFlightRef = useRef(new Set<string>());
   const metricsRef = useRef(new SystemMetrics());
   const softkeyBarRef = useRef<SoftkeyBarHandle>(null);
 
@@ -171,6 +183,14 @@ export function App() {
       });
     }
     setEditorOpen(false);
+    // Same for the file viewer: the server replays VIEWER_OPEN on attach.
+    if (viewerRef.current !== null) {
+      terminalRef.current?.core?.clientLogger.info('viewer panel hidden on session switch', {
+        sessionId: currentSessionId ?? null,
+        viewId: viewerRef.current.viewId,
+      });
+    }
+    setViewerOpen(false);
   }, [currentSessionId]);
 
   useEffect(() => { editorOpenRef.current = editorOpen ? editorFilePath : null; }, [editorOpen, editorFilePath]);
@@ -206,6 +226,7 @@ export function App() {
       void import('@/components/ConnectionClosedDialog');
       void import('@/components/ConnectionSlowOverlay');
       void import('@/components/ImagePasteErrorDialog');
+      void import('@/components/FileViewerPanel');
     };
     if (typeof window.requestIdleCallback === 'function') {
       window.requestIdleCallback(run);
@@ -538,6 +559,34 @@ export function App() {
       a.click();
       setTimeout(() => a.remove(), 100);
     },
+    onViewerOpen: (view: ViewerOpenPayload) => {
+      // A replay of the same view keeps its cache; a new view starts clean.
+      if (viewerRef.current?.viewId !== view.viewId) viewerCacheRef.current.clear();
+      // Anything in flight was sent on a socket that has since closed.
+      viewerInFlightRef.current.clear();
+      viewerRef.current = view;
+      setViewer(view);
+      setViewerOpen(true);
+      setViewerFilesVersion(v => v + 1);
+    },
+    onViewerFile: (file: ViewerFilePayload) => {
+      if (viewerRef.current?.viewId !== file.viewId) return;
+      viewerInFlightRef.current.delete(file.path);
+      viewerCacheRef.current.set(file);
+      setViewerFilesVersion(v => v + 1);
+    },
+    onViewerClose: (viewId: number) => {
+      // The CLI went away (Ctrl-C) — nothing left to answer requests.
+      if (viewerRef.current?.viewId !== viewId) return;
+      viewerRef.current = null;
+      viewerCacheRef.current.clear();
+      viewerInFlightRef.current.clear();
+      setViewer(null);
+      setViewerOpen(false);
+    },
+    onViewerNotice: (_viewId: number, message: string) => {
+      toast(message);
+    },
   }), [refreshSessions]);
 
   // Modifier source for the terminal
@@ -702,6 +751,30 @@ export function App() {
     terminalRef.current?.core?.focus();
   }, [editorContent, editorContentType, editorEditId]);
 
+  const handleViewerRequestFile = useCallback((path: string) => {
+    const view = viewerRef.current;
+    if (!view || viewerInFlightRef.current.has(path)) return;
+    if (terminalRef.current?.core?.sendViewerRequest(view.viewId, 'read', path)) {
+      viewerInFlightRef.current.add(path);
+    }
+  }, []);
+
+  const handleViewerEdit = useCallback((path: string) => {
+    const view = viewerRef.current;
+    if (view) terminalRef.current?.core?.sendViewerRequest(view.viewId, 'edit', path);
+  }, []);
+
+  const handleViewerClose = useCallback(() => {
+    const view = viewerRef.current;
+    if (view) terminalRef.current?.core?.sendViewerDone(view.viewId);
+    viewerRef.current = null;
+    viewerCacheRef.current.clear();
+    viewerInFlightRef.current.clear();
+    setViewer(null);
+    setViewerOpen(false);
+    terminalRef.current?.core?.focus();
+  }, []);
+
   const handleReconnect = useCallback(() => {
     setConnectionClosedReason(null);
     terminalRef.current?.core?.reconnect();
@@ -729,6 +802,24 @@ export function App() {
             gestureMapping={gestureMapping}
             customKeyMap={customKeyMap}
           />
+        )}
+
+        {/* Before the editor: both are `absolute inset-0 z-50`, so an edit
+            opened from the viewer paints on top and reveals it on close. */}
+        {viewer && (
+          <Suspense fallback={null}>
+            <FileViewerPanel
+              key={viewer.viewId}
+              open={viewerOpen}
+              active={!editorOpen}
+              view={viewer}
+              files={viewerCacheRef.current}
+              filesVersion={viewerFilesVersion}
+              onRequestFile={handleViewerRequestFile}
+              onEdit={handleViewerEdit}
+              onClose={handleViewerClose}
+            />
+          </Suspense>
         )}
 
         <RemoteEditorPanel
