@@ -32,6 +32,8 @@ execSync('pnpm tsc -p tsconfig.build.json', { cwd: serverDir, stdio: 'inherit' }
 cpSync(resolve(serverDir, 'src', 'shell-init'), resolve(distDir, 'src', 'shell-init'), {
   recursive: true,
 });
+// The agent skill, resolved by src/skill-install.ts as ../skills from itself.
+cpSync(resolve(serverDir, 'skills'), resolve(distDir, 'skills'), { recursive: true });
 
 // 5. Copy package.json (rewrite .ts → .js references) and .npmignore
 const pkg = JSON.parse(readFileSync(resolve(serverDir, 'package.json'), 'utf-8')) as Record<string, unknown>;
