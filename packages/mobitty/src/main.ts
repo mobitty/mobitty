@@ -8,8 +8,29 @@ import type { ServerConfig } from './types.ts';
 import { startServer } from './server.ts';
 import { createLogger } from './logger.ts';
 import { loadConfig, ConfigError } from './settings.ts';
+import { installSkill, uninstallSkill } from './skill-install.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+const pkg: { version: string } = JSON.parse(
+  readFileSync(resolve(__dirname, '..', 'package.json'), 'utf-8'),
+);
+
+// Verbs that manage the agent skill rather than start the server.
+const verb = process.argv[2];
+if (verb === 'install-skill' || verb === 'uninstall-skill') {
+  const options = { claudeHome: join(homedir(), '.claude'), release: pkg.version };
+  try {
+    const result = verb === 'install-skill' ? installSkill(options) : uninstallSkill(options);
+    for (const note of result.notes) console.error(`mobitty: ${note}`);
+    if (result.skill) console.log(`${verb === 'install-skill' ? 'installed' : 'removed'} ${result.skill}`);
+    else console.log('no mobitty skill installed');
+  } catch (err) {
+    console.error(`mobitty: ${err instanceof Error ? err.message : String(err)}`);
+    process.exit(1);
+  }
+  process.exit(0);
+}
 
 const { values } = parseArgs({
   allowPositionals: false,
@@ -33,15 +54,13 @@ const { values } = parseArgs({
   },
 });
 
-const pkg: { version: string } = JSON.parse(
-  readFileSync(resolve(__dirname, '..', 'package.json'), 'utf-8'),
-);
-
 if (values.help) {
   console.log(`mobitty - Share your terminal over the web
 
 USAGE:
     mobitty [options]
+    mobitty install-skill     Install the mobitty agent skill to ~/.claude/skills
+    mobitty uninstall-skill   Remove the agent skill installed by install-skill
 
 OPTIONS:
     -p, --port              Port to listen (default: 8000)
