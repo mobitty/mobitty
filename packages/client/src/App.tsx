@@ -33,6 +33,8 @@ import { toast } from 'sonner';
 import { Toaster } from '@/components/ui/sonner';
 import { ViewerFileCache } from '@/file-viewer/cache';
 import type { ViewerFilePayload, ViewerOpenPayload } from '@/file-viewer/types';
+import { basename } from '@/file-viewer/paths';
+import { Eye } from 'lucide-react';
 
 const SettingsDialog = lazy(() => import('@/components/SettingsDialog').then(m => ({ default: m.SettingsDialog })));
 const ConnectionClosedDialog = lazy(() => import('@/components/ConnectionClosedDialog').then(m => ({ default: m.ConnectionClosedDialog })));
@@ -138,6 +140,9 @@ export function App() {
   const [viewer, setViewer] = useState<ViewerOpenPayload | null>(null);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerFilesVersion, setViewerFilesVersion] = useState(0);
+  /** viewId the user hid to see the terminal. Keyed by id so a replayed
+   *  VIEWER_OPEN (reconnect, session switch) stays hidden and a new view shows. */
+  const [viewerHiddenId, setViewerHiddenId] = useState<number | null>(null);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
 
   const refreshSessions = useCallback(async () => {
@@ -764,6 +769,14 @@ export function App() {
     if (view) terminalRef.current?.core?.sendViewerRequest(view.viewId, 'edit', path);
   }, []);
 
+  const handleViewerHide = useCallback(() => {
+    const view = viewerRef.current;
+    if (view) setViewerHiddenId(view.viewId);
+    terminalRef.current?.core?.focus();
+  }, []);
+
+  const handleViewerShow = useCallback(() => setViewerHiddenId(null), []);
+
   const handleViewerClose = useCallback(() => {
     const view = viewerRef.current;
     if (view) terminalRef.current?.core?.sendViewerDone(view.viewId);
@@ -810,16 +823,29 @@ export function App() {
           <Suspense fallback={null}>
             <FileViewerPanel
               key={viewer.viewId}
-              open={viewerOpen}
+              open={viewerOpen && viewerHiddenId !== viewer.viewId}
               active={!editorOpen}
               view={viewer}
               files={viewerCacheRef.current}
               filesVersion={viewerFilesVersion}
               onRequestFile={handleViewerRequestFile}
               onEdit={handleViewerEdit}
+              onHide={handleViewerHide}
               onClose={handleViewerClose}
             />
           </Suspense>
+        )}
+        {viewer && viewerOpen && viewerHiddenId === viewer.viewId && !editorOpen && (
+          <button
+            type="button"
+            className="absolute top-2 right-2 z-40 max-w-[60%] flex items-center gap-1.5 rounded-full border border-border bg-[var(--bar-bg)] backdrop-blur-sm shadow-lg px-3 py-1.5 text-xs text-foreground"
+            aria-label="Show viewer"
+            title="Show viewer"
+            onClick={handleViewerShow}
+          >
+            <Eye className="h-4 w-4 shrink-0" />
+            <span className="truncate font-mono">{basename(viewer.initial ?? viewer.root)}</span>
+          </button>
         )}
 
         <RemoteEditorPanel

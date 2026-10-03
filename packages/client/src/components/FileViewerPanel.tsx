@@ -5,7 +5,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import {
-  X, ChevronRight, ChevronLeft, ChevronDown, Folder, File, FileText, FileCode, FileImage, Copy, Pencil,
+  X, ChevronRight, ChevronLeft, ChevronDown, Folder, File, FileText, FileCode, FileImage, Copy, Pencil, EyeOff,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -46,11 +46,13 @@ export interface FileViewerPanelProps {
   filesVersion: number;
   onRequestFile: (path: string) => void;
   onEdit: (path: string) => void;
+  /** Collapse to a pill over the terminal; the view stays open. */
+  onHide: () => void;
   onClose: () => void;
 }
 
 export default function FileViewerPanel({
-  open, active, view, files, filesVersion, onRequestFile, onEdit, onClose,
+  open, active, view, files, filesVersion, onRequestFile, onEdit, onHide, onClose,
 }: FileViewerPanelProps) {
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   const tree = useMemo(() => buildTree(view.entries), [view.entries]);
@@ -143,6 +145,10 @@ export default function FileViewerPanel({
             <Pencil className="h-4 w-4" />
             Edit
           </Button>
+          <Button variant="outline" size="sm" className="gap-1.5" title="Hide to see the terminal" onClick={onHide}>
+            <EyeOff className="h-4 w-4" />
+            Hide
+          </Button>
         </div>
         <div className="flex-1 min-h-0 flex">
           {view.isDir && (
@@ -176,6 +182,9 @@ export default function FileViewerPanel({
             </Button>
           ) : <span className="w-3" />}
           <span className="flex-1 min-w-0 truncate text-sm font-semibold">{dir.path === '' ? rootName : dir.name}</span>
+          <Button variant="ghost" size="icon" className="size-11" aria-label="Hide" onClick={onHide}>
+            <EyeOff className="h-5 w-5" />
+          </Button>
           <Button variant="ghost" size="icon" className="size-11" aria-label="Close" onClick={onClose}>
             <X className="h-5 w-5" />
           </Button>
@@ -207,6 +216,9 @@ export default function FileViewerPanel({
         </CopyPathMenu>
         <Button variant="ghost" size="icon" className="size-11" aria-label="Edit" disabled={!canEdit} onClick={handleEdit}>
           <Pencil className="h-5 w-5" />
+        </Button>
+        <Button variant="ghost" size="icon" className="size-11" aria-label="Hide" onClick={onHide}>
+          <EyeOff className="h-5 w-5" />
         </Button>
         <Button variant="ghost" size="icon" className="size-11" aria-label="Close" onClick={onClose}>
           <X className="h-5 w-5" />
