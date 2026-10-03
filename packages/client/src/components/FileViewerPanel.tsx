@@ -17,6 +17,7 @@ import { detectLanguage, fileTypeLabel, isImagePath, isMarkdownPath } from '@/fi
 import { formatBytes, formatRelativeTime } from '@/file-viewer/format';
 import { copyText } from '@/file-viewer/copy';
 import { CodeView } from '@/file-viewer/CodeView';
+import { ZoomableImage } from '@/file-viewer/ZoomableImage';
 import type { ViewerFileCache } from '@/file-viewer/cache';
 import type { ViewerFilePayload, ViewerOpenPayload } from '@/file-viewer/types';
 
@@ -412,15 +413,11 @@ function Preview({ selected, file, getFile, hasFile, onRequestFile, onNavigate }
       {/* Keyed on the path so switching files starts at the top. */}
       <div key={file.path} className="flex-1 min-h-0 overflow-auto">
         {file.kind === 'image' && file.content && file.contentType ? (
-          <div className="fv-checker min-h-full flex items-center justify-center p-6"
-            style={{ touchAction: 'pinch-zoom pan-x pan-y' }}>
-            <img
-              src={`data:${file.contentType};base64,${file.content}`}
-              alt={basename(file.path)}
-              className="max-w-full h-auto"
-              onLoad={e => setDims({ path: file.path, w: e.currentTarget.naturalWidth, h: e.currentTarget.naturalHeight })}
-            />
-          </div>
+          <ZoomableImage
+            src={`data:${file.contentType};base64,${file.content}`}
+            alt={basename(file.path)}
+            onLoad={(w, h) => setDims({ path: file.path, w, h })}
+          />
         ) : file.kind === 'text' && file.content !== undefined ? (
           isMarkdown && mdMode === 'rendered' ? (
             <Suspense fallback={<Placeholder>Loading…</Placeholder>}>
