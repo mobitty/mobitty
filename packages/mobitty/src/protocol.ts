@@ -7,7 +7,7 @@ import {
   CLIPBOARD_IMAGE, CLIPBOARD_IMAGE_ACK, RTT_REPORT, SESSION_ALERT, SESSION_NOTIFICATION,
   EDITOR_OPEN, EDITOR_DONE, EDITOR_ACK, DOWNLOAD_START, CLIPBOARD_WRITE,
   FILE_UPLOAD, FILE_UPLOAD_ACK,
-  VIEWER_OPEN, VIEWER_FILE, VIEWER_NOTICE, VIEWER_REQUEST, VIEWER_DONE,
+  VIEWER_FILE, VIEWER_NOTICE, VIEWER_REQUEST, VIEWER_DONE,
   HEARTBEAT_INTERVAL_MS, HEARTBEAT_TIMEOUT_MS,
   isResizeMessage, isHandshakeMessage, isUpdateSettingsMessage,
   isClientLogBatch,
@@ -527,13 +527,11 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
               sendBinary(ws, EDITOR_OPEN, JSON.stringify(pending));
             }
 
-            // Register viewer sender and re-send the open view if any
+            // Register viewer sender and replay open and queued views
             registry.setViewerSender(sessionId, viewerSender);
-            const view = registry.getViewerPending(sessionId);
-            if (view) {
-              socketLogger.info('VIEWER_OPEN replayed on attach', { viewId: view.viewId, root: view.root });
-              sendBinary(ws, VIEWER_OPEN, JSON.stringify(view));
-            }
+            const viewIds = registry.getViews(sessionId).map(v => v.viewId);
+            if (viewIds.length > 0) socketLogger.info('VIEWER_OPEN replayed on attach', { viewIds });
+            registry.replayViews(sessionId, viewerSender);
 
             // Register download sender
             registry.setDownloadSender(sessionId, downloadSender);
@@ -836,11 +834,9 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       const action = r['action'];
       const relPath = r['path'];
       if ((action !== 'read' && action !== 'edit') || typeof relPath !== 'string') return;
-      const view = registry.getViewerPending(sessionId);
-      if (!view || view.viewId !== viewId) {
-        socketLogger.warn('VIEWER_REQUEST ignored — not the open view', {
-          viewId, openViewId: view?.viewId ?? null, action,
-        });
+      const view = registry.getView(sessionId, viewId);
+      if (!view) {
+        socketLogger.warn('VIEWER_REQUEST ignored — not an open view', { viewId, action });
         return;
       }
       if (action === 'read') {
@@ -901,7 +897,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       return;
     }
     socketLogger.info('viewer edit saved', { viewId, path: relPath, bytes: result.content.length });
-    if (registry.getViewerPending(sid)?.viewId !== viewId) return;
+    if (!registry.getView(sid, viewId)) return;
     const fresh = await readViewFile(root, relPath);
     registry.sendViewer(sid, VIEWER_FILE, JSON.stringify({ viewId, ...fresh }));
   }

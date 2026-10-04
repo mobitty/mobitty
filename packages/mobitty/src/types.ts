@@ -18,8 +18,9 @@ export const FILE_UPLOAD_ACK = 0x3d;     // '=' — file upload ACK: {requestId,
 export const CLIPBOARD_WRITE = 0x3e;     // '>' — TUI clipboard write (OSC 52 relay): [status:1][text:utf8]
 export const VIEWER_OPEN = 0x3f;         // '?' — file viewer: {viewId, root, isDir, entries, truncated, initial?}
 export const VIEWER_FILE = 0x40;         // '@' — file viewer: {viewId, path, kind, size, mtimeMs, content?, contentType?, error?}
-export const VIEWER_CLOSE = 0x41;        // 'A' — file viewer: the CLI went away: {viewId}
+export const VIEWER_CLOSE = 0x41;        // 'A' — file viewer: closed server-side (CLI gone, superseded): {viewId}
 export const VIEWER_NOTICE = 0x42;       // 'B' — file viewer: user-facing message: {viewId, message}
+export const VIEWER_SYNC = 0x43;         // 'C' — file viewer: after attach replay, the session's open views: {viewIds}
 
 // Client -> Server
 export const INPUT = 0x30;             // '0'

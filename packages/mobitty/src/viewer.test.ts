@@ -6,9 +6,9 @@ import { createServer, request, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { SessionRegistry } from './sessions.ts';
+import { MAX_VIEWS_PER_SESSION, SessionRegistry } from './sessions.ts';
 import { handleHttpRequest } from './http.ts';
-import { VIEWER_CLOSE, VIEWER_OPEN } from './types.ts';
+import { VIEWER_CLOSE, VIEWER_OPEN, VIEWER_SYNC } from './types.ts';
 import {
   listViewTree, readViewFile, resolveInRoot,
   MAX_VIEW_ENTRIES, MAX_VIEW_TEXT_BYTES,
@@ -154,37 +154,77 @@ describe('SessionRegistry viewer lifecycle', () => {
     registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh').info.sessionId;
   const listing = { root: '/r', isDir: true, entries: [['a.txt', 1]] as [string, number][], truncated: false };
 
-  it('rejects without a session or a sender', async () => {
+  it('rejects an unknown session', async () => {
     await assert.rejects(() => registry.requestView('nonexistent', listing, noop), { message: 'Session not found' });
-    const sessionId = newSession();
-    await assert.rejects(() => registry.requestView(sessionId, listing, noop), { message: 'No client connected' });
   });
 
-  it('sends VIEWER_OPEN, allows one view per session, and resolves on done', async () => {
+  it('queues without a sender, raises the alert, and replays on attach', async () => {
+    const sessionId = newSession();
+    const alerts: string[] = [];
+    registry.addAlertListener(id => alerts.push(id));
+    assert.equal(await registry.requestView(sessionId, listing, noop), 'queued');
+    assert.equal(await registry.requestView(sessionId, { ...listing, root: '/s' }, noop), 'queued');
+    assert.deepEqual(alerts, [sessionId, sessionId]);
+    assert.deepEqual(registry.getViews(sessionId).map(v => v.root), ['/r', '/s']);
+
+    const frames: Array<[number, unknown]> = [];
+    const send = (cmd: number, json: string) => { frames.push([cmd, JSON.parse(json)]); return true; };
+    registry.replayViews(sessionId, send);
+    const ids = registry.getViews(sessionId).map(v => v.viewId);
+    assert.deepEqual(frames.map(f => f[0]), [VIEWER_OPEN, VIEWER_OPEN, VIEWER_SYNC]);
+    assert.deepEqual(frames[2]![1], { viewIds: ids });
+
+    // A queued view stays until the user closes it.
+    assert.equal(registry.completeView(sessionId, ids[0]!), true);
+    assert.deepEqual(registry.getViews(sessionId).map(v => v.viewId), [ids[1]]);
+  });
+
+  it('a send failure queues instead of rejecting', async () => {
+    const sessionId = newSession();
+    registry.setViewerSender(sessionId, () => false);
+    assert.equal(await registry.requestView(sessionId, listing, noop), 'queued');
+    assert.equal(registry.getViews(sessionId).length, 1);
+  });
+
+  it('a repeat of a queued view supersedes it', async () => {
+    const sessionId = newSession();
+    await registry.requestView(sessionId, listing, noop);
+    const first = registry.getViews(sessionId)[0]!.viewId;
+    await registry.requestView(sessionId, listing, noop);
+    const views = registry.getViews(sessionId);
+    assert.equal(views.length, 1);
+    assert.notEqual(views[0]!.viewId, first);
+  });
+
+  it('drops the oldest queued view past the cap', async () => {
+    const sessionId = newSession();
+    for (let i = 0; i <= MAX_VIEWS_PER_SESSION; i++) {
+      await registry.requestView(sessionId, { ...listing, root: `/r${i}` }, noop);
+    }
+    const roots = registry.getViews(sessionId).map(v => v.root);
+    assert.equal(roots.length, MAX_VIEWS_PER_SESSION);
+    assert.equal(roots[0], '/r1');
+  });
+
+  it('sends VIEWER_OPEN, stacks views, and resolves each on its own done', async () => {
     const sessionId = newSession();
     const frames: Array<[number, unknown]> = [];
     registry.setViewerSender(sessionId, (cmd, json) => { frames.push([cmd, JSON.parse(json)]); return true; });
 
-    const done = registry.requestView(sessionId, listing, noop);
-    assert.equal(frames.length, 1);
-    assert.equal(frames[0]![0], VIEWER_OPEN);
-    const open = frames[0]![1] as { viewId: number; root: string };
-    assert.equal(open.root, '/r');
-    assert.deepEqual(registry.getViewerPending(sessionId), open);
+    const first = registry.requestView(sessionId, listing, noop);
+    const second = registry.requestView(sessionId, listing, noop);
+    assert.deepEqual(frames.map(f => f[0]), [VIEWER_OPEN, VIEWER_OPEN]);
+    const a = frames[0]![1] as { viewId: number; root: string };
+    const b = frames[1]![1] as { viewId: number };
+    assert.equal(a.root, '/r');
+    assert.deepEqual(registry.getView(sessionId, a.viewId), a);
 
-    await assert.rejects(() => registry.requestView(sessionId, listing, noop), { message: 'View already open' });
-
-    assert.equal(registry.completeView(sessionId, open.viewId + 1), false, 'stale view id is ignored');
-    assert.equal(registry.completeView(sessionId, open.viewId), true);
-    await done;
-    assert.equal(registry.getViewerPending(sessionId), undefined);
-  });
-
-  it('a send failure rejects instead of leaving the view pending', async () => {
-    const sessionId = newSession();
-    registry.setViewerSender(sessionId, () => false);
-    await assert.rejects(() => registry.requestView(sessionId, listing, noop), { message: 'No client connected' });
-    assert.equal(registry.getViewerPending(sessionId), undefined);
+    assert.equal(registry.completeView(sessionId, b.viewId + 1), false, 'unknown view id is ignored');
+    assert.equal(registry.completeView(sessionId, b.viewId), true);
+    assert.equal(await second, 'closed');
+    assert.deepEqual(registry.getViews(sessionId), [a]);
+    assert.equal(registry.completeView(sessionId, a.viewId), true);
+    assert.equal(await first, 'closed');
   });
 
   it('CLI abort clears the view and tells the client to close it', async () => {
@@ -196,21 +236,21 @@ describe('SessionRegistry viewer lifecycle', () => {
     abort();
     await done;
     assert.deepEqual(cmds, [VIEWER_OPEN, VIEWER_CLOSE]);
-    assert.equal(registry.getViewerPending(sessionId), undefined);
+    assert.deepEqual(registry.getViews(sessionId), []);
   });
 
-  it('abort after a normal close does not clobber a newer view', async () => {
+  it('abort after a normal close does not touch other views', async () => {
     const sessionId = newSession();
     registry.setViewerSender(sessionId, () => true);
     let abortFirst: () => void = noop;
     const first = registry.requestView(sessionId, listing, (cleanup) => { abortFirst = cleanup; });
-    registry.completeView(sessionId, registry.getViewerPending(sessionId)!.viewId);
+    registry.completeView(sessionId, registry.getViews(sessionId)[0]!.viewId);
     await first;
 
     void registry.requestView(sessionId, listing, noop);
-    const second = registry.getViewerPending(sessionId);
+    const second = registry.getViews(sessionId);
     abortFirst();
-    assert.deepEqual(registry.getViewerPending(sessionId), second);
+    assert.deepEqual(registry.getViews(sessionId), second);
   });
 
   it('a stale connection clearing its sender does not wipe the replacement', async () => {
@@ -223,12 +263,12 @@ describe('SessionRegistry viewer lifecycle', () => {
     assert.equal(registry.sendViewer(sessionId, VIEWER_OPEN, '{}'), true);
   });
 
-  it('deleting the session resolves the pending view', async () => {
+  it('deleting the session resolves waiting views', async () => {
     const sessionId = newSession();
     registry.setViewerSender(sessionId, () => true);
     const done = registry.requestView(sessionId, listing, noop);
     registry.deleteSession(sessionId);
-    await done;
+    assert.equal(await done, 'closed');
   });
 });
 
@@ -312,6 +352,14 @@ describe('POST /api/sessions/{id}/viewer', () => {
     assert.equal((await response).status, 200);
   });
 
+  it('answers 202 at once when no client is attached', async () => {
+    const sessionId = newSession();
+    const res = await post(sessionId, { path: tmpDir }).response;
+    assert.equal(res.status, 202);
+    assert.deepEqual(JSON.parse(res.body), { ok: true, queued: true });
+    assert.equal(registry.getViews(sessionId)[0]!.root, tmpDir);
+  });
+
   it('rejects relative and missing paths', async () => {
     const sessionId = newSession();
     assert.equal((await post(sessionId, { path: 'rel/path' }).response).status, 400);
@@ -338,6 +386,6 @@ describe('POST /api/sessions/{id}/viewer', () => {
     abort();
     await closeSeen;
     assert.deepEqual(cmds, [VIEWER_OPEN, VIEWER_CLOSE]);
-    assert.equal(registry.getViewerPending(sessionId), undefined);
+    assert.deepEqual(registry.getViews(sessionId), []);
   });
 });

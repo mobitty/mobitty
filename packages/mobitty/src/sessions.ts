@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { release, homedir } from 'node:os';
 import type { PtyHandle, SessionInfo, EditorResult } from './types.ts';
-import { VIEWER_CLOSE, VIEWER_OPEN } from './types.ts';
+import { VIEWER_CLOSE, VIEWER_OPEN, VIEWER_SYNC } from './types.ts';
 import type { ViewEntry } from './viewer.ts';
 import { spawnPty, writePty, resizePty, killPty } from './pty.ts';
 import { generateUniqueSessionName } from './session-names.ts';
@@ -60,6 +60,20 @@ export interface ViewerOpenPayload {
  *  `false` when the socket could not take it — same contract as EditorSender. */
 export type ViewerSender = (cmd: number, json: string) => boolean;
 
+/** How `requestView` ended: the user closed a view the CLI waited on, or no
+ *  client was attached and the view was queued for the next one. */
+export type ViewOutcome = 'closed' | 'queued';
+
+/** Views a session keeps open or queued. Past this, the oldest queued view is
+ *  dropped; views a CLI is waiting on are never dropped. */
+export const MAX_VIEWS_PER_SESSION = 16;
+
+interface ViewState {
+  open: ViewerOpenPayload;
+  /** Resolves the waiting CLI; `null` for a queued view nobody waits on. */
+  resolve: (() => void) | null;
+}
+
 interface SessionEntry {
   sessionId: string;
   name: string;
@@ -97,10 +111,8 @@ interface SessionEntry {
     ackTimer: NodeJS.Timeout | null;
   } | null;
   editorSender: EditorSender | null;
-  viewerPending: {
-    open: ViewerOpenPayload;
-    resolve: () => void;
-  } | null;
+  /** Open and queued views, oldest first. */
+  views: ViewState[];
   viewerSender: ViewerSender | null;
   downloadSender: ((fileName: string, fileSize: number, token: string) => void) | null;
   /** Set by the attached connection; relays OSC 52 clipboard writes to it.
@@ -203,7 +215,7 @@ export class SessionRegistry {
         onChangeCallbacks: [],
         editorPending: null,
         editorSender: null,
-        viewerPending: null,
+        views: [],
         viewerSender: null,
         downloadSender: null,
         clipboardSender: null,
@@ -397,7 +409,7 @@ export class SessionRegistry {
       onChangeCallbacks,
       editorPending: null,
       editorSender: null,
-      viewerPending: null,
+      views: [],
       viewerSender: null,
       downloadSender: null,
       clipboardSender: null,
@@ -527,7 +539,7 @@ export class SessionRegistry {
     const entry = this.sessions.get(sessionId);
     if (!entry) return false;
     this.cancelPendingEdit(entry);
-    this.cancelPendingView(entry);
+    this.cancelViews(entry);
     if (entry.alive && entry.handle) {
       killPty(entry.handle);
       entry.alive = false;
@@ -562,7 +574,7 @@ export class SessionRegistry {
     this.logger.info('destroying all sessions', { count: this.sessions.size });
     for (const entry of this.sessions.values()) {
       this.cancelPendingEdit(entry);
-      this.cancelPendingView(entry);
+      this.cancelViews(entry);
       if (entry.alive && entry.handle) {
         killPty(entry.handle);
         entry.alive = false;
@@ -826,59 +838,69 @@ export class SessionRegistry {
     if (entry?.viewerSender === fn) entry.viewerSender = null;
   }
 
-  /** The open view's VIEWER_OPEN payload, for replay on attach and for
-   *  validating VIEWER_REQUEST / VIEWER_DONE. */
-  getViewerPending(sessionId: string): ViewerOpenPayload | undefined {
-    return this.sessions.get(sessionId)?.viewerPending?.open;
+  /** The session's views, oldest first — replayed on attach. */
+  getViews(sessionId: string): ViewerOpenPayload[] {
+    return this.sessions.get(sessionId)?.views.map(v => v.open) ?? [];
   }
 
-  /** Open a viewer and resolve when the user closes it. At most one per
-   *  session. `onAbort` hooks the CLI's HTTP response: if the CLI goes away the
-   *  view is dropped and the client told to close it. */
+  /** One open view, for validating VIEWER_REQUEST. */
+  getView(sessionId: string, viewId: number): ViewerOpenPayload | undefined {
+    return this.sessions.get(sessionId)?.views.find(v => v.open.viewId === viewId)?.open;
+  }
+
+  /** Replay every view to a newly attached client, then VIEWER_SYNC so it
+   *  drops views that closed while it was away. */
+  replayViews(sessionId: string, send: ViewerSender): void {
+    const views = this.getViews(sessionId);
+    for (const open of views) send(VIEWER_OPEN, JSON.stringify(open));
+    send(VIEWER_SYNC, JSON.stringify({ viewIds: views.map(v => v.viewId) }));
+  }
+
+  /** Open a view. With a client attached, resolve `'closed'` when the user
+   *  closes it; `onAbort` hooks the CLI's HTTP response, so if the CLI goes
+   *  away the view is dropped and the client told to close it. With none
+   *  attached, queue it, raise the session's alert, and resolve `'queued'` at
+   *  once — the view opens on the next attach. */
   requestView(
     sessionId: string,
     listing: Omit<ViewerOpenPayload, 'viewId'>,
     onAbort: (cleanup: () => void) => void,
-  ): Promise<void> {
+  ): Promise<ViewOutcome> {
     const entry = this.sessions.get(sessionId);
     const summary = {
-      sessionId, root: listing.root, isDir: listing.isDir,
+      sessionId, root: listing.root, isDir: listing.isDir, initial: listing.initial ?? null,
       entries: listing.entries.length, truncated: listing.truncated,
     };
     this.logger.info('viewer requested', summary);
     if (!entry) return Promise.reject(new Error('Session not found'));
-    if (entry.viewerPending) {
-      this.logger.warn('viewer request rejected', {
-        ...summary, reason: 'view already open', openRoot: entry.viewerPending.open.root,
-      });
-      return Promise.reject(new Error('View already open'));
-    }
-    if (!entry.viewerSender) {
-      this.logger.warn('viewer request rejected', { ...summary, reason: 'no viewer sender registered' });
-      return Promise.reject(new Error('No client connected'));
-    }
+
+    // A repeat of a queued view supersedes it rather than adding a tab.
+    const repeat = entry.views.find(v => v.resolve === null
+      && v.open.root === listing.root && v.open.isDir === listing.isDir && v.open.initial === listing.initial);
+    if (repeat) this.dropView(entry, repeat, 'superseded');
 
     const open: ViewerOpenPayload = { viewId: this.nextViewId++, ...listing };
-    return new Promise<void>((resolve, reject) => {
-      entry.viewerPending = { open, resolve };
-      if (!entry.viewerSender!(VIEWER_OPEN, JSON.stringify(open))) {
-        entry.viewerPending = null;
-        this.logger.warn('viewer request rejected', { ...summary, reason: 'send failed' });
-        reject(new Error('No client connected'));
-        return;
-      }
-      this.logger.info('viewer open sent', { ...summary, viewId: open.viewId });
+    const view: ViewState = { open, resolve: null };
+    entry.views.push(view);
+    this.trimViews(entry);
 
-      // Identity check: `onAbort` also fires after a normal close, by which
-      // time `viewerPending` may belong to a newer view.
-      onAbort(() => {
-        if (entry.viewerPending?.resolve !== resolve) return;
-        entry.viewerPending = null;
-        this.logger.info('viewer aborted — CLI gone', { sessionId, viewId: open.viewId });
-        entry.viewerSender?.(VIEWER_CLOSE, JSON.stringify({ viewId: open.viewId }));
-        resolve();
+    if (entry.viewerSender?.(VIEWER_OPEN, JSON.stringify(open))) {
+      this.logger.info('viewer open sent', { ...summary, viewId: open.viewId });
+      return new Promise<ViewOutcome>((resolve) => {
+        view.resolve = () => resolve('closed');
+        // Identity check: `onAbort` also fires after a normal close.
+        onAbort(() => {
+          if (!entry.views.includes(view)) return;
+          this.dropView(entry, view, 'CLI gone');
+        });
       });
+    }
+
+    this.logger.info('viewer queued — no client attached', {
+      ...summary, viewId: open.viewId, sender: entry.viewerSender !== null, queued: entry.views.length,
     });
+    this.raiseAlert(entry);
+    return Promise.resolve('queued');
   }
 
   /** Send a viewer frame to whichever connection currently owns the session. */
@@ -886,27 +908,48 @@ export class SessionRegistry {
     return this.sessions.get(sessionId)?.viewerSender?.(cmd, json) ?? false;
   }
 
-  /** The user closed the viewer. Ignored unless `viewId` is the open view. */
+  /** The user closed a view. Ignored unless `viewId` is one of the session's. */
   completeView(sessionId: string, viewId: number): boolean {
     const entry = this.sessions.get(sessionId);
-    const pending = entry?.viewerPending;
-    if (!entry || !pending || pending.open.viewId !== viewId) {
-      this.logger.warn('viewer done ignored', { sessionId, viewId, openViewId: pending?.open.viewId ?? null });
+    const view = entry?.views.find(v => v.open.viewId === viewId);
+    if (!entry || !view) {
+      this.logger.warn('viewer done ignored', { sessionId, viewId, viewIds: entry?.views.map(v => v.open.viewId) ?? [] });
       return false;
     }
-    entry.viewerPending = null;
-    this.logger.info('viewer closed', { sessionId, viewId });
-    pending.resolve();
+    entry.views.splice(entry.views.indexOf(view), 1);
+    this.logger.info('viewer closed', { sessionId, viewId, remaining: entry.views.length });
+    view.resolve?.();
     return true;
   }
 
-  private cancelPendingView(entry: SessionEntry): void {
-    if (!entry.viewerPending) return;
-    this.logger.info('viewer closed — session gone', {
-      sessionId: entry.sessionId, viewId: entry.viewerPending.open.viewId,
-    });
-    entry.viewerPending.resolve();
-    entry.viewerPending = null;
+  /** Remove a view the user did not close, telling the client and releasing
+   *  any waiting CLI. */
+  private dropView(entry: SessionEntry, view: ViewState, reason: string): void {
+    entry.views.splice(entry.views.indexOf(view), 1);
+    this.logger.info('viewer dropped', { sessionId: entry.sessionId, viewId: view.open.viewId, reason });
+    entry.viewerSender?.(VIEWER_CLOSE, JSON.stringify({ viewId: view.open.viewId }));
+    view.resolve?.();
+  }
+
+  private trimViews(entry: SessionEntry): void {
+    while (entry.views.length > MAX_VIEWS_PER_SESSION) {
+      const oldestQueued = entry.views.find(v => v.resolve === null);
+      if (!oldestQueued) return;
+      this.dropView(entry, oldestQueued, 'over cap');
+    }
+  }
+
+  private raiseAlert(entry: SessionEntry): void {
+    entry.hasAlert = true;
+    for (const cb of this.alertListeners) cb(entry.sessionId);
+  }
+
+  private cancelViews(entry: SessionEntry): void {
+    for (const view of entry.views) {
+      this.logger.info('viewer closed — session gone', { sessionId: entry.sessionId, viewId: view.open.viewId });
+      view.resolve?.();
+    }
+    entry.views = [];
   }
 
   // ── File Download ────────────────────────────────────────────────────────

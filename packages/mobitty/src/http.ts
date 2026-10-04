@@ -529,7 +529,8 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
     return;
   }
 
-  // `mobitty-cli view <path>` — held open until the user closes the viewer.
+  // `mobitty-cli view <path>` — held open until the user closes the view, or
+  // answered 202 at once when no client is attached and the view is queued.
   // See docs/todo-design-file-viewer.md.
   const sessionViewerPath = parseSessionViewerPath(pathname);
   if (sessionViewerPath !== undefined && method === 'POST') {
@@ -577,17 +578,14 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
 
       try {
         // Hook the response, not the request — see the /editor route above.
-        await registry.requestView(sessionViewerPath, listing, (cleanup) => { res.on('close', cleanup); });
+        const outcome = await registry.requestView(sessionViewerPath, listing, (cleanup) => { res.on('close', cleanup); });
         if (res.writableEnded || res.destroyed) return; // CLI already gone
-        jsonResponse(res, 200, { ok: true });
+        if (outcome === 'queued') jsonResponse(res, 202, { ok: true, queued: true });
+        else jsonResponse(res, 200, { ok: true });
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         if (msg === 'Session not found') {
           jsonResponse(res, 404, { error: msg });
-        } else if (msg === 'View already open') {
-          jsonResponse(res, 409, { error: msg });
-        } else if (msg === 'No client connected') {
-          jsonResponse(res, 503, { error: msg });
         } else {
           jsonResponse(res, 500, { error: msg });
         }

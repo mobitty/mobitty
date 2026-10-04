@@ -37,7 +37,13 @@ Errors go to stderr prefixed `mobitty-cli:`, with exit status 1.
 - A **folder** opens a file tree with the same preview beside it.
 - The viewer offers the user Copy path and Edit; an edit they make there is
   written to disk by the server.
-- **It blocks until the user closes the viewer**, like a pager, then exits 0.
+- **With the user attached to this session, it blocks until they close the
+  view**, like a pager, then exits 0.
+- **With no one attached, it queues the view and exits 0 at once**, printing
+  `view: queued <path> — …` to stderr. The session gets an alert badge and the
+  view opens when the user next opens the session. Queue several and they
+  appear as tabs the user closes one by one; repeating a queued path replaces
+  it rather than adding a tab.
 
 ### `edit` — let the user change a file
 
@@ -58,8 +64,9 @@ Errors go to stderr prefixed `mobitty-cli:`, with exit status 1.
 
 ## Blocking commands and your tool calls
 
-`view` and `edit` wait on a human, for as long as the human takes. Run them so
-the wait does not hold up your turn or hit a tool timeout — in Claude Code, call
+`view` (when the user is attached) and `edit` wait on a human, for as long as
+the human takes. Run them so the wait does not hold up your turn or hit a tool
+timeout — in Claude Code, call
 Bash with `run_in_background: true`; you are notified when the user closes the
 panel. Do not poll for it, and do not wrap the command in `timeout`: killing the
 CLI closes the panel under the user.
@@ -70,8 +77,8 @@ CLI closes the panel under the user.
 
 | stderr | Meaning | What to do |
 |---|---|---|
-| `server error 503: …No client connected…` | No browser is attached to this session right now. | Tell the user; retry once they reopen it. |
-| `server error 409: …already…` | A viewer or editor is already open in this session. | Wait for it to close; one at a time. |
+| `server error 503: …No client connected…` | `edit` or `download`: no browser is attached to this session right now. (`view` queues instead.) | Tell the user; retry once they reopen it. |
+| `server error 409: …already…` | An editor is already open in this session. | Wait for it to close; one at a time. |
 | `not found: <path>` / `file not found` | Path does not exist (for `edit`, only images must exist). | Fix the path. |
 | `not a regular file` | `download` was given a folder or device. | Archive the folder, download the archive. |
 

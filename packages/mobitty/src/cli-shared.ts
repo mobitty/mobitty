@@ -148,7 +148,8 @@ export async function runEdit(env: CliEnv, prefix: string, filePath: string): Pr
 }
 
 /** Open the file viewer on a file or folder and block until the user closes
- *  it, like a pager. The server lists and reads; see
+ *  it, like a pager. With no client attached the server queues the view
+ *  (202) and this returns at once. The server lists and reads; see
  *  docs/todo-design-file-viewer.md. */
 export async function runView(env: CliEnv, prefix: string, targetPath: string): Promise<void> {
   const absPath = resolve(targetPath);
@@ -160,6 +161,10 @@ export async function runView(env: CliEnv, prefix: string, targetPath: string): 
     JSON.stringify({ path: absPath }),
   );
 
+  if (result.status === 202) {
+    process.stderr.write(`view: queued ${absPath} — opens when the user next attaches to this session\n`);
+    return;
+  }
   if (result.status !== 200) fail(prefix, `server error ${result.status}: ${result.body}`);
 }
 
