@@ -44,6 +44,7 @@ const CMD_VIEWER_OPEN = 0x3f;     // server → client
 const CMD_VIEWER_FILE = 0x40;     // server → client
 const CMD_VIEWER_CLOSE = 0x41;    // server → client
 const CMD_VIEWER_NOTICE = 0x42;   // server → client
+const CMD_VIEWER_SYNC = 0x43;     // server → client
 const CMD_VIEWER_REQUEST = 0x3f;  // client → server (0x3f is VIEWER_OPEN the other way)
 const CMD_VIEWER_DONE = 0x40;     // client → server (0x40 is VIEWER_FILE the other way)
 const VIEWER_FILE_KINDS: ReadonlySet<string> = new Set<ViewerFileKind>(['text', 'image', 'binary', 'too-large', 'error']);
@@ -154,6 +155,8 @@ export interface TerminalCoreCallbacks {
   onViewerFile?: (file: ViewerFilePayload) => void;
   onViewerClose?: (viewId: number) => void;
   onViewerNotice?: (viewId: number, message: string) => void;
+  /** After an attach replay: the session's open views. Drop any others. */
+  onViewerSync?: (viewIds: number[]) => void;
 }
 
 export interface TerminalCoreOptions {
@@ -428,9 +431,9 @@ export class TerminalCore {
     return true;
   }
 
-  /** The user closed the viewer. If this is dropped, the CLI stays blocked
-   *  and the server replays VIEWER_OPEN on the next attach, so the user can
-   *  close it again. */
+  /** The user closed a view. If this is dropped, the server keeps the view
+   *  (and any CLI waiting on it) and replays VIEWER_OPEN on the next attach,
+   *  so the user can close it again. */
   sendViewerDone(viewId: number): void {
     if (!this.socket || this.socket.readyState !== WebSocket.OPEN) {
       this.logger.warn('viewer done not sent — socket not open', {
@@ -1364,9 +1367,9 @@ export class TerminalCore {
     this.overlayAddon?.showOverlay('Copy failed', 800);
   }
 
-  /** VIEWER_OPEN / VIEWER_FILE / VIEWER_CLOSE / VIEWER_NOTICE — the file
-   *  viewer's server → client messages. Malformed payloads are dropped with a
-   *  debug line, like the other JSON commands. */
+  /** VIEWER_OPEN / VIEWER_FILE / VIEWER_CLOSE / VIEWER_NOTICE / VIEWER_SYNC —
+   *  the file viewer's server → client messages. Malformed payloads are
+   *  dropped with a debug line, like the other JSON commands. */
   private handleViewerMessage(cmd: number, jsonStr: string): void {
     let r: Record<string, unknown>;
     try {
@@ -1375,6 +1378,16 @@ export class TerminalCore {
       r = parsed as Record<string, unknown>;
     } catch {
       this.logger.debug('viewer message parse failed', { cmd });
+      return;
+    }
+    if (cmd === CMD_VIEWER_SYNC) {
+      const ids = r['viewIds'];
+      if (!Array.isArray(ids) || !ids.every(id => typeof id === 'number')) {
+        this.logger.debug('VIEWER_SYNC malformed');
+        return;
+      }
+      this.logger.info('viewer sync received', { viewIds: ids, sessionId: this.options.sessionId ?? null });
+      this.callbacks.onViewerSync?.(ids as number[]);
       return;
     }
     const viewId = r['viewId'];
@@ -2003,7 +2016,8 @@ export class TerminalCore {
       return;
     }
 
-    if ((cmd === CMD_VIEWER_OPEN || cmd === CMD_VIEWER_FILE || cmd === CMD_VIEWER_CLOSE || cmd === CMD_VIEWER_NOTICE)
+    if ((cmd === CMD_VIEWER_OPEN || cmd === CMD_VIEWER_FILE || cmd === CMD_VIEWER_CLOSE || cmd === CMD_VIEWER_NOTICE
+      || cmd === CMD_VIEWER_SYNC)
       && rawData.byteLength > 1) {
       this.handleViewerMessage(cmd, this.textDecoder.decode(new Uint8Array(rawData, 1)));
       return;

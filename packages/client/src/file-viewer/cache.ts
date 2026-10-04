@@ -1,5 +1,7 @@
-// Per-view cache of VIEWER_FILE payloads, bounded by content size so a folder
-// of large images cannot pin unbounded memory in the WebView. Pure.
+// Cache of VIEWER_FILE payloads for every open view, keyed by view and path.
+// One bound on content size across all views, so a folder of large images —
+// or several queued views of them — cannot pin unbounded memory in the
+// WebView. Pure.
 
 import type { ViewerFilePayload } from './types.ts';
 
@@ -7,6 +9,7 @@ import type { ViewerFilePayload } from './types.ts';
 export const VIEWER_CACHE_MAX_CHARS = 48 * 1024 * 1024;
 
 export class ViewerFileCache {
+  /** Keyed by `cacheKey(viewId, path)`; Map order is insertion order. */
   private files = new Map<string, ViewerFilePayload>();
   private chars = 0;
   private maxChars: number;
@@ -15,12 +18,12 @@ export class ViewerFileCache {
     this.maxChars = maxChars;
   }
 
-  get(path: string): ViewerFilePayload | undefined {
-    return this.files.get(path);
+  get(viewId: number, path: string): ViewerFilePayload | undefined {
+    return this.files.get(cacheKey(viewId, path));
   }
 
-  has(path: string): boolean {
-    return this.files.has(path);
+  has(viewId: number, path: string): boolean {
+    return this.files.has(cacheKey(viewId, path));
   }
 
   get size(): number {
@@ -30,25 +33,31 @@ export class ViewerFileCache {
   /** Insert or replace, then evict least-recently-inserted entries until under
    *  the cap. The entry just inserted is never evicted, even if it alone is over. */
   set(file: ViewerFilePayload): void {
-    this.remove(file.path);
-    this.files.set(file.path, file);
+    const key = cacheKey(file.viewId, file.path);
+    this.remove(key);
+    this.files.set(key, file);
     this.chars += file.content?.length ?? 0;
-    for (const [path, entry] of this.files) {
-      if (this.chars <= this.maxChars || path === file.path) break;
-      this.files.delete(path);
-      this.chars -= entry.content?.length ?? 0;
+    for (const k of this.files.keys()) {
+      if (this.chars <= this.maxChars || k === key) break;
+      this.remove(k);
     }
   }
 
-  clear(): void {
-    this.files.clear();
-    this.chars = 0;
+  /** Drop one view's files, when that view closes. */
+  clearView(viewId: number): void {
+    for (const [k, entry] of this.files) {
+      if (entry.viewId === viewId) this.remove(k);
+    }
   }
 
-  private remove(path: string): void {
-    const existing = this.files.get(path);
+  private remove(key: string): void {
+    const existing = this.files.get(key);
     if (!existing) return;
-    this.files.delete(path);
+    this.files.delete(key);
     this.chars -= existing.content?.length ?? 0;
   }
+}
+
+function cacheKey(viewId: number, path: string): string {
+  return `${viewId}\0${path}`;
 }

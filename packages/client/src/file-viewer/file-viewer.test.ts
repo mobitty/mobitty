@@ -152,8 +152,8 @@ describe('format', () => {
 });
 
 describe('ViewerFileCache', () => {
-  const file = (path: string, chars: number): ViewerFilePayload => ({
-    viewId: 1, path, kind: 'text', size: chars, mtimeMs: 0, content: 'x'.repeat(chars),
+  const file = (path: string, chars: number, viewId = 1): ViewerFilePayload => ({
+    viewId, path, kind: 'text', size: chars, mtimeMs: 0, content: 'x'.repeat(chars),
   });
 
   it('evicts the oldest entries past the cap', () => {
@@ -161,17 +161,17 @@ describe('ViewerFileCache', () => {
     cache.set(file('a', 4));
     cache.set(file('b', 4));
     cache.set(file('c', 4));
-    assert.equal(cache.has('a'), false);
-    assert.equal(cache.has('b'), true);
-    assert.equal(cache.has('c'), true);
+    assert.equal(cache.has(1, 'a'), false);
+    assert.equal(cache.has(1, 'b'), true);
+    assert.equal(cache.has(1, 'c'), true);
   });
 
   it('keeps an entry that alone exceeds the cap', () => {
     const cache = new ViewerFileCache(10);
     cache.set(file('a', 4));
     cache.set(file('big', 50));
-    assert.equal(cache.has('a'), false);
-    assert.equal(cache.has('big'), true);
+    assert.equal(cache.has(1, 'a'), false);
+    assert.equal(cache.has(1, 'big'), true);
   });
 
   it('replaces an entry without double counting', () => {
@@ -179,8 +179,22 @@ describe('ViewerFileCache', () => {
     cache.set(file('a', 6));
     cache.set(file('a', 6));
     cache.set(file('b', 4));
-    assert.equal(cache.has('a'), true);
-    assert.equal(cache.has('b'), true);
+    assert.equal(cache.has(1, 'a'), true);
+    assert.equal(cache.has(1, 'b'), true);
     assert.equal(cache.size, 2);
+  });
+
+  it('keys by view, shares the cap, and clears one view', () => {
+    const cache = new ViewerFileCache(10);
+    cache.set(file('a', 4, 1));
+    cache.set(file('a', 4, 2));
+    assert.equal(cache.has(1, 'a'), true);
+    assert.equal(cache.has(2, 'a'), true);
+    cache.set(file('b', 4, 2));
+    assert.equal(cache.has(1, 'a'), false, 'evicted across views');
+    cache.clearView(2);
+    assert.equal(cache.size, 0);
+    cache.set(file('c', 10, 1));
+    assert.equal(cache.has(1, 'c'), true, 'cleared chars are not double counted');
   });
 });

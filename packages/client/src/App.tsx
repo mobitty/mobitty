@@ -135,14 +135,16 @@ export function App() {
    *  EDITOR_OPEN (same edit id) produce a fresh ack. */
   const [editorEditId, setEditorEditId] = useState(0);
   const [editorOpenSeq, setEditorOpenSeq] = useState(0);
-  /** The open file view (`mobitty-cli view`), kept while hidden by a session
-   *  switch so the replayed VIEWER_OPEN finds its cache and selection intact. */
-  const [viewer, setViewer] = useState<ViewerOpenPayload | null>(null);
+  /** Open and queued file views (`mobitty-cli view`), oldest first. Kept while
+   *  hidden by a session switch; VIEWER_SYNC after the attach replay drops the
+   *  ones the server no longer has. */
+  const [views, setViews] = useState<ViewerOpenPayload[]>([]);
+  const [activeViewId, setActiveViewId] = useState<number | null>(null);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [viewerFilesVersion, setViewerFilesVersion] = useState(0);
-  /** viewId the user hid to see the terminal. Keyed by id so a replayed
-   *  VIEWER_OPEN (reconnect, session switch) stays hidden and a new view shows. */
-  const [viewerHiddenId, setViewerHiddenId] = useState<number | null>(null);
+  /** The user hid the viewer to see the terminal. A replayed VIEWER_OPEN
+   *  (reconnect, session switch) leaves it hidden; a new view shows it. */
+  const [viewerHidden, setViewerHidden] = useState(false);
   const [sessions, setSessions] = useState<SessionInfo[]>([]);
 
   const refreshSessions = useCallback(async () => {
@@ -156,11 +158,48 @@ export function App() {
   /** Mirrors `editorOpen` (as the open file's path, or null) so the
    *  session-switch effect can report what it closed without re-running. */
   const editorOpenRef = useRef<string | null>(null);
-  const viewerRef = useRef<ViewerOpenPayload | null>(null);
+  /** Mirrors `views` / `activeViewId` for the terminal callbacks, which are
+   *  created once. */
+  const viewsRef = useRef<ViewerOpenPayload[]>([]);
+  const activeViewIdRef = useRef<number | null>(null);
   const viewerCacheRef = useRef(new ViewerFileCache());
-  /** Paths with a VIEWER_REQUEST read outstanding, so re-renders don't re-send. */
+  /** `viewId\0path` keys with a VIEWER_REQUEST read outstanding, so re-renders
+   *  don't re-send. */
   const viewerInFlightRef = useRef(new Set<string>());
   const metricsRef = useRef(new SystemMetrics());
+
+  const setActiveView = useCallback((viewId: number | null) => {
+    activeViewIdRef.current = viewId;
+    setActiveViewId(viewId);
+  }, []);
+
+  const clearInFlight = useCallback((viewId: number) => {
+    const prefix = `${viewId}\0`;
+    for (const key of viewerInFlightRef.current) {
+      if (key.startsWith(prefix)) viewerInFlightRef.current.delete(key);
+    }
+  }, []);
+
+  /** Forget views and their files. A closed active view hands over to its
+   *  neighbour in the tab strip. */
+  const dropViews = useCallback((viewIds: ReadonlySet<number>) => {
+    if (viewIds.size === 0) return;
+    const before = viewsRef.current;
+    for (const viewId of viewIds) {
+      viewerCacheRef.current.clearView(viewId);
+      clearInFlight(viewId);
+    }
+    const remaining = before.filter(v => !viewIds.has(v.viewId));
+    viewsRef.current = remaining;
+    setViews(remaining);
+    const active = activeViewIdRef.current;
+    if (active === null || viewIds.has(active)) {
+      const at = before.findIndex(v => v.viewId === active);
+      const next = remaining[Math.min(Math.max(at, 0), remaining.length - 1)];
+      setActiveView(next?.viewId ?? null);
+    }
+    if (remaining.length === 0) setViewerOpen(false);
+  }, [clearInFlight, setActiveView]);
   const softkeyBarRef = useRef<SoftkeyBarHandle>(null);
 
   // Keep ref in sync and clear alerts for newly-active session
@@ -189,10 +228,10 @@ export function App() {
     }
     setEditorOpen(false);
     // Same for the file viewer: the server replays VIEWER_OPEN on attach.
-    if (viewerRef.current !== null) {
+    if (viewsRef.current.length > 0) {
       terminalRef.current?.core?.clientLogger.info('viewer panel hidden on session switch', {
         sessionId: currentSessionId ?? null,
-        viewId: viewerRef.current.viewId,
+        viewIds: viewsRef.current.map(v => v.viewId),
       });
     }
     setViewerOpen(false);
@@ -565,34 +604,43 @@ export function App() {
       setTimeout(() => a.remove(), 100);
     },
     onViewerOpen: (view: ViewerOpenPayload) => {
-      // A replay of the same view keeps its cache; a new view starts clean.
-      if (viewerRef.current?.viewId !== view.viewId) viewerCacheRef.current.clear();
-      // Anything in flight was sent on a socket that has since closed.
-      viewerInFlightRef.current.clear();
-      viewerRef.current = view;
-      setViewer(view);
+      // A replay of a known view keeps its cache and selection; anything in
+      // flight for it was sent on a socket that has since closed.
+      clearInFlight(view.viewId);
+      const known = viewsRef.current.some(v => v.viewId === view.viewId);
+      const next = known
+        ? viewsRef.current.map(v => (v.viewId === view.viewId ? view : v))
+        : [...viewsRef.current, view];
+      viewsRef.current = next;
+      setViews(next);
+      // A new view comes to the front, even over a hidden viewer.
+      if (!known) {
+        setActiveView(view.viewId);
+        setViewerHidden(false);
+      } else if (activeViewIdRef.current === null) {
+        setActiveView(view.viewId);
+      }
       setViewerOpen(true);
       setViewerFilesVersion(v => v + 1);
     },
     onViewerFile: (file: ViewerFilePayload) => {
-      if (viewerRef.current?.viewId !== file.viewId) return;
-      viewerInFlightRef.current.delete(file.path);
+      if (!viewsRef.current.some(v => v.viewId === file.viewId)) return;
+      viewerInFlightRef.current.delete(`${file.viewId}\0${file.path}`);
       viewerCacheRef.current.set(file);
       setViewerFilesVersion(v => v + 1);
     },
     onViewerClose: (viewId: number) => {
-      // The CLI went away (Ctrl-C) — nothing left to answer requests.
-      if (viewerRef.current?.viewId !== viewId) return;
-      viewerRef.current = null;
-      viewerCacheRef.current.clear();
-      viewerInFlightRef.current.clear();
-      setViewer(null);
-      setViewerOpen(false);
+      // Closed server-side (CLI gone, superseded) — nothing left to answer requests.
+      dropViews(new Set([viewId]));
+    },
+    onViewerSync: (viewIds: number[]) => {
+      const keep = new Set(viewIds);
+      dropViews(new Set(viewsRef.current.filter(v => !keep.has(v.viewId)).map(v => v.viewId)));
     },
     onViewerNotice: (_viewId: number, message: string) => {
       toast(message);
     },
-  }), [refreshSessions]);
+  }), [refreshSessions, clearInFlight, dropViews, setActiveView]);
 
   // Modifier source for the terminal
   const modifierSource = useMemo(() => {
@@ -756,37 +804,37 @@ export function App() {
     terminalRef.current?.core?.focus();
   }, [editorContent, editorContentType, editorEditId]);
 
-  const handleViewerRequestFile = useCallback((path: string) => {
-    const view = viewerRef.current;
-    if (!view || viewerInFlightRef.current.has(path)) return;
-    if (terminalRef.current?.core?.sendViewerRequest(view.viewId, 'read', path)) {
-      viewerInFlightRef.current.add(path);
+  const handleViewerRequestFile = useCallback((viewId: number, path: string) => {
+    const key = `${viewId}\0${path}`;
+    if (viewerInFlightRef.current.has(key)) return;
+    if (terminalRef.current?.core?.sendViewerRequest(viewId, 'read', path)) {
+      viewerInFlightRef.current.add(key);
     }
   }, []);
 
-  const handleViewerEdit = useCallback((path: string) => {
-    const view = viewerRef.current;
-    if (view) terminalRef.current?.core?.sendViewerRequest(view.viewId, 'edit', path);
+  const handleViewerEdit = useCallback((viewId: number, path: string) => {
+    terminalRef.current?.core?.sendViewerRequest(viewId, 'edit', path);
   }, []);
 
   const handleViewerHide = useCallback(() => {
-    const view = viewerRef.current;
-    if (view) setViewerHiddenId(view.viewId);
+    setViewerHidden(true);
     terminalRef.current?.core?.focus();
   }, []);
 
-  const handleViewerShow = useCallback(() => setViewerHiddenId(null), []);
+  const handleViewerShow = useCallback(() => setViewerHidden(false), []);
 
-  const handleViewerClose = useCallback(() => {
-    const view = viewerRef.current;
-    if (view) terminalRef.current?.core?.sendViewerDone(view.viewId);
-    viewerRef.current = null;
-    viewerCacheRef.current.clear();
-    viewerInFlightRef.current.clear();
-    setViewer(null);
-    setViewerOpen(false);
-    terminalRef.current?.core?.focus();
-  }, []);
+  const handleViewerClose = useCallback((viewId: number) => {
+    terminalRef.current?.core?.sendViewerDone(viewId);
+    dropViews(new Set([viewId]));
+    if (viewsRef.current.length === 0) terminalRef.current?.core?.focus();
+  }, [dropViews]);
+
+  const viewerTabs = useMemo(() => ({
+    views,
+    activeViewId: activeViewId ?? -1,
+    onSelect: setActiveView,
+  }), [views, activeViewId, setActiveView]);
+  const activeView = views.find(v => v.viewId === activeViewId);
 
   const handleReconnect = useCallback(() => {
     setConnectionClosedReason(null);
@@ -819,23 +867,26 @@ export function App() {
 
         {/* Before the editor: both are `absolute inset-0 z-50`, so an edit
             opened from the viewer paints on top and reveals it on close. */}
-        {viewer && (
+        {views.length > 0 && (
           <Suspense fallback={null}>
-            <FileViewerPanel
-              key={viewer.viewId}
-              open={viewerOpen && viewerHiddenId !== viewer.viewId}
-              active={!editorOpen}
-              view={viewer}
-              files={viewerCacheRef.current}
-              filesVersion={viewerFilesVersion}
-              onRequestFile={handleViewerRequestFile}
-              onEdit={handleViewerEdit}
-              onHide={handleViewerHide}
-              onClose={handleViewerClose}
-            />
+            {views.map(view => (
+              <FileViewerPanel
+                key={view.viewId}
+                open={viewerOpen && !viewerHidden && view.viewId === activeViewId}
+                active={!editorOpen}
+                view={view}
+                files={viewerCacheRef.current}
+                filesVersion={viewerFilesVersion}
+                tabs={viewerTabs}
+                onRequestFile={handleViewerRequestFile}
+                onEdit={handleViewerEdit}
+                onHide={handleViewerHide}
+                onClose={handleViewerClose}
+              />
+            ))}
           </Suspense>
         )}
-        {viewer && viewerOpen && viewerHiddenId === viewer.viewId && !editorOpen && (
+        {activeView && viewerOpen && viewerHidden && !editorOpen && (
           <button
             type="button"
             className="absolute top-2 right-2 z-40 max-w-[60%] flex items-center gap-1.5 rounded-full border border-border bg-[var(--bar-bg)] backdrop-blur-sm shadow-lg px-3 py-1.5 text-xs text-foreground"
@@ -844,7 +895,8 @@ export function App() {
             onClick={handleViewerShow}
           >
             <Eye className="h-4 w-4 shrink-0" />
-            <span className="truncate font-mono">{basename(viewer.initial ?? viewer.root)}</span>
+            <span className="truncate font-mono">{basename(activeView.initial ?? activeView.root)}</span>
+            {views.length > 1 && <span className="shrink-0 text-muted-foreground">+{views.length - 1}</span>}
           </button>
         )}
 

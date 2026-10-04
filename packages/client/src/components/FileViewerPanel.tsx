@@ -1,6 +1,7 @@
 // The file viewer overlay for `mobitty-cli view`. Desktop (md and up): header,
 // 260px tree, preview with a meta strip. Below md: drill-down — one directory
-// level per screen, then a full-screen preview. See
+// level per screen, then a full-screen preview. With several views open, a tab
+// strip above the header switches between them. See
 // docs/todo-design-file-viewer.md.
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
@@ -36,8 +37,16 @@ function useMediaQuery(query: string): boolean {
   );
 }
 
+/** The strip of open views, drawn only when there is more than one. */
+export interface FileViewerTabs {
+  views: ViewerOpenPayload[];
+  activeViewId: number;
+  onSelect: (viewId: number) => void;
+}
+
 export interface FileViewerPanelProps {
-  /** Visible. The panel stays mounted while hidden so selection survives a session switch. */
+  /** Visible. One panel is mounted per view and stays mounted while hidden,
+   *  so each view keeps its selection across tab switches and reconnects. */
   open: boolean;
   /** Takes keyboard shortcuts; false while the remote editor is stacked on top. */
   active: boolean;
@@ -45,16 +54,22 @@ export interface FileViewerPanelProps {
   files: ViewerFileCache;
   /** Bumped whenever `files` changes. */
   filesVersion: number;
-  onRequestFile: (path: string) => void;
-  onEdit: (path: string) => void;
-  /** Collapse to a pill over the terminal; the view stays open. */
+  tabs: FileViewerTabs;
+  onRequestFile: (viewId: number, path: string) => void;
+  onEdit: (viewId: number, path: string) => void;
+  /** Collapse to a pill over the terminal; the views stay open. */
   onHide: () => void;
-  onClose: () => void;
+  /** Close one view; the tab strip closes others through this too. */
+  onClose: (viewId: number) => void;
 }
 
 export default function FileViewerPanel({
-  open, active, view, files, filesVersion, onRequestFile, onEdit, onHide, onClose,
+  open, active, view, files, filesVersion, tabs, onRequestFile: requestFile, onEdit: edit, onHide, onClose: closeView,
 }: FileViewerPanelProps) {
+  const viewId = view.viewId;
+  const onRequestFile = useCallback((path: string) => requestFile(viewId, path), [requestFile, viewId]);
+  const onEdit = useCallback((path: string) => edit(viewId, path), [edit, viewId]);
+  const onClose = useCallback(() => closeView(viewId), [closeView, viewId]);
   const isDesktop = useMediaQuery(DESKTOP_QUERY);
   const tree = useMemo(() => buildTree(view.entries), [view.entries]);
   const [selected, setSelected] = useState<string | null>(view.initial ?? null);
@@ -64,14 +79,14 @@ export default function FileViewerPanel({
 
   // `filesVersion` changes whenever the cache does; the cache itself is a stable object.
   const file = useMemo(
-    () => (selected ? files.get(selected) : undefined),
+    () => (selected ? files.get(viewId, selected) : undefined),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [files, selected, filesVersion],
+    [files, viewId, selected, filesVersion],
   );
   const getFile = useCallback(
-    (path: string) => files.get(path),
+    (path: string) => files.get(viewId, path),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [files, filesVersion],
+    [files, viewId, filesVersion],
   );
   // A file view lists only the file itself, but is rooted at its parent so
   // relative Markdown images and links resolve — let the server's
@@ -129,6 +144,7 @@ export default function FileViewerPanel({
   if (isDesktop) {
     return (
       <div className="absolute inset-0 z-50 bg-background text-foreground flex flex-col">
+        <TabStrip tabs={tabs} onClose={closeView} desktop />
         <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border">
           <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-foreground"
             aria-label="Close" title="Close (Esc)" onClick={onClose}>
@@ -175,6 +191,7 @@ export default function FileViewerPanel({
     const dir = findDir(tree, mobileDir) ?? tree;
     return (
       <div className="absolute inset-0 z-50 bg-background text-foreground flex flex-col">
+        <TabStrip tabs={tabs} onClose={closeView} />
         <div className="shrink-0 flex items-center gap-1 px-1 py-1 border-b border-border">
           {dir.path !== '' ? (
             <Button variant="ghost" size="icon" className="size-11" aria-label="Back"
@@ -200,6 +217,7 @@ export default function FileViewerPanel({
 
   return (
     <div className="absolute inset-0 z-50 bg-background text-foreground flex flex-col">
+      <TabStrip tabs={tabs} onClose={closeView} />
       <div className="shrink-0 flex items-center gap-0.5 px-1 py-1 border-b border-border">
         {view.isDir ? (
           <Button variant="ghost" size="icon" className="size-11" aria-label="Back to files"
@@ -238,6 +256,40 @@ export default function FileViewerPanel({
 }
 
 // ── Header pieces ───────────────────────────────────────────────────────────
+
+/** One tab per open view — queued views pile up while the user is away. */
+function TabStrip({ tabs, onClose, desktop = false }: { tabs: FileViewerTabs; onClose: (viewId: number) => void; desktop?: boolean }) {
+  if (tabs.views.length < 2) return null;
+  return (
+    <div role="tablist" aria-label="Open views"
+      className="shrink-0 flex overflow-x-auto border-b border-border bg-[var(--bar-bg)]">
+      {tabs.views.map(v => {
+        const isActive = v.viewId === tabs.activeViewId;
+        const label = basename(v.initial ?? v.root);
+        return (
+          <div key={v.viewId}
+            className={cn(
+              'shrink-0 flex items-center max-w-[14rem] border-r border-border',
+              isActive ? 'bg-background text-foreground' : 'text-muted-foreground',
+            )}>
+            <button type="button" role="tab" aria-selected={isActive}
+              className={cn('min-w-0 flex items-center gap-1.5 pl-3 font-mono text-xs', desktop ? 'h-8' : 'h-10')}
+              title={v.initial ? absolutePath(v.root, v.initial) : v.root}
+              onClick={() => tabs.onSelect(v.viewId)}>
+              {v.isDir ? <Folder className="h-3.5 w-3.5 shrink-0" /> : <File className="h-3.5 w-3.5 shrink-0" />}
+              <span className="truncate">{label}</span>
+            </button>
+            <button type="button" aria-label={`Close ${label}`}
+              className={cn('shrink-0 flex items-center justify-center hover:text-foreground', desktop ? 'h-8 w-7' : 'h-10 w-9')}
+              onClick={() => onClose(v.viewId)}>
+              <X className="h-3.5 w-3.5" />
+            </button>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function Breadcrumb({ root, selected }: { root: string; selected: string | null }) {
   const segments = selected ? selected.split('/') : [];
