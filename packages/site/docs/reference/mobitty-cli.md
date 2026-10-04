@@ -1,7 +1,7 @@
 ---
 sidebar_position: 12
 title: Shell Tools (mobitty-cli)
-description: Mobitty shell tools for downloading files, editing, and viewing images from your terminal session in the browser.
+description: Mobitty shell tools for downloading files, editing, and viewing files and folders from your terminal session in the browser.
 ---
 
 # Shell Tools (mobitty-cli)
@@ -15,7 +15,7 @@ mobitty-cli <command> <path>
 | Command | Description |
 |---------|-------------|
 | `edit <path>` | Open a file in the browser editor |
-| `view <path>` | View an image in the browser |
+| `view <path>` | View a file or folder in the browser |
 | `download <path>` | Download a file to the browser |
 
 ### edit
@@ -32,13 +32,14 @@ When you open an image file, it automatically switches to the image viewer.
 
 ### view
 
-Opens an image file in a full-screen browser viewer with pinch-to-zoom support on mobile.
+Opens a read-only viewer for a file or folder. A file shows a preview: text, syntax-highlighted code, images (with zoom), or rendered Markdown. A folder shows a file tree beside the preview. The viewer offers Copy path and Edit.
 
 ```bash
 mobitty-cli view screenshot.png
+mobitty-cli view .
 ```
 
-Supported formats: `.png`, `.jpg`, `.jpeg`, `.gif`, `.webp`, `.bmp`, `.svg`
+While you are watching the session, the command waits until you close the viewer. If no browser is attached to the session, the view is queued and the command returns at once: the session shows an alert, and the view opens the next time you open that session. Several views open as tabs, which you close one at a time.
 
 ### download
 
