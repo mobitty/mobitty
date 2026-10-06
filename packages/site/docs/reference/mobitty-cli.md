@@ -32,7 +32,7 @@ When you open an image file, it automatically switches to the image viewer.
 
 ### view
 
-Opens a read-only viewer for a file or folder. A file shows a preview: text, syntax-highlighted code, images (with zoom), or rendered Markdown. A folder shows a file tree beside the preview. The viewer offers Copy path and Edit.
+Opens a read-only viewer for a file or folder. A file shows a preview: text, syntax-highlighted code, images (with zoom), rendered Markdown, or an audio player. A folder shows a file tree beside the preview. The viewer offers Copy path and Edit.
 
 ```bash
 mobitty-cli view screenshot.png
