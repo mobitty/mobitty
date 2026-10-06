@@ -14,9 +14,24 @@ import { IMAGE_EXTENSIONS } from './cli-shared.ts';
 export const MAX_VIEW_ENTRIES = 20_000;
 export const MAX_VIEW_TEXT_BYTES = 2 * 1024 * 1024;
 export const MAX_VIEW_IMAGE_BYTES = 8 * 1024 * 1024;
+export const MAX_VIEW_AUDIO_BYTES = 16 * 1024 * 1024;
 const BINARY_SNIFF_BYTES = 8192;
 const GIT_TIMEOUT_MS = 10_000;
 const WALK_SKIP_DIRS = new Set(['.git', 'node_modules']);
+
+/** Extensions previewed with an `<audio>` player. Whether the browser can
+ *  decode one (e.g. Ogg in older Safari) is the client's to report. */
+export const AUDIO_EXTENSIONS: Record<string, string> = {
+  '.mp3': 'audio/mpeg',
+  '.m4a': 'audio/mp4',
+  '.aac': 'audio/aac',
+  '.wav': 'audio/wav',
+  '.flac': 'audio/flac',
+  '.ogg': 'audio/ogg',
+  '.oga': 'audio/ogg',
+  '.opus': 'audio/ogg',
+  '.weba': 'audio/webm',
+};
 
 /** `[relPath, size]` — POSIX-separated, relative to the view root. Files only. */
 export type ViewEntry = [string, number];
@@ -26,7 +41,7 @@ export interface ViewListing {
   truncated: boolean;
 }
 
-export type ViewFileKind = 'text' | 'image' | 'binary' | 'too-large' | 'error';
+export type ViewFileKind = 'text' | 'image' | 'audio' | 'binary' | 'too-large' | 'error';
 
 export interface ViewFile {
   path: string;
@@ -176,11 +191,18 @@ export async function readViewFile(root: string, relPath: string): Promise<ViewF
   const meta = { path: relPath, size: st.size, mtimeMs: st.mtimeMs };
 
   try {
-    const imageType = IMAGE_EXTENSIONS[extname(abs).toLowerCase()];
+    const ext = extname(abs).toLowerCase();
+    const imageType = IMAGE_EXTENSIONS[ext];
     if (imageType) {
       if (st.size > MAX_VIEW_IMAGE_BYTES) return { ...meta, kind: 'too-large' };
       const buf = await readFile(abs);
       return { ...meta, kind: 'image', content: buf.toString('base64'), contentType: imageType };
+    }
+    const audioType = AUDIO_EXTENSIONS[ext];
+    if (audioType) {
+      if (st.size > MAX_VIEW_AUDIO_BYTES) return { ...meta, kind: 'too-large' };
+      const buf = await readFile(abs);
+      return { ...meta, kind: 'audio', content: buf.toString('base64'), contentType: audioType };
     }
     if (st.size > MAX_VIEW_TEXT_BYTES) return { ...meta, kind: 'too-large' };
     if (await sniffBinary(abs)) return { ...meta, kind: 'binary' };

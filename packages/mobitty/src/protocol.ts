@@ -877,7 +877,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
     const abs = resolveInRoot(root, relPath);
     const file = await readViewFile(root, relPath);
     if (abs === null || file.kind !== 'text' || file.content === undefined) {
-      notice(file.kind === 'error' ? `Cannot edit: ${file.error ?? 'unreadable'}` : `Cannot edit a ${file.kind} file`);
+      notice(file.kind === 'error' ? `Cannot edit: ${file.error ?? 'unreadable'}` : `Cannot edit ${/^[aeiou]/.test(file.kind) ? 'an' : 'a'} ${file.kind} file`);
       return;
     }
     let result;

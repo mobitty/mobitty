@@ -11,7 +11,7 @@ import { handleHttpRequest } from './http.ts';
 import { VIEWER_CLOSE, VIEWER_OPEN, VIEWER_SYNC } from './types.ts';
 import {
   listViewTree, readViewFile, resolveInRoot,
-  MAX_VIEW_ENTRIES, MAX_VIEW_TEXT_BYTES,
+  MAX_VIEW_AUDIO_BYTES, MAX_VIEW_ENTRIES, MAX_VIEW_TEXT_BYTES,
 } from './viewer.ts';
 import type { ProfileStore } from './profiles.ts';
 import type { ThemeStore } from './themes.ts';
@@ -105,9 +105,11 @@ describe('listViewTree / readViewFile', () => {
     assert.equal(truncated, true);
   });
 
-  it('reads text, image, binary, too-large, and error kinds', async () => {
+  it('reads text, image, audio, binary, too-large, and error kinds', async () => {
     writeFileSync(join(dir, 'a.txt'), 'hello');
     writeFileSync(join(dir, 'p.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    writeFileSync(join(dir, 's.MP3'), Buffer.from([0x49, 0x44, 0x33, 0]));
+    writeFileSync(join(dir, 'long.wav'), Buffer.alloc(MAX_VIEW_AUDIO_BYTES + 1));
     writeFileSync(join(dir, 'b.bin'), Buffer.from([1, 0, 2]));
     writeFileSync(join(dir, 'big.log'), Buffer.alloc(MAX_VIEW_TEXT_BYTES + 1, 0x61));
 
@@ -121,6 +123,14 @@ describe('listViewTree / readViewFile', () => {
     assert.equal(image.kind, 'image');
     assert.equal(image.contentType, 'image/png');
     assert.equal(image.content, Buffer.from([0x89, 0x50, 0x4e, 0x47]).toString('base64'));
+
+    const audio = await readViewFile(dir, 's.MP3');
+    assert.equal(audio.kind, 'audio');
+    assert.equal(audio.contentType, 'audio/mpeg');
+    assert.equal(audio.content, Buffer.from([0x49, 0x44, 0x33, 0]).toString('base64'));
+    const longAudio = await readViewFile(dir, 'long.wav');
+    assert.equal(longAudio.kind, 'too-large');
+    assert.equal(longAudio.content, undefined);
 
     assert.equal((await readViewFile(dir, 'b.bin')).kind, 'binary');
     const big = await readViewFile(dir, 'big.log');
