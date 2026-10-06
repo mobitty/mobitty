@@ -1,7 +1,7 @@
 // Wire payloads of the file viewer (`mobitty-cli view`). The contract lives in
 // docs/todo-design-file-viewer.md; the server side is packages/mobitty/src/viewer.ts.
 
-export type ViewerFileKind = 'text' | 'image' | 'binary' | 'too-large' | 'error';
+export type ViewerFileKind = 'text' | 'image' | 'audio' | 'binary' | 'too-large' | 'error';
 
 export type ViewerAction = 'read' | 'edit';
 
@@ -17,7 +17,8 @@ export interface ViewerOpenPayload {
   initial?: string;
 }
 
-/** VIEWER_FILE. `content` is UTF-8 text for `text`, base64 for `image`,
+/** VIEWER_FILE. `content` is UTF-8 text for `text`, base64 for `image`
+ *  and `audio`,
  *  absent otherwise. */
 export interface ViewerFilePayload {
   viewId: number;

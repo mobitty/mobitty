@@ -47,7 +47,7 @@ const CMD_VIEWER_NOTICE = 0x42;   // server → client
 const CMD_VIEWER_SYNC = 0x43;     // server → client
 const CMD_VIEWER_REQUEST = 0x3f;  // client → server (0x3f is VIEWER_OPEN the other way)
 const CMD_VIEWER_DONE = 0x40;     // client → server (0x40 is VIEWER_FILE the other way)
-const VIEWER_FILE_KINDS: ReadonlySet<string> = new Set<ViewerFileKind>(['text', 'image', 'binary', 'too-large', 'error']);
+const VIEWER_FILE_KINDS: ReadonlySet<string> = new Set<ViewerFileKind>(['text', 'image', 'audio', 'binary', 'too-large', 'error']);
 
 const MAX_PASTE_IMAGE_BYTES = 25 * 1024 * 1024; // 25 MB
 

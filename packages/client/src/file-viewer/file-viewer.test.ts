@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildTree, findDir, hasFile, ancestorDirs, childCount, flattenVisible } from './tree.ts';
 import { resolveRelative, absolutePath, isExternalUrl, dirname, basename } from './paths.ts';
-import { detectLanguage, languageFromFence, isMarkdownPath, isImagePath, fileTypeLabel } from './languages.ts';
+import { detectLanguage, languageFromFence, isMarkdownPath, isImagePath, isAudioPath, fileTypeLabel } from './languages.ts';
 import { formatBytes, formatRelativeTime } from './format.ts';
 import { ViewerFileCache } from './cache.ts';
 import type { ViewerFilePayload } from './types.ts';
@@ -124,6 +124,8 @@ describe('languages', () => {
     assert.equal(isMarkdownPath('notes.txt'), false);
     assert.equal(isImagePath('docs/a.PNG'), true);
     assert.equal(isImagePath('a.ts'), false);
+    assert.equal(isAudioPath('rec/take.M4A'), true);
+    assert.equal(isAudioPath('a.png'), false);
   });
 
   it('labels file types', () => {
@@ -131,6 +133,7 @@ describe('languages', () => {
     assert.equal(fileTypeLabel('notes.txt'), 'Plain text');
     assert.equal(fileTypeLabel('a.png', 'image/png'), 'PNG image');
     assert.equal(fileTypeLabel('a.svg', 'image/svg+xml'), 'SVG image');
+    assert.equal(fileTypeLabel('take.m4a', 'audio/mp4'), 'M4A audio');
   });
 });
 

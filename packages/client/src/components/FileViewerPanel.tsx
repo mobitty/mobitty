@@ -6,7 +6,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import {
-  X, ChevronRight, ChevronLeft, ChevronDown, Folder, File, FileText, FileCode, FileImage, Copy, Pencil, EyeOff,
+  X, ChevronRight, ChevronLeft, ChevronDown, Folder, File, FileText, FileCode, FileImage, FileAudio, Copy, Pencil, EyeOff,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -14,11 +14,12 @@ import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover
 import { cn } from '@/lib/utils';
 import { buildTree, findDir, hasFile, ancestorDirs, childCount, flattenVisible, type DirNode } from '@/file-viewer/tree';
 import { absolutePath, basename, dirname } from '@/file-viewer/paths';
-import { detectLanguage, fileTypeLabel, isImagePath, isMarkdownPath } from '@/file-viewer/languages';
+import { detectLanguage, fileTypeLabel, isAudioPath, isImagePath, isMarkdownPath } from '@/file-viewer/languages';
 import { formatBytes, formatRelativeTime } from '@/file-viewer/format';
 import { copyText } from '@/file-viewer/copy';
 import { CodeView } from '@/file-viewer/CodeView';
 import { ZoomableImage } from '@/file-viewer/ZoomableImage';
+import { AudioView } from '@/file-viewer/AudioView';
 import type { ViewerFileCache } from '@/file-viewer/cache';
 import type { ViewerFilePayload, ViewerOpenPayload } from '@/file-viewer/types';
 
@@ -334,6 +335,7 @@ function CopyPathMenu({ root, relPath, children }: { root: string; relPath: stri
 
 function FileIcon({ path, className }: { path: string; className?: string }) {
   if (isImagePath(path)) return <FileImage className={cn('text-purple-300', className)} />;
+  if (isAudioPath(path)) return <FileAudio className={cn('text-sky-300', className)} />;
   if (isMarkdownPath(path) || path.endsWith('.txt')) return <FileText className={cn('text-muted-foreground', className)} />;
   if (detectLanguage(path)) return <FileCode className={cn('text-muted-foreground', className)} />;
   return <File className={cn('text-muted-foreground', className)} />;
@@ -470,6 +472,8 @@ function Preview({ selected, file, getFile, hasFile, onRequestFile, onNavigate }
             alt={basename(file.path)}
             onLoad={(w, h) => setDims({ path: file.path, w, h })}
           />
+        ) : file.kind === 'audio' && file.content && file.contentType ? (
+          <AudioView content={file.content} contentType={file.contentType} />
         ) : file.kind === 'text' && file.content !== undefined ? (
           isMarkdown && mdMode === 'rendered' ? (
             <Suspense fallback={<Placeholder>Loading…</Placeholder>}>

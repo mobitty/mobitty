@@ -81,6 +81,8 @@ const LANG_LABELS: Record<LangId, string> = {
 
 /** Extensions the server previews as images (IMAGE_EXTENSIONS in cli-shared.ts). */
 const IMAGE_EXTS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg']);
+/** Extensions the server previews as audio (AUDIO_EXTENSIONS in viewer.ts). */
+const AUDIO_EXTS = new Set(['mp3', 'm4a', 'aac', 'wav', 'flac', 'ogg', 'oga', 'opus', 'weba']);
 
 function fileName(path: string): string {
   const slash = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
@@ -120,10 +122,19 @@ export function isImagePath(path: string): boolean {
   return IMAGE_EXTS.has(extension(path));
 }
 
+/** Whether the tree shows the audio icon. The server decides the real kind. */
+export function isAudioPath(path: string): boolean {
+  return AUDIO_EXTS.has(extension(path));
+}
+
 /** Label for the meta strip, e.g. `TypeScript`, `PNG image`, `Plain text`. */
 export function fileTypeLabel(path: string, contentType?: string): string {
   if (contentType?.startsWith('image/')) {
     return `${contentType.slice('image/'.length).replace('+xml', '').toUpperCase()} image`;
+  }
+  if (contentType?.startsWith('audio/')) {
+    const ext = extension(path);
+    return `${ext ? ext.toUpperCase() : 'Unknown'} audio`;
   }
   const lang = detectLanguage(path);
   return lang ? LANG_LABELS[lang] : 'Plain text';
