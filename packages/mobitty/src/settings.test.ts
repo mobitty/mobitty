@@ -237,13 +237,13 @@ describe('loadConfig', () => {
   it('reads start-dir from INI', () => {
     writeFileSync(join(tmpDir, 'settings.ini'), '[server]\nstart-dir = /tmp\n');
     const config = loadConfig(tmpDir, noCli);
-    assert.equal(config.startDir, '/tmp');
+    assert.equal(config.startDir, resolve('/tmp'));
   });
 
   it('CLI overrides start-dir from INI', () => {
     writeFileSync(join(tmpDir, 'settings.ini'), '[server]\nstart-dir = /tmp\n');
     const config = loadConfig(tmpDir, { 'start-dir': '/var/log' });
-    assert.equal(config.startDir, '/var/log');
+    assert.equal(config.startDir, resolve('/var/log'));
   });
 
   it('expands ~ in start-dir to homedir', () => {
