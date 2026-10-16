@@ -1,4 +1,6 @@
 import { describe, it } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
+import type { IPty } from 'node-pty';
 import assert from 'node:assert/strict';
 import { spawnPty, killPty } from './pty.ts';
 import type { PtyHandle } from './types.ts';
@@ -64,5 +66,51 @@ describe('killPty', { skip: !posix }, () => {
     killPty(handle, 5000);
     assert.equal(handle.killTimer, armed, 'second call should reuse the pending escalation');
     await exited;
+  });
+});
+
+/** A handle whose pty never exits and, like node-pty's Windows backend, throws
+ *  when `kill()` is given a signal. Records every `kill()` call. */
+function fakeHandle(): { handle: PtyHandle; kills: Array<string | undefined> } {
+  const kills: Array<string | undefined> = [];
+  const pty = {
+    kill(signal?: string) {
+      kills.push(signal);
+      if (signal) throw new Error('Signals not supported on windows.');
+    },
+  } as unknown as IPty;
+  const handle: PtyHandle = {
+    pid: 0, pty, paused: false, columns: 80, rows: 24,
+    exited: false, killed: false, killTimer: null,
+  };
+  return { handle, kills };
+}
+
+// Runs on every platform: the fakes stand in for node-pty's backends. An
+// exception thrown from the escalation timer is uncaught, so it fails this
+// file — on a real server it would take the whole process down.
+describe('killPty escalation safety', () => {
+  it('does not escalate on Windows, where kill() with a signal throws', async () => {
+    const { handle, kills } = fakeHandle();
+    killPty(handle, 10, 'win32');
+    assert.equal(handle.killTimer, null, 'no escalation should be armed on Windows');
+    await delay(50);
+    assert.deepEqual(kills, [undefined], 'only the signal-less kill() should be sent');
+  });
+
+  it('is idempotent on Windows — a second call does not kill() again', () => {
+    const { handle, kills } = fakeHandle();
+    killPty(handle, 10, 'win32');
+    killPty(handle, 10, 'win32');
+    assert.deepEqual(kills, [undefined]);
+  });
+
+  it('a throwing SIGKILL escalation does not raise an uncaught exception', async () => {
+    const { handle, kills } = fakeHandle();
+    killPty(handle, 10, 'linux');
+    assert.notEqual(handle.killTimer, null, 'escalation should be armed on POSIX');
+    await delay(50);
+    assert.deepEqual(kills, [undefined, 'SIGKILL']);
+    assert.equal(handle.killTimer, null);
   });
 });

@@ -52,6 +52,7 @@ export function spawnPty(options: SpawnOptions, callbacks: PtyCallbacks): PtyHan
     columns: options.columns,
     rows: options.rows,
     exited: false,
+    killed: false,
     killTimer: null,
   };
 
@@ -117,7 +118,7 @@ export function resumePty(handle: PtyHandle): void {
 
 /**
  * Grace period between the polite SIGHUP and the SIGKILL that guarantees the
- * child is gone.
+ * child is gone. POSIX only — see `killPty`.
  */
 export const KILL_ESCALATION_MS = 2000;
 
@@ -132,14 +133,37 @@ export const KILL_ESCALATION_MS = 2000;
  * SIGHUP first so the shell can run its exit traps, SIGKILL after a grace period
  * if it is still there. The timer is unref'd so it never by itself delays exit,
  * and it is gated on `exited` so a recycled pid can never be hit.
+ *
+ * Windows has no signals and needs no escalation. node-pty's Windows `kill()`
+ * is already a hard kill — `TerminateProcess` on the shell (conpty.dll), or
+ * `ClosePseudoConsole` plus `TerminateProcess` on every process attached to the
+ * console (in-box ConPTY) — and it throws if handed a signal at all. Calling it
+ * a second time is not a retry either: it re-closes the pseudoconsole and
+ * re-disposes the conout worker. So on Windows the one `kill()` is the whole job.
+ *
+ * Either way the pty is killed at most once per handle (`killed`).
  */
-export function killPty(handle: PtyHandle, escalationMs = KILL_ESCALATION_MS): void {
-  if (handle.exited || handle.killTimer) return;
+export function killPty(
+  handle: PtyHandle,
+  escalationMs = KILL_ESCALATION_MS,
+  platform: NodeJS.Platform = process.platform,
+): void {
+  if (handle.exited || handle.killed) return;
+  handle.killed = true;
   handle.pty.kill();
+  if (platform === 'win32') return;
   handle.killTimer = setTimeout(() => {
     handle.killTimer = null;
     if (handle.exited) return;
-    handle.pty.kill('SIGKILL');
+    // An exception here is uncaught and takes the whole server down, and there
+    // is no caller left to report it to. The escalation is best-effort: a child
+    // that cannot be signalled has either already died (its exit event still in
+    // flight) or is beyond anything a second attempt could do.
+    try {
+      handle.pty.kill('SIGKILL');
+    } catch {
+      /* best-effort; see above */
+    }
   }, escalationMs);
   handle.killTimer.unref();
 }
