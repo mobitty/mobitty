@@ -508,6 +508,16 @@ export class SessionRegistry {
     return this.sessions.get(sessionId)?.handle ?? null;
   }
 
+  /** The session's absolute cwd for writing files into it: the OSC 7 report
+   *  first, else a fresh process probe. '' when neither is available (e.g. a
+   *  Windows shell with no OSC 7 hook — getProcessCwd has no win32 probe). */
+  async getCwd(sessionId: string): Promise<string> {
+    const entry = this.sessions.get(sessionId);
+    if (!entry) return '';
+    if (entry.reportedCwd) return entry.reportedCwd;
+    return getProcessCwd(entry.pid);
+  }
+
   listSessions(): SessionInfo[] {
     return [...this.sessions.values()].map(e => this.toSessionInfo(e));
   }

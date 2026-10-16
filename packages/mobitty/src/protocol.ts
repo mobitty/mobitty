@@ -16,7 +16,7 @@ import type { ServerState } from './types.ts';
 const DEFAULT_SCROLLBACK = 5000;
 import { resolve, relative, isAbsolute } from 'node:path';
 import { writePty } from './pty.ts';
-import { writeImageToSystemClipboard, writeImageToFile, getProcessCwd } from './clipboard.ts';
+import { writeImageToSystemClipboard, writeImageToFile } from './clipboard.ts';
 import { writeUploadToCwd, shellQuoteForBash } from './upload.ts';
 import type { SessionRegistry } from './sessions.ts';
 import type { ShellStore } from './shells.ts';
@@ -655,6 +655,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
 
     if (command === CLIPBOARD_IMAGE) {
       if (sessionId === null) return;
+      const targetSessionId = sessionId;
       const handle = registry.getHandle(sessionId);
       if (!handle) return;
       // [cmd:1][requestId:4][mimeLen:1][mime:N][imageData:M]
@@ -683,7 +684,16 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
           return;
         }
 
-        const cwd = await getProcessCwd(handle.pid);
+        const cwd = await registry.getCwd(targetSessionId);
+        if (!cwd) {
+          // resolve('') would anchor to the server's own cwd — never write there.
+          socketLogger.warn('file fallback unavailable: session cwd unknown');
+          sendClipboardImageAck(ws, requestId, 1, JSON.stringify({
+            clipboardError: clipResult.error,
+            containmentError: 'cwd-unavailable',
+          }));
+          return;
+        }
         const dirPath = resolve(cwd, imagePasteDir);
         const rel = relative(cwd, dirPath);
         if (rel.startsWith('..') || isAbsolute(rel)) {
@@ -730,7 +740,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       const filename = buf.subarray(7, 7 + filenameLen).toString('utf-8');
       const fileData = buf.subarray(7 + filenameLen);
 
-      getProcessCwd(handle.pid).then(cwd => writeUploadToCwd(fileData, filename, cwd).then(result => {
+      registry.getCwd(sessionId).then(cwd => writeUploadToCwd(fileData, filename, cwd).then(result => {
         if (result.success && result.savedName) {
           socketLogger.info('file uploaded to cwd', { name: result.savedName, bytes: fileData.length, cwd });
           writePty(handle, './' + shellQuoteForBash(result.savedName) + ' ');

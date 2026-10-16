@@ -355,4 +355,18 @@ describe('SessionRegistry', () => {
 
     assert.deepEqual(seen, []);
   });
+
+  it('getCwd prefers the OSC 7-reported cwd', async () => {
+    const { info } = registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
+    const headless = registry.getHeadless(info.sessionId)!;
+    const url = process.platform === 'win32' ? 'file://host/C:/work/my%20dir' : 'file://host/work/my%20dir';
+    await new Promise<void>(resolve => { headless.write(`\x1b]7;${url}\x07`, resolve); });
+
+    const expected = process.platform === 'win32' ? 'C:\\work\\my dir' : '/work/my dir';
+    assert.equal(await registry.getCwd(info.sessionId), expected);
+  });
+
+  it('getCwd returns empty for an unknown session', async () => {
+    assert.equal(await registry.getCwd('no-such-session'), '');
+  });
 });
