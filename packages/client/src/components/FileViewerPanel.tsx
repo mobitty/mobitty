@@ -6,7 +6,7 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import {
-  X, ChevronRight, ChevronLeft, ChevronDown, Folder, File, FileText, FileCode, FileImage, FileAudio, Copy, Pencil, EyeOff,
+  X, ArrowLeft, ArrowRight, ChevronRight, ChevronLeft, ChevronDown, Folder, File, FileText, FileCode, FileImage, FileAudio, Copy, Pencil, EyeOff,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -77,6 +77,13 @@ export default function FileViewerPanel({
   const [expanded, setExpanded] = useState<Set<string>>(() => new Set(view.initial ? ancestorDirs(view.initial) : []));
   const [mobileDir, setMobileDir] = useState(() => (view.initial ? dirname(view.initial) : ''));
   const [mobilePane, setMobilePane] = useState<'list' | 'preview'>(view.initial ? 'preview' : 'list');
+  // Every file opened in this view, browser-style: opening a file drops the
+  // forward entries and appends; back and forward move the index.
+  const [history, setHistory] = useState<{ paths: string[]; index: number }>(
+    () => (view.initial ? { paths: [view.initial], index: 0 } : { paths: [], index: -1 }),
+  );
+  const canBack = history.index > 0;
+  const canForward = history.index < history.paths.length - 1;
 
   // `filesVersion` changes whenever the cache does; the cache itself is a stable object.
   const file = useMemo(
@@ -101,7 +108,7 @@ export default function FileViewerPanel({
     if (open && selected && !file) onRequestFile(selected);
   }, [open, selected, file, view, onRequestFile]);
 
-  const select = useCallback((path: string) => {
+  const show = useCallback((path: string) => {
     setSelected(path);
     setExpanded(prev => {
       const next = new Set(prev);
@@ -111,6 +118,28 @@ export default function FileViewerPanel({
     setMobileDir(dirname(path));
     setMobilePane('preview');
   }, []);
+
+  const select = useCallback((path: string) => {
+    show(path);
+    setHistory(prev => {
+      if (prev.paths[prev.index] === path) return prev;
+      return { paths: [...prev.paths.slice(0, prev.index + 1), path], index: prev.index + 1 };
+    });
+  }, [show]);
+
+  const goBack = useCallback(() => {
+    const path = history.paths[history.index - 1];
+    if (path === undefined) return;
+    show(path);
+    setHistory(prev => ({ ...prev, index: prev.index - 1 }));
+  }, [history, show]);
+
+  const goForward = useCallback(() => {
+    const path = history.paths[history.index + 1];
+    if (path === undefined) return;
+    show(path);
+    setHistory(prev => ({ ...prev, index: prev.index + 1 }));
+  }, [history, show]);
 
   const toggleDir = useCallback((path: string) => {
     setExpanded(prev => {
@@ -128,14 +157,18 @@ export default function FileViewerPanel({
   useEffect(() => {
     if (!open || !active) return;
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape' && !e.defaultPrevented) {
+      if (e.defaultPrevented) return;
+      if (e.key === 'Escape') {
         e.preventDefault();
         onClose();
+      } else if (e.altKey && !e.ctrlKey && !e.metaKey && !e.shiftKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+        e.preventDefault();
+        if (e.key === 'ArrowLeft') goBack(); else goForward();
       }
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [open, active, onClose]);
+  }, [open, active, onClose, goBack, goForward]);
 
   if (!open) return null;
 
@@ -151,6 +184,7 @@ export default function FileViewerPanel({
             aria-label="Close" title="Close (Esc)" onClick={onClose}>
             <X className="h-4 w-4" />
           </Button>
+          <HistoryButtons canBack={canBack} canForward={canForward} onBack={goBack} onForward={goForward} desktop />
           <Breadcrumb root={view.root} selected={selected} />
           <CopyPathMenu root={view.root} relPath={copyTarget}>
             <Button variant="outline" size="sm" className="gap-1.5">
@@ -226,6 +260,7 @@ export default function FileViewerPanel({
             <ChevronLeft className="h-5 w-5" />
           </Button>
         ) : <span className="w-3" />}
+        <HistoryButtons canBack={canBack} canForward={canForward} onBack={goBack} onForward={goForward} />
         <span className="flex-1 min-w-0 truncate text-sm font-semibold font-mono">
           {selected ? basename(selected) : rootName}
         </span>
@@ -289,6 +324,29 @@ function TabStrip({ tabs, onClose, desktop = false }: { tabs: FileViewerTabs; on
         );
       })}
     </div>
+  );
+}
+
+/** Back and forward through the files opened in this view — the way back
+ *  after following a Markdown link. Not drawn until there is somewhere to go. */
+function HistoryButtons({ canBack, canForward, onBack, onForward, desktop = false }: {
+  canBack: boolean; canForward: boolean; onBack: () => void; onForward: () => void; desktop?: boolean;
+}) {
+  if (!canBack && !canForward) return null;
+  const size = desktop ? 'icon-sm' : 'icon';
+  const button = desktop ? 'text-muted-foreground hover:text-foreground' : 'size-11';
+  const icon = desktop ? 'h-4 w-4' : 'h-5 w-5';
+  return (
+    <>
+      <Button variant="ghost" size={size} className={button} aria-label="Back" title="Back (Alt+←)"
+        disabled={!canBack} onClick={onBack}>
+        <ArrowLeft className={icon} />
+      </Button>
+      <Button variant="ghost" size={size} className={button} aria-label="Forward" title="Forward (Alt+→)"
+        disabled={!canForward} onClick={onForward}>
+        <ArrowRight className={icon} />
+      </Button>
+    </>
   );
 }
 
