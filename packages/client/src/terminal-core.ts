@@ -1266,7 +1266,17 @@ export class TerminalCore {
     this.terminal.attachCustomKeyEventHandler((event) => {
       if (event.type !== 'keydown') return true;
       // Cmd-bearing keystrokes always pass through to xterm/native handling.
-      if (event.metaKey) return true;
+      // Under kitty flags xterm would encode Cmd as SUPER (Cmd+V →
+      // CSI 118;9u) instead of leaving it to the browser, so skip xterm and
+      // let native copy/paste fire; keep xterm's legacy Cmd+A select-all.
+      if (event.metaKey) {
+        if (this.kittyFlags === 0) return true;
+        if (event.key === 'a' && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+          event.preventDefault();
+          this.terminal.selectAll();
+        }
+        return false;
+      }
 
       if (this.copyCombo !== null && matchComboEvent(this.copyCombo, event)) {
         const selection = this.terminal.getSelection();
