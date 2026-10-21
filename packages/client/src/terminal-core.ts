@@ -12,6 +12,8 @@ import type { Profile, ProfileTheme, SoftkeyKeySettings } from './profiles';
 import type { KeyBehavior, ModifierFlags, VirtualKey, ComboStep, KeySpec } from './softkey-types';
 import { getKeySpec, emptyModifiers, parseComboString, matchComboEvent } from './softkey-types';
 import { detectOS, resolveHotkey } from './platform-detect';
+import { encodeKey, encodeTextWithModifiers } from './key-encoding';
+import type { KeyEncodingContext } from './key-encoding';
 import type { GestureId, GestureMapping } from './gesture-types';
 import { DEFAULT_GESTURE_MAPPING } from './gesture-types';
 import { GestureDetector } from './gesture-detector';
@@ -273,6 +275,9 @@ export class TerminalCore {
   private idleDisconnected = false;
   private pendingConnectRaf?: number;
   private lastBlurWasInternal = false;
+  /** Active kitty keyboard flags, mirrored from the `CSI = N ; 1 u` the server
+   *  sends (registerKittyFlagsObserver). Drives soft-key encoding. */
+  private kittyFlags = 0;
 
   constructor(private options: TerminalCoreOptions) {
     this.scrollback = this.options.termOptions.scrollback ?? 5000;
@@ -534,6 +539,7 @@ export class TerminalCore {
     terminal.loadAddon(webLinksAddon);
 
     terminal.open(parent);
+    this.registerTouchIsolation(parent);
 
     this.selectionOverlay = new SelectionOverlayAddon({
       isTouchDevice: () => this.isTouchDevice(),
@@ -546,6 +552,7 @@ export class TerminalCore {
     this.registerKeyInterceptor();
     this.registerNativePasteImageHandler();
     this.registerMouseEncodingLogging();
+    this.registerKittyFlagsObserver();
     this.syncPageBackground();
     fitAddon.fit();
 
@@ -1308,6 +1315,52 @@ export class TerminalCore {
       copied = typeof document.execCommand === 'function' && document.execCommand('copy');
     } catch { /* ignore */ }
     this.overlayAddon.showOverlay(copied ? '\u2702' : 'Copy failed', copied ? 300 : 700);
+  }
+
+  /** xterm.js 6.1 registers VS Code's `Gesture` with touch listeners on
+   *  `document`, and its MouseService turns a one-finger pan on
+   *  `.xterm-screen` into viewport scrolling, wheel reports, or up/down arrow
+   *  keys in the alternate buffer. mobitty owns touch scrolling
+   *  (gesture-detector.ts), so both would act on the same pan: double scroll
+   *  in the normal buffer, arrow keys into a fullscreen TUI. Stop touch events
+   *  from bubbling past the terminal container. Bubble phase and no
+   *  `preventDefault`, so listeners inside the container and click synthesis
+   *  are untouched; only `document` stops seeing them. Nothing else in the
+   *  client listens to touch events on `document`.
+   *  See docs/todo-bug-ctrl-enter-alt-buffer.md. */
+  private registerTouchIsolation(container: HTMLElement): void {
+    const stop = (e: Event) => { e.stopPropagation(); };
+    const types = ['touchstart', 'touchmove', 'touchend', 'touchcancel'] as const;
+    for (const type of types) container.addEventListener(type, stop, { passive: true });
+    this.registerTerminal({
+      dispose: () => { for (const type of types) container.removeEventListener(type, stop); },
+    });
+  }
+
+  /** Mirror of the kitty keyboard flags for the soft-key encoder
+   *  (key-encoding.ts). xterm.js has no public API for them. Exact because the
+   *  server only ever sends `CSI = N ; 1 u` assignments (never push/pop), and
+   *  every STATE_FULL ends with one after its buffer switch. Passive: returns
+   *  false so xterm's own handler applies the flags to hardware-key encoding.
+   *  Never write `CSI ? u` into this terminal to read its flags — the reply
+   *  would go out through onData to the PTY.
+   *  See docs/todo-bug-ctrl-enter-alt-buffer.md. */
+  private registerKittyFlagsObserver(): void {
+    this.kittyFlags = 0;
+    this.registerTerminal(this.terminal.parser.registerCsiHandler({ prefix: '=', final: 'u' }, (params) => {
+      const p0 = params[0];
+      const p1 = params.length > 1 ? params[1] : undefined;
+      const flags = (Array.isArray(p0) ? p0[0] : p0) || 0;
+      const mode = (Array.isArray(p1) ? p1[0] : p1) || 1;
+      const before = this.kittyFlags;
+      switch (mode) {
+        case 1: this.kittyFlags = flags; break;
+        case 2: this.kittyFlags |= flags; break;
+        case 3: this.kittyFlags &= ~flags; break;
+      }
+      if (this.kittyFlags !== before) this.logger.debug('kitty-flags', { flags: this.kittyFlags });
+      return false;
+    }));
   }
 
   /** Passive observer that logs the mouse ENCODING DECSET/DECRSTs
@@ -2301,7 +2354,7 @@ export class TerminalCore {
     switch (value) {
       case 'webgl':
         if (this.webglAddon) return;
-        this.webglAddon = new WebglAddon(true);
+        this.webglAddon = new WebglAddon({ preserveDrawingBuffer: true });
         try {
           this.webglAddon.onContextLoss(() => {
             this.logger.warn('webgl-context-loss', this.getRenderDiagnostics('context-loss'));
@@ -2400,52 +2453,15 @@ export class TerminalCore {
 
   // --- Modifier/key encoding ---
 
+  private keyEncodingContext(): KeyEncodingContext {
+    return { kittyFlags: this.kittyFlags, appCursorKeys: this.inApplicationCursorKeysMode() };
+  }
+
   private applyModifierToText(data: string): string {
     if (!data || data.length === 0) return data;
     const modifiers = this.modifierSource?.consumeModifiers();
     if (!modifiers || (!modifiers.ctrl && !modifiers.alt && !modifiers.shift)) return data;
-
-    const chars = Array.from(data);
-    const first = chars.shift();
-    if (!first) return data;
-    return this.encodeCharWithModifiers(first, modifiers) + chars.join('');
-  }
-
-  private encodeCharWithModifiers(char: string, modifiers: ModifierFlags): string {
-    let value = modifiers.shift ? this.applyShift(char) : char;
-    if (modifiers.ctrl) value = this.applyCtrl(value);
-    if (modifiers.alt) value = `\x1b${value}`;
-    return value;
-  }
-
-  private applyShift(char: string): string {
-    if (/^[a-z]$/.test(char)) return char.toUpperCase();
-    return char;
-  }
-
-  private applyCtrl(char: string): string {
-    if (char.length !== 1) return char;
-    const code = char.charCodeAt(0);
-    if (code >= 97 && code <= 122) return String.fromCharCode(code - 96);
-    if (code >= 65 && code <= 90) return String.fromCharCode(code - 64);
-    switch (char) {
-      case ' ': case '@': return String.fromCharCode(0);
-      case '[': return String.fromCharCode(27);
-      case '\\': return String.fromCharCode(28);
-      case ']': return String.fromCharCode(29);
-      case '^': return String.fromCharCode(30);
-      case '_': return String.fromCharCode(31);
-      case '?': return String.fromCharCode(127);
-      default: return char;
-    }
-  }
-
-  private hasModifiers(modifiers: ModifierFlags): boolean {
-    return modifiers.ctrl || modifiers.alt || modifiers.shift;
-  }
-
-  private getCsiModifier(modifiers: ModifierFlags): number {
-    return 1 + (modifiers.shift ? 1 : 0) + (modifiers.alt ? 2 : 0) + (modifiers.ctrl ? 4 : 0);
+    return encodeTextWithModifiers(data, modifiers, this.keyEncodingContext());
   }
 
   private inApplicationCursorKeysMode(): boolean {
@@ -2453,40 +2469,13 @@ export class TerminalCore {
   }
 
   private sendVirtualKey(key: VirtualKey, modifiers: ModifierFlags) {
-    const appMode = this.inApplicationCursorKeysMode();
-    if (!this.hasModifiers(modifiers)) {
-      const keyMap: Record<string, string> = {
-        esc: '\x1b', tab: '\t',
-        up: appMode ? '\x1bOA' : '\x1b[A',
-        down: appMode ? '\x1bOB' : '\x1b[B',
-        right: appMode ? '\x1bOC' : '\x1b[C',
-        left: appMode ? '\x1bOD' : '\x1b[D',
-        home: appMode ? '\x1bOH' : '\x1b[H',
-        end: appMode ? '\x1bOF' : '\x1b[F',
-        pageup: '\x1b[5~', pagedown: '\x1b[6~',
-      };
-      const seq = keyMap[key];
-      if (seq) this.sendData(seq);
-      return;
-    }
-
-    const m = this.getCsiModifier(modifiers);
-    const modKeyMap: Record<string, string> = {
-      esc: this.encodeCharWithModifiers('\x1b', modifiers),
-      tab: modifiers.shift && !modifiers.ctrl && !modifiers.alt ? '\x1b[Z' : `\x1b[1;${m}I`,
-      up: `\x1b[1;${m}A`, down: `\x1b[1;${m}B`,
-      right: `\x1b[1;${m}C`, left: `\x1b[1;${m}D`,
-      home: `\x1b[1;${m}H`, end: `\x1b[1;${m}F`,
-      pageup: `\x1b[5;${m}~`, pagedown: `\x1b[6;${m}~`,
-    };
-    const seq = modKeyMap[key];
+    const seq = encodeKey(key, modifiers, this.keyEncodingContext());
     if (seq) this.sendData(seq);
   }
 
   private sendDynamicChar(char: string, modifiers: ModifierFlags) {
     if (!char || char.length === 0) return;
-    if (!this.hasModifiers(modifiers)) { this.sendData(char); return; }
-    this.sendData(this.encodeCharWithModifiers(char, modifiers));
+    this.sendData(encodeKey({ char }, modifiers, this.keyEncodingContext()));
   }
 
   private sendDynamicCombo(combo: ComboStep[]) {

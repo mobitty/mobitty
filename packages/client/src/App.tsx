@@ -74,14 +74,14 @@ const defaultTermOptions: ITerminalOptions = {
   fontFamily: DEFAULT_DESKTOP_PROFILE.fontFamily,
   theme: defaultTheme,
   scrollback: DEFAULT_SCROLLBACK,
-  // Effectively disable the scrollbar. xterm.js maps
-  // `overviewRuler.width` to its SmoothScrollableElement's
-  // `verticalScrollbarSize`, with a `|| 14` fallback that treats 0 as
-  // falsy — so 1 is the minimum we can pass. A real disable flag
-  // (`scrollbar.showScrollbar: false`) lands in a future xterm.js
-  // release; see `docs/todo-feat-xterm-disable-scrollbar.md`.
-  overviewRuler: { width: 1 },
+  // mobitty owns scrolling (touch pan, momentum); xterm's scrollbar and
+  // overview ruler are never shown.
+  scrollbar: { showScrollbar: false },
   allowProposedApi: true,
+  // Kitty keyboard protocol: once an app enables it (the server replays its
+  // flags as `CSI = N ; 1 u`), Ctrl+Enter, Shift+Enter and friends get
+  // unambiguous `CSI u` encodings. See docs/todo-bug-ctrl-enter-alt-buffer.md.
+  vtExtensions: { kittyKeyboard: true },
   linkHandler: {
     activate(_event, text) {
       openExternalUrl(text);
