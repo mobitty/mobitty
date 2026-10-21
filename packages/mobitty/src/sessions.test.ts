@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { SessionRegistry } from './sessions.ts';
-import { killPty } from './pty.ts';
+import { killPty, writePty } from './pty.ts';
 
 const noopLogger = {
   debug() {},
@@ -368,5 +368,62 @@ describe('SessionRegistry', () => {
 
   it('getCwd returns empty for an unknown session', async () => {
     assert.equal(await registry.getCwd('no-such-session'), '');
+  });
+
+  // A real PTY child queries the kitty keyboard flags, then pushes and pops
+  // them on the alternate screen. The server must answer the query exactly
+  // once (to the PTY) and track the flags for the client.
+  // See docs/todo-bug-ctrl-enter-alt-buffer.md.
+  it('answers CSI ? u once and tracks kitty keyboard flags from a real PTY', { skip: process.platform === 'win32' }, async () => {
+    const child = String.raw`
+      process.stdin.setRawMode(true);
+      let got = '';
+      let step = 0;
+      process.stdin.on('data', (d) => {
+        got += d.toString('latin1');
+        if (step === 0 && got.includes('u')) {
+          step = 1;
+          // Collect a little longer so a duplicate reply would show up.
+          setTimeout(() => {
+            process.stdout.write('REPLY=' + JSON.stringify(got) + '\r\n');
+            process.stdout.write('\x1b[?1049h\x1b[>5uPUSHED');
+          }, 200);
+        } else if (step === 1 && d.toString().includes('p')) {
+          step = 2;
+          process.stdout.write('\x1b[<uPOPPED');
+        } else if (step === 2 && d.toString().includes('q')) {
+          process.exit(0);
+        }
+      });
+      process.stdout.write('\x1b[?u');
+    `;
+    const { info } = registry.createSession([process.execPath, '-e', child], 'xterm-256color', 80, 24, 5000, 'node');
+    const id = info.sessionId;
+    const headless = registry.getHeadless(id)!;
+
+    const screenText = (buf: typeof headless.buffer.active): string => {
+      let text = '';
+      for (let y = 0; y < buf.length; y++) text += buf.getLine(y)?.translateToString(true) ?? '';
+      return text;
+    };
+    const waitFor = async (what: string, pred: () => boolean): Promise<void> => {
+      const deadline = Date.now() + 5000;
+      while (!pred()) {
+        if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+        await new Promise(r => setTimeout(r, 20));
+      }
+    };
+
+    await waitFor('push', () => screenText(headless.buffer.alternate).includes('PUSHED'));
+    const normal = screenText(headless.buffer.normal);
+    const replies = normal.split('\\u001b[?0u').length - 1;
+    assert.equal(replies, 1, `expected exactly one CSI ? u reply, saw: ${normal.trim()}`);
+    assert.match(normal, /REPLY="\\u001b\[\?0u"/);
+    assert.equal(registry.getTrackedModes(id).kittyKeyboardFlags, 5);
+
+    writePty(registry.getHandle(id)!, 'p');
+    await waitFor('pop', () => screenText(headless.buffer.alternate).includes('POPPED'));
+    assert.equal(registry.getTrackedModes(id).kittyKeyboardFlags, 0);
+    writePty(registry.getHandle(id)!, 'q');
   });
 });

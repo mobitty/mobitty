@@ -10,12 +10,12 @@ import { generateUniqueSessionName } from './session-names.ts';
 import type { LoggerInterface } from './types.ts';
 import headlessPkg from '@xterm/headless';
 const { Terminal } = headlessPkg;
-import serializePkg from '@xterm/addon-serialize';
-const { SerializeAddon } = serializePkg;
 import { trackCursorVisibility } from './cursor-visibility.ts';
 import type { CursorVisibilityTracker } from './cursor-visibility.ts';
 import { trackMouseEncoding } from './mouse-encoding.ts';
 import type { MouseEncodingTracker } from './mouse-encoding.ts';
+import { trackKittyKeyboard } from './kitty-keyboard.ts';
+import type { KittyKeyboardTracker } from './kitty-keyboard.ts';
 import { registerNotificationHandlers } from './osc-notifications.ts';
 import { registerCwdHandler } from './osc-cwd.ts';
 import { registerClipboardHandler } from './osc-clipboard.ts';
@@ -24,7 +24,7 @@ import type { OscColorQueryTracker, OscColorConfig } from './osc-color-query.ts'
 import { BUILTIN_THEMES } from './themes.ts';
 import { normalizeSgrColors } from './sgr-normalize.ts';
 import { bufferStats, summarizeBytes, sampleBufferLines, sampleAltBuffer, detectLineRepetition } from './diff.ts';
-import type { MouseEncoding } from './diff.ts';
+import type { TrackedModes } from './diff.ts';
 import { getProcessCwd } from './clipboard.ts';
 
 const HOME = homedir();
@@ -84,10 +84,10 @@ interface SessionEntry {
   shell: string;
   handle: PtyHandle | null;
   headless: InstanceType<typeof Terminal> | null;
-  serializeAddon: InstanceType<typeof SerializeAddon> | null;
   cursorTracker: CursorVisibilityTracker | null;
   colorTracker: OscColorQueryTracker | null;
   mouseEncodingTracker: MouseEncodingTracker | null;
+  kittyKeyboardTracker: KittyKeyboardTracker | null;
   title: string;
   hasAlert: boolean;
   /** Last-known absolute CWD reported via OSC 7. Empty until a shell reports it. */
@@ -201,10 +201,10 @@ export class SessionRegistry {
         shell: s.shell,
         handle: null,
         headless: null,
-        serializeAddon: null,
         cursorTracker: null,
         colorTracker: null,
         mouseEncodingTracker: null,
+        kittyKeyboardTracker: null,
         title: '',
         hasAlert: false,
         reportedCwd: '',
@@ -266,10 +266,6 @@ export class SessionRegistry {
       ? { backend: 'conpty' as const, buildNumber: parseInt(release().split('.')[2] ?? '0', 10) }
       : undefined;
     const headless = new Terminal({ cols: columns, rows, scrollback, allowProposedApi: true, windowsPty });
-    const serializeAddon = new SerializeAddon();
-    // SerializeAddon is typed against @xterm/xterm's Terminal but is structurally
-    // identical to @xterm/headless's; the runtime API is the same.
-    headless.loadAddon(serializeAddon as unknown as Parameters<typeof headless.loadAddon>[0]);
     let title = '';
 
     const onExitCallbacks: Array<() => void> = [];
@@ -284,7 +280,7 @@ export class SessionRegistry {
 
     // Mouse report encoding isn't on xterm's public `terminal.modes`, so the
     // diff/serialize layer can't read it — track it here and thread it into
-    // captureSnapshot/serializeFullState via getMouseEncoding(). Without this a
+    // captureSnapshot/serializeFullState via getTrackedModes(). Without this a
     // TUI's SGR mouse mode (`\x1b[?1006h`, e.g. Copilot CLI) never reaches the
     // client and mouse-move reports arrive as garbled X10 bytes. See
     // docs/done-bug-copilot-mouse-sgr-encoding-not-serialized.md.
@@ -293,6 +289,24 @@ export class SessionRegistry {
         this.logger.debug('mouse-encoding-change', { sessionId, encoding });
       }
       notifyChange();
+    });
+
+    // Kitty keyboard protocol (`CSI = | ? | > | < u`). The headless parser
+    // would drop an app's `CSI > 5 u` and the client would keep sending `\r`
+    // for Ctrl+Enter; track the flags here, answer `CSI ? u` straight to the
+    // PTY, and replay the flags to the client as `CSI = N ; 1 u` (diff.ts).
+    // Registered before spawnPty so an app's startup probe gets its answer.
+    // See docs/todo-bug-ctrl-enter-alt-buffer.md.
+    const kittyKeyboardTracker = trackKittyKeyboard(headless, {
+      reply: (data) => {
+        if (entry.handle) writePty(entry.handle, data);
+      },
+      onChange: (flags) => {
+        if (this.logger.isEnabled('debug')) {
+          this.logger.debug('kitty-keyboard-change', { sessionId, flags });
+        }
+        notifyChange();
+      },
     });
 
     headless.onCursorMove(notifyChange);
@@ -395,10 +409,10 @@ export class SessionRegistry {
       shell: shellName,
       handle,
       headless,
-      serializeAddon,
       cursorTracker,
       colorTracker,
       mouseEncodingTracker,
+      kittyKeyboardTracker,
       title,
       hasAlert: false,
       reportedCwd: '',
@@ -446,10 +460,6 @@ export class SessionRegistry {
     return this.sessions.get(sessionId)?.headless ?? null;
   }
 
-  getSerializeAddon(sessionId: string): InstanceType<typeof SerializeAddon> | null {
-    return this.sessions.get(sessionId)?.serializeAddon ?? null;
-  }
-
   getTitle(sessionId: string): string {
     return this.sessions.get(sessionId)?.title ?? '';
   }
@@ -477,8 +487,14 @@ export class SessionRegistry {
     return this.sessions.get(sessionId)?.cursorTracker?.cursorHidden ?? false;
   }
 
-  getMouseEncoding(sessionId: string): MouseEncoding {
-    return this.sessions.get(sessionId)?.mouseEncodingTracker?.encoding ?? 'default';
+  /** Modes xterm.js does not expose on `terminal.modes`, for the
+   *  diff/serialize layer. */
+  getTrackedModes(sessionId: string): TrackedModes {
+    const entry = this.sessions.get(sessionId);
+    return {
+      mouseEncoding: entry?.mouseEncodingTracker?.encoding ?? 'default',
+      kittyKeyboardFlags: entry?.kittyKeyboardTracker?.flags ?? 0,
+    };
   }
 
   updateSessionThemeColors(sessionId: string, fg: string, bg: string): void {
@@ -566,9 +582,9 @@ export class SessionRegistry {
       entry.mouseEncodingTracker.dispose();
       entry.mouseEncodingTracker = null;
     }
-    if (entry.serializeAddon) {
-      entry.serializeAddon.dispose();
-      entry.serializeAddon = null;
+    if (entry.kittyKeyboardTracker) {
+      entry.kittyKeyboardTracker.dispose();
+      entry.kittyKeyboardTracker = null;
     }
     if (entry.headless) {
       entry.headless.dispose();
@@ -601,9 +617,9 @@ export class SessionRegistry {
         entry.mouseEncodingTracker.dispose();
         entry.mouseEncodingTracker = null;
       }
-      if (entry.serializeAddon) {
-        entry.serializeAddon.dispose();
-        entry.serializeAddon = null;
+      if (entry.kittyKeyboardTracker) {
+        entry.kittyKeyboardTracker.dispose();
+        entry.kittyKeyboardTracker = null;
       }
       if (entry.headless) {
         entry.headless.dispose();

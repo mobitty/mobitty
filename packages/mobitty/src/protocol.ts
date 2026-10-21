@@ -179,8 +179,8 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
     // Send STATE_FULL immediately on attach
     const title = registry.getTitle(sid);
     const cursorHidden = registry.getCursorHidden(sid);
-    const mouseEncoding = registry.getMouseEncoding(sid);
-    const vtFull = serializeFullState(headless, title, cursorHidden, mouseEncoding);
+    const tracked = registry.getTrackedModes(sid);
+    const vtFull = serializeFullState(headless, title, cursorHidden, tracked);
     socketLogger.info('state-full sent', {
       stats: bufferStats(headless),
       samples: sampleBufferLines(headless, 4, 60),
@@ -189,7 +189,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       payload: summarizeBytes(vtFull, 200),
     });
     ws.send(Buffer.from(String.fromCharCode(STATE_FULL) + vtFull));
-    lastSnapshot = captureSnapshot(headless, title, cursorHidden, registry.getScrollCount(sid), mouseEncoding);
+    lastSnapshot = captureSnapshot(headless, title, cursorHidden, registry.getScrollCount(sid), tracked);
 
     // --- Verification terminal (when MOBITTY_VERIFY_DIFF=1) ---
     let verifyTerm: InstanceType<typeof HeadlessTerminal> | null = null;
@@ -214,7 +214,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
     function runVerifyComparison(expectedSnapshot: FrameSnapshot): void {
       if (!verifyTerm || !socketLogger) return;
 
-      const verifySnapshot = captureSnapshot(verifyTerm, expectedSnapshot.title, expectedSnapshot.cursorHidden, 0, expectedSnapshot.modes.mouseEncoding);
+      const verifySnapshot = captureSnapshot(verifyTerm, expectedSnapshot.title, expectedSnapshot.cursorHidden, 0, expectedSnapshot.modes);
       const mismatches = compareSnapshots(expectedSnapshot, verifySnapshot, 20);
 
       if (mismatches.length > 0) {
@@ -232,7 +232,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         if (h && ws.readyState === 1) {
           const t = registry.getTitle(sid);
           const ch = registry.getCursorHidden(sid);
-          const enc = registry.getMouseEncoding(sid);
+          const enc = registry.getTrackedModes(sid);
           const healVt = serializeFullState(h, t, ch, enc);
           ws.send(Buffer.from(String.fromCharCode(STATE_FULL) + healVt));
           lastSnapshot = captureSnapshot(h, t, ch, registry.getScrollCount(sid), enc);
@@ -257,7 +257,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       if (!h) { stopSync(); return; }
 
       const ch = registry.getCursorHidden(sid);
-      const enc = registry.getMouseEncoding(sid);
+      const enc = registry.getTrackedModes(sid);
       const curr = captureSnapshot(h, t, ch, registry.getScrollCount(sid), enc);
       const prevSnapshot = lastSnapshot;
 

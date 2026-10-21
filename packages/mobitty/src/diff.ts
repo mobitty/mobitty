@@ -49,6 +49,21 @@ function readUriForUrlId(terminal: Terminal, urlId: number): string | undefined 
 // docs/done-bug-copilot-mouse-sgr-encoding-not-serialized.md.
 export type MouseEncoding = 'default' | 'utf8' | 'sgr' | 'urxvt' | 'sgr-pixels';
 
+/** Modes xterm.js does not expose on `terminal.modes`, tracked out-of-band by
+ *  the session (`mouse-encoding.ts`, `kitty-keyboard.ts`) and threaded into
+ *  `captureSnapshot` / `serializeFullState`. */
+export interface TrackedModes {
+  mouseEncoding: MouseEncoding;
+  /** Kitty keyboard protocol flags of the active screen. See
+   *  docs/todo-bug-ctrl-enter-alt-buffer.md. */
+  kittyKeyboardFlags: number;
+}
+
+export const DEFAULT_TRACKED_MODES: Readonly<TrackedModes> = Object.freeze({
+  mouseEncoding: 'default',
+  kittyKeyboardFlags: 0,
+});
+
 interface TerminalModes {
   applicationCursorKeysMode: boolean;
   applicationKeypadMode: boolean;
@@ -56,6 +71,7 @@ interface TerminalModes {
   insertMode: boolean;
   mouseTrackingMode: 'none' | 'x10' | 'vt200' | 'drag' | 'any';
   mouseEncoding: MouseEncoding;
+  kittyKeyboardFlags: number;
   originMode: boolean;
   reverseWraparoundMode: boolean;
   sendFocusMode: boolean;
@@ -110,6 +126,7 @@ function defaultModes(): TerminalModes {
     insertMode: false,
     mouseTrackingMode: 'none',
     mouseEncoding: 'default',
+    kittyKeyboardFlags: 0,
     originMode: false,
     reverseWraparoundMode: false,
     sendFocusMode: false,
@@ -117,7 +134,7 @@ function defaultModes(): TerminalModes {
   };
 }
 
-function readModes(terminal: Terminal, mouseEncoding: MouseEncoding = 'default'): TerminalModes {
+function readModes(terminal: Terminal, tracked: Readonly<TrackedModes> = DEFAULT_TRACKED_MODES): TerminalModes {
   const m = terminal.modes;
   const mouseMap: Record<string, TerminalModes['mouseTrackingMode']> = {
     none: 'none', x10: 'x10', vt200: 'vt200', drag: 'drag', any: 'any',
@@ -128,7 +145,8 @@ function readModes(terminal: Terminal, mouseEncoding: MouseEncoding = 'default')
     bracketedPasteMode: m.bracketedPasteMode,
     insertMode: m.insertMode,
     mouseTrackingMode: mouseMap[m.mouseTrackingMode] ?? 'none',
-    mouseEncoding,
+    mouseEncoding: tracked.mouseEncoding,
+    kittyKeyboardFlags: tracked.kittyKeyboardFlags,
     originMode: m.originMode,
     reverseWraparoundMode: m.reverseWraparoundMode,
     sendFocusMode: m.sendFocusMode,
@@ -136,7 +154,7 @@ function readModes(terminal: Terminal, mouseEncoding: MouseEncoding = 'default')
   };
 }
 
-export function captureSnapshot(terminal: Terminal, title: string, cursorHidden: boolean, scrollCount: number, mouseEncoding: MouseEncoding = 'default'): FrameSnapshot {
+export function captureSnapshot(terminal: Terminal, title: string, cursorHidden: boolean, scrollCount: number, tracked: Readonly<TrackedModes> = DEFAULT_TRACKED_MODES): FrameSnapshot {
   const buf = terminal.buffer.active;
   const cols = terminal.cols;
   const rows = terminal.rows;
@@ -193,7 +211,7 @@ export function captureSnapshot(terminal: Terminal, title: string, cursorHidden:
     baseY,
     scrollCount,
     title,
-    modes: readModes(terminal, mouseEncoding),
+    modes: readModes(terminal, tracked),
     urlIdToUri,
   };
 }
@@ -319,6 +337,13 @@ function emitModeChanges(prev: TerminalModes, curr: TerminalModes): string {
     if (oldCode) out += `\x1b[?${oldCode}l`;
     const newCode = encCode[curr.mouseEncoding];
     if (newCode) out += `\x1b[?${newCode}h`;
+  }
+
+  // Kitty keyboard flags. The client only ever receives an assignment
+  // (`CSI = N ; 1 u`), never push/pop, so its flags mirror the server's
+  // active screen exactly. See docs/todo-bug-ctrl-enter-alt-buffer.md.
+  if (prev.kittyKeyboardFlags !== curr.kittyKeyboardFlags) {
+    out += `\x1b[=${curr.kittyKeyboardFlags};1u`;
   }
 
   return out;
@@ -675,6 +700,12 @@ function serializeModes(modes: TerminalModes): string {
     case 'urxvt': out += '\x1b[?1015h'; break;
     case 'sgr-pixels': out += '\x1b[?1016h'; break;
   }
+  // Kitty keyboard flags — always emitted, even 0. xterm.js swaps kitty flags
+  // on every `?1049h/l`, so the client's STATE_FULL prefix (`?1049l`) plus this
+  // payload's `?1049h` would bring back a previous session's alternate-screen
+  // flags. Only an assignment after the buffer switch is correct; this runs
+  // after the alternate-buffer content, so it lands on the right screen.
+  out += `\x1b[=${modes.kittyKeyboardFlags};1u`;
   return out;
 }
 
@@ -683,7 +714,7 @@ function serializeModes(modes: TerminalModes): string {
 // previous `@xterm/addon-serialize`-based path (`addon-serialize` 0.14 has no
 // OSC 8 support — markdown URLs from Claude Code lost their link attribute
 // before reaching the client; only the underline + color survived).
-export function serializeFullState(terminal: Terminal, title: string, cursorHidden: boolean, mouseEncoding: MouseEncoding = 'default'): string {
+export function serializeFullState(terminal: Terminal, title: string, cursorHidden: boolean, tracked: Readonly<TrackedModes> = DEFAULT_TRACKED_MODES): string {
   // Hide cursor for the duration of the client's write to prevent flicker.
   // Reset SGR + clear screen + home cursor before the buffer payload so the
   // client starts from a known-clean slate. SGR reset MUST precede `\x1b[2J`:
@@ -705,7 +736,7 @@ export function serializeFullState(terminal: Terminal, title: string, cursorHidd
     out += serializeBufferOf(terminal, terminal.buffer.active, /* isAlt */ false);
   }
 
-  out += serializeModes(readModes(terminal, mouseEncoding));
+  out += serializeModes(readModes(terminal, tracked));
 
   const buf = terminal.buffer.active;
   const cursorRow = buf.cursorY + 1;

@@ -4,6 +4,7 @@ import headlessPkg from '@xterm/headless';
 const { Terminal } = headlessPkg;
 import { blankSnapshot, captureSnapshot, generateDiff, serializeFullState, compareSnapshots } from './diff.ts';
 import { trackMouseEncoding } from './mouse-encoding.ts';
+import { trackKittyKeyboard } from './kitty-keyboard.ts';
 
 describe('blankSnapshot', () => {
   it('creates correct dimensions and defaults', () => {
@@ -418,7 +419,7 @@ describe('serializeFullState', () => {
     await writeAndWait(src, '\x1b[?1003h\x1b[?1006h');
     assert.equal(srcTracker.encoding, 'sgr', 'precondition: source tracked SGR');
 
-    const vt = serializeFullState(src, '', false, srcTracker.encoding);
+    const vt = serializeFullState(src, '', false, { mouseEncoding: srcTracker.encoding, kittyKeyboardFlags: 0 });
     assert.ok(vt.includes('\x1b[?1006h'), 'full snapshot must re-emit SGR encoding');
     assert.ok(vt.includes('\x1b[?1003h'), 'full snapshot must re-emit any-motion tracking');
 
@@ -448,6 +449,101 @@ describe('serializeFullState', () => {
     const resetDiff = generateDiff(curr, back);
     assert.ok(resetDiff !== null);
     assert.ok(resetDiff.includes('\x1b[?1006l'), 'disabling SGR should emit ?1006l');
+  });
+
+  // Kitty keyboard flags. See docs/todo-bug-ctrl-enter-alt-buffer.md.
+  // Mirrors the client STATE_FULL reset prefix (terminal-core.ts).
+  const KITTY_FULL_PREFIX =
+    '\x1b[?1049l' +
+    '\x1b[?9l\x1b[?1000l\x1b[?1002l\x1b[?1003l' +
+    '\x1b[?1004l' +
+    '\x1b[?1005l\x1b[?1006l\x1b[?1015l\x1b[?1016l' +
+    '\x1b[?2004l' +
+    '\x1b[3J';
+
+  /** Ask a kitty-enabled terminal for its active flags through public API. */
+  async function queryKittyFlags(term: InstanceType<typeof Terminal>): Promise<string> {
+    const replies: string[] = [];
+    const sub = term.onData(d => replies.push(d));
+    await writeAndWait(term, '\x1b[?u');
+    sub.dispose();
+    return replies.join('');
+  }
+
+  it('serializeFullState ends the modes with the kitty flags after ?1049h', async () => {
+    const src = new Terminal({ cols: 40, rows: 5, allowProposedApi: true });
+    const tracker = trackKittyKeyboard(src, { reply: () => {} });
+    await writeAndWait(src, 'shell\r\n\x1b[?1049h\x1b[>5uapp');
+    assert.equal(tracker.flags, 5);
+
+    const vt = serializeFullState(src, '', false, { mouseEncoding: 'default', kittyKeyboardFlags: tracker.flags });
+    const altAt = vt.indexOf('\x1b[?1049h');
+    const kittyAt = vt.indexOf('\x1b[=5;1u');
+    assert.ok(altAt >= 0, 'alt session enters the alternate screen');
+    assert.ok(kittyAt > altAt, 'kitty assignment comes after the buffer switch');
+
+    const zero = serializeFullState(src, '', false, { mouseEncoding: 'default', kittyKeyboardFlags: 0 });
+    assert.ok(zero.includes('\x1b[=0;1u'), 'flags 0 are still emitted');
+
+    tracker.dispose();
+    src.dispose();
+  });
+
+  it('kitty flags survive a STATE_FULL round trip into a kitty-enabled client', async () => {
+    const src = new Terminal({ cols: 40, rows: 5, allowProposedApi: true });
+    const tracker = trackKittyKeyboard(src, { reply: () => {} });
+    await writeAndWait(src, '\x1b[?1049h\x1b[>5u');
+    const vt = serializeFullState(src, '', false, { mouseEncoding: 'default', kittyKeyboardFlags: tracker.flags });
+
+    const dst = new Terminal({ cols: 40, rows: 5, allowProposedApi: true, vtExtensions: { kittyKeyboard: true } });
+    await writeAndWait(dst, KITTY_FULL_PREFIX + vt);
+    assert.equal(dst.buffer.active.type, 'alternate');
+    assert.equal(await queryKittyFlags(dst), '\x1b[?5u');
+
+    tracker.dispose();
+    src.dispose();
+    dst.dispose();
+  });
+
+  it('a session switch does not leak the previous alternate-screen kitty flags', async () => {
+    // Destination: the client after a previous session left its alternate
+    // screen with flags 5, then went back to the normal screen.
+    const dst = new Terminal({ cols: 40, rows: 5, allowProposedApi: true, vtExtensions: { kittyKeyboard: true } });
+    await writeAndWait(dst, '\x1b[?1049h\x1b[=5;1u');
+    assert.equal(await queryKittyFlags(dst), '\x1b[?5u', 'precondition: alt screen holds 5');
+
+    // Source: a different alternate-screen session with flags 0.
+    const src = new Terminal({ cols: 40, rows: 5, allowProposedApi: true });
+    const tracker = trackKittyKeyboard(src, { reply: () => {} });
+    await writeAndWait(src, '\x1b[?1049h');
+    const vt = serializeFullState(src, '', false, { mouseEncoding: 'default', kittyKeyboardFlags: tracker.flags });
+
+    await writeAndWait(dst, KITTY_FULL_PREFIX + vt);
+    assert.equal(dst.buffer.active.type, 'alternate');
+    assert.equal(await queryKittyFlags(dst), '\x1b[?0u');
+
+    tracker.dispose();
+    src.dispose();
+    dst.dispose();
+  });
+
+  it('emits kitty flag changes in STATE_UPDATE diffs and nothing when unchanged', () => {
+    const prev = blankSnapshot(80, 24);
+    const curr = blankSnapshot(80, 24);
+    curr.modes.kittyKeyboardFlags = 5;
+    const setDiff = generateDiff(prev, curr);
+    assert.ok(setDiff !== null);
+    assert.ok(setDiff.includes('\x1b[=5;1u'));
+
+    const back = blankSnapshot(80, 24);
+    const resetDiff = generateDiff(curr, back);
+    assert.ok(resetDiff !== null);
+    assert.ok(resetDiff.includes('\x1b[=0;1u'));
+
+    const same = blankSnapshot(80, 24);
+    same.modes.kittyKeyboardFlags = 5;
+    const noDiff = generateDiff(curr, same);
+    assert.equal(noDiff, '', 'unchanged flags emit nothing');
   });
 
   it('preserves wrapped-line groups across replay', async () => {
