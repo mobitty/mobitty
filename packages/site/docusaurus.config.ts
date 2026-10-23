@@ -186,6 +186,11 @@ const config: Config = {
           position: 'right',
         },
         {
+          href: 'https://discord.gg/EAPqRFsFa5',
+          label: 'Discord',
+          position: 'right',
+        },
+        {
           href: 'https://github.com/mobitty/mobitty',
           label: 'GitHub',
           position: 'right',
@@ -206,6 +211,7 @@ const config: Config = {
           title: 'Resources',
           items: [
             { label: 'Documentation', to: '/docs/getting-started' },
+            { label: 'Support (Discord)', href: 'https://discord.gg/EAPqRFsFa5' },
             {
               label: 'GitHub',
               href: 'https://github.com/mobitty/mobitty',

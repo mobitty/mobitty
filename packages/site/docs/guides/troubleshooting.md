@@ -57,3 +57,7 @@ For direct LAN access:
 The iOS app accepts multiple URLs per saved server and tries them in order until one connects. This is useful when your server is reachable two ways — e.g. a Tailscale address and a local LAN address — and you want it to "just work" whether or not the VPN is up.
 
 Open the iOS app's server setup and add each URL on its own line. The first one is tried first; the rest are fallbacks. See the [iOS App](/docs/guides/ios-app) guide for the full feature tour.
+
+## Still stuck?
+
+Ask in the [#mobitty forum on Discord](https://discord.gg/EAPqRFsFa5), one post per problem. Say which device and browser (or the iOS app), the output of `mobitty --version`, and what you expected instead.
