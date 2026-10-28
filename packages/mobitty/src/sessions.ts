@@ -1,9 +1,9 @@
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { release, homedir } from 'node:os';
-import type { PtyHandle, SessionInfo, EditorResult } from './types.ts';
-import { VIEWER_CLOSE, VIEWER_OPEN, VIEWER_SYNC } from './types.ts';
+import type { PtyHandle, SessionInfo, EditorResult, ClientCapabilities, ViewKind } from './types.ts';
+import { DEFAULT_CAPABILITIES, VIEWER_CLOSE, VIEWER_NOTICE, VIEWER_OPEN, VIEWER_SYNC } from './types.ts';
 import type { ViewEntry } from './viewer.ts';
 import { spawnPty, writePty, resizePty, killPty } from './pty.ts';
 import { generateUniqueSessionName } from './session-names.ts';
@@ -45,6 +45,10 @@ export type EditorSender = (editId: number, filePath: string, content: string, c
  *  `todo-bug-remote-editor-hangs-no-panel.md`. */
 const EDITOR_ACK_TIMEOUT_MS = 2000;
 
+/** `requestEdit` rejects an image edit with this while the attached client
+ *  can't show images. */
+export const IMAGE_EDIT_UNSUPPORTED = "the attached client can't show images";
+
 /** The VIEWER_OPEN payload — kept whole so it can be replayed on attach.
  *  See docs/todo-design-file-viewer.md. */
 export interface ViewerOpenPayload {
@@ -60,9 +64,22 @@ export interface ViewerOpenPayload {
  *  `false` when the socket could not take it — same contract as EditorSender. */
 export type ViewerSender = (cmd: number, json: string) => boolean;
 
-/** How `requestView` ended: the user closed a view the CLI waited on, or no
- *  client was attached and the view was queued for the next one. */
+/** How `requestView` ended: the user closed a view the CLI waited on, or the
+ *  view was queued for the next client that can show it — because no client
+ *  was attached, the attached one can't show its kind, or the client that had
+ *  it open was replaced by one that can't. */
 export type ViewOutcome = 'closed' | 'queued';
+
+/** What the server keeps about the connection attached to a session. */
+export interface AttachedClient {
+  capabilities: ClientCapabilities;
+}
+
+/** A view to open: the VIEWER_OPEN payload less its id, plus what it shows.
+ *  `kind` stays on the server. */
+export interface ViewRequest extends Omit<ViewerOpenPayload, 'viewId'> {
+  kind: ViewKind;
+}
 
 /** Views a session keeps open or queued. Past this, the oldest queued view is
  *  dropped; views a CLI is waiting on are never dropped. */
@@ -70,8 +87,9 @@ export const MAX_VIEWS_PER_SESSION = 16;
 
 interface ViewState {
   open: ViewerOpenPayload;
+  kind: ViewKind;
   /** Resolves the waiting CLI; `null` for a queued view nobody waits on. */
-  resolve: (() => void) | null;
+  resolve: ((outcome: ViewOutcome) => void) | null;
 }
 
 interface SessionEntry {
@@ -119,6 +137,8 @@ interface SessionEntry {
    *  `null` text means the payload blew the size cap — the client surfaces
    *  that rather than dropping the copy silently. */
   clipboardSender: ((text: string | null) => void) | null;
+  /** The connection attached now; `null` once it closed. */
+  attachedClient: AttachedClient | null;
   scrollCount: number;
 }
 
@@ -217,6 +237,7 @@ export class SessionRegistry {
         editorSender: null,
         views: [],
         viewerSender: null,
+      attachedClient: null,
         downloadSender: null,
         clipboardSender: null,
         scrollCount: 0,
@@ -425,6 +446,7 @@ export class SessionRegistry {
       editorSender: null,
       views: [],
       viewerSender: null,
+      attachedClient: null,
       downloadSender: null,
       clipboardSender: null,
       scrollCount: 0,
@@ -437,13 +459,36 @@ export class SessionRegistry {
     return { info: this.toSessionInfo(entry), handle };
   }
 
-  attachSession(sessionId: string, onExit: () => void, onDetach: () => void): SessionInfo | undefined {
+  /** `client` defaults to one with DEFAULT_CAPABILITIES. A client that
+   *  can't show images cancels a pending image edit, which would otherwise
+   *  hold the session's only edit slot until another client attached. */
+  attachSession(
+    sessionId: string,
+    onExit: () => void,
+    onDetach: () => void,
+    client: AttachedClient = { capabilities: { ...DEFAULT_CAPABILITIES } },
+  ): SessionInfo | undefined {
     const entry = this.sessions.get(sessionId);
     if (!entry || !entry.alive || !entry.handle) return undefined;
 
     entry.onExitCallbacks.push(onExit);
     entry.onDetachCallbacks.push(onDetach);
+    entry.attachedClient = client;
+    if (!client.capabilities.imageEdit && entry.editorPending?.contentType?.startsWith('image/')) {
+      this.cancelPendingEdit(entry, 'client cannot show images');
+    }
     return this.toSessionInfo(entry);
+  }
+
+  /** The connection attached to the session, or `null` when none is. */
+  getAttachedClient(sessionId: string): AttachedClient | null {
+    return this.sessions.get(sessionId)?.attachedClient ?? null;
+  }
+
+  /** Clear only if `client` is still the attached one — see clearEditorSender. */
+  clearAttachedClient(sessionId: string, client: AttachedClient): void {
+    const entry = this.sessions.get(sessionId);
+    if (entry?.attachedClient === client) entry.attachedClient = null;
   }
 
   detachSession(sessionId: string): void {
@@ -735,6 +780,10 @@ export class SessionRegistry {
       this.logger.warn('editor request rejected', { ...summary, reason: 'no editor sender registered' });
       return Promise.reject(new Error('No client connected'));
     }
+    if (contentType?.startsWith('image/') && entry.attachedClient?.capabilities.imageEdit === false) {
+      this.logger.warn('editor request rejected', { ...summary, reason: 'client cannot show images' });
+      return Promise.reject(new Error(IMAGE_EDIT_UNSUPPORTED));
+    }
 
     const editId = this.nextEditId++;
     return new Promise<EditorResult>((resolve, reject) => {
@@ -874,27 +923,47 @@ export class SessionRegistry {
     return this.sessions.get(sessionId)?.views.find(v => v.open.viewId === viewId)?.open;
   }
 
-  /** Replay every view to a newly attached client, then VIEWER_SYNC so it
-   *  drops views that closed while it was away. */
-  replayViews(sessionId: string, send: ViewerSender): void {
-    const views = this.getViews(sessionId);
-    for (const open of views) send(VIEWER_OPEN, JSON.stringify(open));
-    send(VIEWER_SYNC, JSON.stringify({ viewIds: views.map(v => v.viewId) }));
+  /** Replay the views a newly attached client can show, then VIEWER_SYNC so
+   *  it drops views that closed while it was away. The rest stay queued; a CLI
+   *  waiting on one of them (the previous client had it open) is released as
+   *  `'queued'`, since nobody can close it until a capable client attaches. */
+  replayViews(sessionId: string, send: ViewerSender, capabilities: ClientCapabilities = DEFAULT_CAPABILITIES): void {
+    const entry = this.sessions.get(sessionId);
+    if (!entry) return;
+    const shown: ViewerOpenPayload[] = [];
+    for (const view of entry.views) {
+      if (capabilities.viewer.includes(view.kind)) {
+        shown.push(view.open);
+        continue;
+      }
+      if (view.resolve) {
+        this.logger.info('viewer released as queued — client cannot show it', {
+          sessionId, viewId: view.open.viewId, kind: view.kind,
+        });
+        const resolve = view.resolve;
+        view.resolve = null;
+        resolve('queued');
+      }
+    }
+    for (const open of shown) send(VIEWER_OPEN, JSON.stringify(open));
+    send(VIEWER_SYNC, JSON.stringify({ viewIds: shown.map(v => v.viewId) }));
   }
 
-  /** Open a view. With a client attached, resolve `'closed'` when the user
-   *  closes it; `onAbort` hooks the CLI's HTTP response, so if the CLI goes
-   *  away the view is dropped and the client told to close it. With none
-   *  attached, queue it, raise the session's alert, and resolve `'queued'` at
-   *  once — the view opens on the next attach. */
+  /** Open a view. With a client attached that can show its kind, resolve
+   *  `'closed'` when the user closes it; `onAbort` hooks the CLI's HTTP
+   *  response, so if the CLI goes away the view is dropped and the client told
+   *  to close it. Otherwise queue it, raise the session's alert, and resolve
+   *  `'queued'` at once — the view opens in the next client that can show it.
+   *  An attached client that can't gets a VIEWER_NOTICE saying so. */
   requestView(
     sessionId: string,
-    listing: Omit<ViewerOpenPayload, 'viewId'>,
+    request: ViewRequest,
     onAbort: (cleanup: () => void) => void,
   ): Promise<ViewOutcome> {
     const entry = this.sessions.get(sessionId);
+    const { kind, ...listing } = request;
     const summary = {
-      sessionId, root: listing.root, isDir: listing.isDir, initial: listing.initial ?? null,
+      sessionId, root: listing.root, isDir: listing.isDir, initial: listing.initial ?? null, kind,
       entries: listing.entries.length, truncated: listing.truncated,
     };
     this.logger.info('viewer requested', summary);
@@ -906,17 +975,31 @@ export class SessionRegistry {
     if (repeat) this.dropView(entry, repeat, 'superseded');
 
     const open: ViewerOpenPayload = { viewId: this.nextViewId++, ...listing };
-    const view: ViewState = { open, resolve: null };
+    const view: ViewState = { open, kind, resolve: null };
     entry.views.push(view);
     this.trimViews(entry);
+
+    const capabilities = entry.attachedClient?.capabilities ?? DEFAULT_CAPABILITIES;
+    if (entry.viewerSender && !capabilities.viewer.includes(kind)) {
+      this.logger.info('viewer queued — attached client cannot show it', {
+        ...summary, viewId: open.viewId, queued: entry.views.length,
+      });
+      const name = basename(listing.initial ?? listing.root) || listing.root;
+      entry.viewerSender(VIEWER_NOTICE, JSON.stringify({
+        viewId: open.viewId, message: `Queued ${name} (${kind}) for a client that can show it`,
+      }));
+      this.raiseAlert(entry);
+      return Promise.resolve('queued');
+    }
 
     if (entry.viewerSender?.(VIEWER_OPEN, JSON.stringify(open))) {
       this.logger.info('viewer open sent', { ...summary, viewId: open.viewId });
       return new Promise<ViewOutcome>((resolve) => {
-        view.resolve = () => resolve('closed');
-        // Identity check: `onAbort` also fires after a normal close.
+        view.resolve = resolve;
+        // Identity check: `onAbort` also fires after a normal close, and after
+        // `replayViews` released this CLI and left the view queued.
         onAbort(() => {
-          if (!entry.views.includes(view)) return;
+          if (view.resolve !== resolve || !entry.views.includes(view)) return;
           this.dropView(entry, view, 'CLI gone');
         });
       });
@@ -944,7 +1027,7 @@ export class SessionRegistry {
     }
     entry.views.splice(entry.views.indexOf(view), 1);
     this.logger.info('viewer closed', { sessionId, viewId, remaining: entry.views.length });
-    view.resolve?.();
+    view.resolve?.('closed');
     return true;
   }
 
@@ -954,7 +1037,7 @@ export class SessionRegistry {
     entry.views.splice(entry.views.indexOf(view), 1);
     this.logger.info('viewer dropped', { sessionId: entry.sessionId, viewId: view.open.viewId, reason });
     entry.viewerSender?.(VIEWER_CLOSE, JSON.stringify({ viewId: view.open.viewId }));
-    view.resolve?.();
+    view.resolve?.('closed');
   }
 
   private trimViews(entry: SessionEntry): void {
@@ -973,7 +1056,7 @@ export class SessionRegistry {
   private cancelViews(entry: SessionEntry): void {
     for (const view of entry.views) {
       this.logger.info('viewer closed — session gone', { sessionId: entry.sessionId, viewId: view.open.viewId });
-      view.resolve?.();
+      view.resolve?.('closed');
     }
     entry.views = [];
   }
@@ -1008,9 +1091,9 @@ export class SessionRegistry {
     if (entry?.clipboardSender === fn) entry.clipboardSender = null;
   }
 
-  private cancelPendingEdit(entry: SessionEntry): void {
+  private cancelPendingEdit(entry: SessionEntry, reason = 'session gone'): void {
     if (entry.editorPending) {
-      this.logger.info('editor cancelled — session gone', {
+      this.logger.info(`editor cancelled — ${reason}`, {
         sessionId: entry.sessionId, editId: entry.editorPending.editId, filePath: entry.editorPending.filePath,
       });
       this.clearAckTimer(entry);

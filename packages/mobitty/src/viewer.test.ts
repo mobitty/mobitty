@@ -6,11 +6,11 @@ import { createServer, request, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { MAX_VIEWS_PER_SESSION, SessionRegistry } from './sessions.ts';
+import { MAX_VIEWS_PER_SESSION, SessionRegistry, type ViewRequest } from './sessions.ts';
 import { handleHttpRequest } from './http.ts';
 import { VIEWER_CLOSE, VIEWER_OPEN, VIEWER_SYNC } from './types.ts';
 import {
-  listViewTree, readViewFile, resolveInRoot,
+  classifyViewTarget, listViewTree, readViewFile, resolveInRoot,
   MAX_VIEW_AUDIO_BYTES, MAX_VIEW_ENTRIES, MAX_VIEW_TEXT_BYTES,
 } from './viewer.ts';
 import type { ProfileStore } from './profiles.ts';
@@ -143,6 +143,25 @@ describe('listViewTree / readViewFile', () => {
     assert.equal(escaped.kind, 'error');
     assert.match(escaped.error ?? '', /outside/);
   });
+
+  it('classifies view targets, with text over the limit as large-text', async () => {
+    writeFileSync(join(dir, 'a.txt'), 'hello');
+    writeFileSync(join(dir, 'p.PNG'), Buffer.from([0x89, 0x50]));
+    writeFileSync(join(dir, 's.mp3'), Buffer.from([0x49, 0]));
+    writeFileSync(join(dir, 'b.bin'), Buffer.from([1, 0, 2]));
+    writeFileSync(join(dir, 'big.log'), Buffer.alloc(MAX_VIEW_TEXT_BYTES + 1, 0x61));
+    writeFileSync(join(dir, 'big.bin'), Buffer.alloc(MAX_VIEW_TEXT_BYTES + 1));
+    const kind = (name: string, size: number) => classifyViewTarget(join(dir, name), false, size);
+
+    assert.equal(await classifyViewTarget(dir, true, 0), 'folder');
+    assert.equal(await kind('a.txt', 5), 'text');
+    assert.equal(await kind('p.PNG', 2), 'image');
+    assert.equal(await kind('s.mp3', 2), 'audio');
+    assert.equal(await kind('b.bin', 3), 'binary');
+    assert.equal(await kind('big.log', MAX_VIEW_TEXT_BYTES + 1), 'large-text');
+    assert.equal(await kind('big.bin', MAX_VIEW_TEXT_BYTES + 1), 'binary');
+    assert.equal(await kind('a.txt', MAX_VIEW_TEXT_BYTES), 'text', 'exactly at the limit is still text');
+  });
 });
 
 describe('SessionRegistry viewer lifecycle', () => {
@@ -162,7 +181,7 @@ describe('SessionRegistry viewer lifecycle', () => {
 
   const newSession = () =>
     registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh').info.sessionId;
-  const listing = { root: '/r', isDir: true, entries: [['a.txt', 1]] as [string, number][], truncated: false };
+  const listing: ViewRequest = { root: '/r', isDir: true, entries: [['a.txt', 1]], truncated: false, kind: 'folder' };
 
   it('rejects an unknown session', async () => {
     await assert.rejects(() => registry.requestView('nonexistent', listing, noop), { message: 'Session not found' });

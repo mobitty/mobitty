@@ -7,8 +7,8 @@ import { brotliCompressSync, gzipSync, constants } from 'node:zlib';
 import { type ProfileStore, DEFAULT_PROFILE_NAMES } from './profiles.ts';
 import { type ThemeStore, BUILTIN_THEME_NAMES } from './themes.ts';
 import type { ShellStore } from './shells.ts';
-import type { SessionRegistry } from './sessions.ts';
-import { listViewTree } from './viewer.ts';
+import { IMAGE_EDIT_UNSUPPORTED, type SessionRegistry } from './sessions.ts';
+import { classifyViewTarget, listViewTree } from './viewer.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -17,6 +17,9 @@ const MAX_BODY_BYTES = 65536;
 const MAX_EDITOR_BODY_BYTES = 10 * 1024 * 1024; // 10 MB for editor content
 
 const CLIENT_DIR = resolve(__dirname, '..', 'client');
+
+/** `mobitty-cli download` while the attached client declared `download: false`. */
+export const DOWNLOAD_UNSUPPORTED = "the attached client can't receive files";
 
 // ── Download token store ─────────────────────────────────────────────────────
 
@@ -517,7 +520,7 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
           jsonResponse(res, 404, { error: msg });
         } else if (msg === 'Edit already in progress') {
           jsonResponse(res, 409, { error: msg });
-        } else if (msg === 'No client connected') {
+        } else if (msg === 'No client connected' || msg === IMAGE_EDIT_UNSUPPORTED) {
           jsonResponse(res, 503, { error: msg });
         } else {
           jsonResponse(res, 500, { error: msg });
@@ -530,7 +533,8 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
   }
 
   // `mobitty-cli view <path>` — held open until the user closes the view, or
-  // answered 202 at once when no client is attached and the view is queued.
+  // answered 202 at once when the view is queued: no client is attached, or
+  // the attached one can't show this kind of view.
   // See docs/todo-design-file-viewer.md.
   const sessionViewerPath = parseSessionViewerPath(pathname);
   if (sessionViewerPath !== undefined && method === 'POST') {
@@ -567,6 +571,7 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
         return;
       }
 
+      const kind = await classifyViewTarget(target, isDir, fileSize);
       // A file view is rooted at its parent so relative Markdown images resolve.
       const listing = isDir
         ? { root: target, isDir, ...(await listViewTree(target)) }
@@ -578,7 +583,7 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
 
       try {
         // Hook the response, not the request — see the /editor route above.
-        const outcome = await registry.requestView(sessionViewerPath, listing, (cleanup) => { res.on('close', cleanup); });
+        const outcome = await registry.requestView(sessionViewerPath, { ...listing, kind }, (cleanup) => { res.on('close', cleanup); });
         if (res.writableEnded || res.destroyed) return; // CLI already gone
         if (outcome === 'queued') jsonResponse(res, 202, { ok: true, queued: true });
         else jsonResponse(res, 200, { ok: true });
@@ -639,6 +644,10 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
       const sender = registry.getDownloadSender(sessionDownloadPath);
       if (!sender) {
         jsonResponse(res, 503, { error: 'No client connected' });
+        return;
+      }
+      if (registry.getAttachedClient(sessionDownloadPath)?.capabilities.download === false) {
+        jsonResponse(res, 503, { error: DOWNLOAD_UNSUPPORTED });
         return;
       }
 

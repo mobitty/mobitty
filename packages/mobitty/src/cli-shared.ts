@@ -73,7 +73,7 @@ export function readCliEnv(prefix: string): CliEnv {
   };
 }
 
-interface HttpResult {
+export interface HttpResult {
   status: number;
   body: string;
 }
@@ -107,6 +107,18 @@ function httpPost(env: CliEnv, path: string, jsonBody: string): Promise<HttpResu
   });
 }
 
+/** The server's `error` text for a failed request, or the status and raw
+ *  body when the response carries none. */
+export function serverError(result: HttpResult): string {
+  try {
+    const parsed: unknown = JSON.parse(result.body);
+    if (typeof parsed === 'object' && parsed !== null && 'error' in parsed && typeof parsed.error === 'string') {
+      return parsed.error;
+    }
+  } catch { /* not JSON */ }
+  return `server error ${result.status}: ${result.body}`;
+}
+
 export async function runEdit(env: CliEnv, prefix: string, filePath: string): Promise<void> {
   const imageContentType = IMAGE_EXTENSIONS[extname(filePath).toLowerCase()];
 
@@ -127,7 +139,7 @@ export async function runEdit(env: CliEnv, prefix: string, filePath: string): Pr
     JSON.stringify(postBody),
   );
 
-  if (result.status !== 200) fail(prefix, `server error ${result.status}: ${result.body}`);
+  if (result.status !== 200) fail(prefix, serverError(result));
 
   let parsed: unknown;
   try {
@@ -148,8 +160,8 @@ export async function runEdit(env: CliEnv, prefix: string, filePath: string): Pr
 }
 
 /** Open the file viewer on a file or folder and block until the user closes
- *  it, like a pager. With no client attached the server queues the view
- *  (202) and this returns at once. The server lists and reads; see
+ *  it, like a pager. When no attached client can show it, the server queues
+ *  the view (202) and this returns at once. The server lists and reads; see
  *  docs/todo-design-file-viewer.md. */
 export async function runView(env: CliEnv, prefix: string, targetPath: string): Promise<void> {
   const absPath = resolve(targetPath);
@@ -162,7 +174,7 @@ export async function runView(env: CliEnv, prefix: string, targetPath: string): 
   );
 
   if (result.status === 202) {
-    process.stderr.write(`view: queued ${absPath} — opens when the user next attaches to this session\n`);
+    process.stderr.write(`view: queued ${absPath} — opens in the next client that can show it\n`);
     return;
   }
   if (result.status !== 200) fail(prefix, `server error ${result.status}: ${result.body}`);
@@ -179,6 +191,6 @@ export async function runDownload(env: CliEnv, prefix: string, filePath: string)
     JSON.stringify({ filePath }),
   );
 
-  if (result.status !== 200) fail(prefix, `server error ${result.status}: ${result.body}`);
+  if (result.status !== 200) fail(prefix, serverError(result));
   process.stderr.write(`download: ${basename(filePath)}\n`);
 }

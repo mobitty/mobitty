@@ -10,7 +10,7 @@ import {
   VIEWER_FILE, VIEWER_NOTICE, VIEWER_REQUEST, VIEWER_DONE,
   HEARTBEAT_INTERVAL_MS, HEARTBEAT_TIMEOUT_MS,
   isResizeMessage, isHandshakeMessage, isUpdateSettingsMessage,
-  isClientLogBatch,
+  isClientLogBatch, resolveCapabilities,
 } from './types.ts';
 import type { ServerState } from './types.ts';
 const DEFAULT_SCROLLBACK = 5000;
@@ -18,7 +18,7 @@ import { resolve, relative, isAbsolute } from 'node:path';
 import { writePty } from './pty.ts';
 import { writeImageToSystemClipboard, writeImageToFile } from './clipboard.ts';
 import { writeUploadToCwd, shellQuoteForBash } from './upload.ts';
-import type { SessionRegistry } from './sessions.ts';
+import type { AttachedClient, SessionRegistry } from './sessions.ts';
 import type { ShellStore } from './shells.ts';
 import type { Logger } from './logger.ts';
 import { captureSnapshot, generateDiff, serializeFullState, compareSnapshots, bufferStats, summarizeBytes, sampleBufferLines, sampleAltBuffer, detectLineRepetition } from './diff.ts';
@@ -110,6 +110,8 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
   let themeBackground: string | undefined;
 
   let sessionId: string | null = null;
+  /** Set by the handshake: this connection's declared capabilities. */
+  let attachedClient: AttachedClient | null = null;
   let lastSnapshot: FrameSnapshot | null = null;
   let syncCleanup: (() => void) | null = null;
   let onSyncResize: ((cols: number, rows: number) => void) | null = null;
@@ -411,6 +413,12 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         ? parsed.rows : 24;
       const requestedSessionId = typeof parsed.sessionId === 'string' ? parsed.sessionId : undefined;
 
+      // Features this client can handle; absent fields mean the web client's.
+      const client: AttachedClient = { capabilities: resolveCapabilities(parsed.capabilities) };
+      if (parsed.capabilities !== undefined) {
+        socketLogger.info('client capabilities', { ...client.capabilities });
+      }
+
       // Parse scrollback preference
       const scrollback = typeof parsed.scrollback === 'number'
         && Number.isInteger(parsed.scrollback)
@@ -489,9 +497,10 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
             ws.close(4002, 'Process exited');
           }, () => {
             if (ws.readyState === 1) ws.close(4003, 'Replaced');
-          });
+          }, client);
           if (info) {
             sessionId = requestedSessionId;
+            attachedClient = client;
             socketLogger.set('session', sessionId);
             registry.clearAlert(sessionId);
             const headlessBeforeResize = registry.getHeadless(sessionId);
@@ -527,11 +536,12 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
               sendBinary(ws, EDITOR_OPEN, JSON.stringify(pending));
             }
 
-            // Register viewer sender and replay open and queued views
+            // Register viewer sender and replay the open and queued views this
+            // client can show
             registry.setViewerSender(sessionId, viewerSender);
             const viewIds = registry.getViews(sessionId).map(v => v.viewId);
             if (viewIds.length > 0) socketLogger.info('VIEWER_OPEN replayed on attach', { viewIds });
-            registry.replayViews(sessionId, viewerSender);
+            registry.replayViews(sessionId, viewerSender, client.capabilities);
 
             // Register download sender
             registry.setDownloadSender(sessionId, downloadSender);
@@ -586,7 +596,8 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
           ws.close(4002, 'Process exited');
         }, () => {
           if (ws.readyState === 1) ws.close(4003, 'Replaced');
-        });
+        }, client);
+        attachedClient = client;
 
         sendBinary(ws, SET_WINDOW_TITLE, info.name);
         sendBinary(ws, SET_PREFERENCES, state.config.prefsJson);
@@ -923,6 +934,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       registry.clearViewerSender(sessionId, viewerSender);
       registry.clearDownloadSender(sessionId, downloadSender);
       registry.clearClipboardSender(sessionId, clipboardSender);
+      if (attachedClient) registry.clearAttachedClient(sessionId, attachedClient);
     }
     state.clientCount--;
     socketLogger.info('WS closed', { clientCount: state.clientCount });

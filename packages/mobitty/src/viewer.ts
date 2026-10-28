@@ -10,6 +10,7 @@ import { execFile } from 'node:child_process';
 import { open, lstat, readdir, readFile, stat } from 'node:fs/promises';
 import { extname, isAbsolute, join, normalize, relative, resolve, sep } from 'node:path';
 import { IMAGE_EXTENSIONS } from './cli-shared.ts';
+import type { ViewKind } from './types.ts';
 
 export const MAX_VIEW_ENTRIES = 20_000;
 export const MAX_VIEW_TEXT_BYTES = 2 * 1024 * 1024;
@@ -172,6 +173,22 @@ async function sniffBinary(absPath: string): Promise<boolean> {
   } finally {
     await fh.close();
   }
+}
+
+/** Classify what `mobitty-cli view` asked for, so the server can tell
+ *  whether the attached client can show it. Same rules as `readViewFile`:
+ *  extension first, then a binary sniff; text over MAX_VIEW_TEXT_BYTES is
+ *  `large-text`. A file that can't be sniffed counts as text, so the client
+ *  shows the read error rather than the view waiting for another client. */
+export async function classifyViewTarget(absPath: string, isDir: boolean, size: number): Promise<ViewKind> {
+  if (isDir) return 'folder';
+  const ext = extname(absPath).toLowerCase();
+  if (IMAGE_EXTENSIONS[ext]) return 'image';
+  if (AUDIO_EXTENSIONS[ext]) return 'audio';
+  try {
+    if (await sniffBinary(absPath)) return 'binary';
+  } catch { /* unreadable — readViewFile reports it */ }
+  return size > MAX_VIEW_TEXT_BYTES ? 'large-text' : 'text';
 }
 
 /** Read one file for the viewer. Never throws — failures come back as

@@ -150,6 +150,43 @@ export interface ResizeMessage {
   rows: number;
 }
 
+/** What a view shows, as the server classifies it before sending VIEWER_OPEN.
+ *  `large-text` is text over MAX_VIEW_TEXT_BYTES (viewer.ts). */
+export type ViewKind = 'folder' | 'image' | 'audio' | 'binary' | 'text' | 'large-text';
+
+export const VIEW_KINDS: readonly ViewKind[] = ['folder', 'image', 'audio', 'binary', 'text', 'large-text'];
+
+/** Features a client declares in its handshake. They describe features,
+ *  never a client kind: the server does not tell clients apart. */
+export interface ClientCapabilities {
+  /** View kinds the client can show. Other views stay queued for a client
+   *  that can. */
+  viewer: ViewKind[];
+  /** Receives DOWNLOAD_START. */
+  download: boolean;
+  /** Shows an image EDITOR_OPEN. */
+  imageEdit: boolean;
+  /** Wants SESSION_ALERT / SESSION_NOTIFICATION for its own session too. */
+  sessionAlerts: boolean;
+}
+
+/** A handshake without `capabilities`, or a field left out of it, means what
+ *  the web client has always done. */
+export const DEFAULT_CAPABILITIES: Readonly<ClientCapabilities> = {
+  viewer: [...VIEW_KINDS],
+  download: true,
+  imageEdit: true,
+  sessionAlerts: false,
+};
+
+/** `capabilities` as sent: every field optional. */
+export interface CapabilitiesMessage {
+  viewer?: string[];
+  download?: boolean;
+  imageEdit?: boolean;
+  sessionAlerts?: boolean;
+}
+
 export interface HandshakeMessage {
   columns?: number;
   rows?: number;
@@ -161,6 +198,7 @@ export interface HandshakeMessage {
   remoteEditor?: boolean;
   themeForeground?: string;
   themeBackground?: string;
+  capabilities?: CapabilitiesMessage;
 }
 
 export interface UpdateSettingsMessage {
@@ -190,8 +228,44 @@ export function isResizeMessage(obj: unknown): obj is ResizeMessage {
 export const HEARTBEAT_INTERVAL_MS = 5000;   // ping every 5s
 export const HEARTBEAT_TIMEOUT_MS = 15000;    // dead after 15s with no pong
 
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every(v => typeof v === 'string');
+}
+
+function isOptionalBoolean(value: unknown): boolean {
+  return value === undefined || typeof value === 'boolean';
+}
+
+export function isCapabilitiesMessage(obj: unknown): obj is CapabilitiesMessage {
+  if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) return false;
+  const viewer = 'viewer' in obj ? obj.viewer : undefined;
+  const download = 'download' in obj ? obj.download : undefined;
+  const imageEdit = 'imageEdit' in obj ? obj.imageEdit : undefined;
+  const sessionAlerts = 'sessionAlerts' in obj ? obj.sessionAlerts : undefined;
+  return (viewer === undefined || isStringArray(viewer))
+    && isOptionalBoolean(download) && isOptionalBoolean(imageEdit) && isOptionalBoolean(sessionAlerts);
+}
+
+function isViewKind(value: string): value is ViewKind {
+  return VIEW_KINDS.some(k => k === value);
+}
+
+/** Fill in what a client left out. View kinds this server does not know are
+ *  dropped, so a newer client still attaches. */
+export function resolveCapabilities(msg: CapabilitiesMessage | undefined): ClientCapabilities {
+  return {
+    viewer: msg?.viewer !== undefined ? msg.viewer.filter(isViewKind) : [...DEFAULT_CAPABILITIES.viewer],
+    download: msg?.download ?? DEFAULT_CAPABILITIES.download,
+    imageEdit: msg?.imageEdit ?? DEFAULT_CAPABILITIES.imageEdit,
+    sessionAlerts: msg?.sessionAlerts ?? DEFAULT_CAPABILITIES.sessionAlerts,
+  };
+}
+
+/** Unknown fields are accepted, so an older server ignores newer ones. Known
+ *  fields that are present must have the right type. */
 export function isHandshakeMessage(obj: unknown): obj is HandshakeMessage {
   if (typeof obj !== 'object' || obj === null) return false;
+  if ('capabilities' in obj && obj.capabilities !== undefined && !isCapabilitiesMessage(obj.capabilities)) return false;
   return true;
 }
 
