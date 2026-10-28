@@ -10,6 +10,8 @@ import { ThemeStore } from './themes.ts';
 import { ShellStore } from './shells.ts';
 import { SessionRegistry } from './sessions.ts';
 import type { Logger } from './logger.ts';
+import { installLifecycleLogging } from './lifecycle.ts';
+import type { ShutdownSignal } from './lifecycle.ts';
 
 export function startServer(config: ServerConfig, logger: Logger): void {
   const profileStore = new ProfileStore(config.dataFolder);
@@ -76,21 +78,21 @@ export function startServer(config: ServerConfig, logger: Logger): void {
 
   });
 
-  const shutdown = () => {
-    logger.info('shutting down...');
+  let shuttingDown = false;
+  const shutdown = (signal: ShutdownSignal) => {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    logger.info('shutting down...', { signal });
     registry.destroyAll();
     wss.clients.forEach((ws) => ws.close(1001, 'Server shutting down'));
     wss.close();
-    httpServer.close(() => {
-      logger.close();
-      process.exit(0);
-    });
+    // The 'exit' listener writes the exit record and closes the logger.
+    httpServer.close(() => process.exit(0));
     setTimeout(() => {
       logger.warn('graceful shutdown timed out, forcing exit');
       process.exit(1);
     }, 3000);
   };
 
-  process.on('SIGINT', shutdown);
-  process.on('SIGTERM', shutdown);
+  installLifecycleLogging(logger, shutdown);
 }
