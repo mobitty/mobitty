@@ -18,7 +18,7 @@ import { resolve, relative, isAbsolute } from 'node:path';
 import { writePty } from './pty.ts';
 import { writeImageToSystemClipboard, writeImageToFile } from './clipboard.ts';
 import { writeUploadToCwd, shellQuoteForBash } from './upload.ts';
-import type { AttachedClient, SessionRegistry } from './sessions.ts';
+import type { AlertReason, AttachedClient, SessionRegistry } from './sessions.ts';
 import type { ShellStore } from './shells.ts';
 import type { Logger } from './logger.ts';
 import { captureSnapshot, generateDiff, serializeFullState, compareSnapshots, bufferStats, summarizeBytes, sampleBufferLines, sampleAltBuffer, detectLineRepetition } from './diff.ts';
@@ -51,6 +51,21 @@ export function computeAutoInterval(rtt: number, prevSmooth: number, currentInte
     syncIntervalMs = Math.min(Math.round(smoothRtt * 0.5), 250);
   }
   return { smoothRtt, syncIntervalMs };
+}
+
+/** Whether a session's alert goes to a client. Another session's alert always
+ *  does. The client's own session's alert does only when the client asked for
+ *  `sessionAlerts`, and only for a bell: the client is told about a queued
+ *  view with a viewer message, never with a bell. */
+export function relaysAlert(alertSessionId: string, reason: AlertReason, attachedSessionId: string | null, sessionAlerts: boolean): boolean {
+  if (alertSessionId !== attachedSessionId) return true;
+  return sessionAlerts && reason === 'bell';
+}
+
+/** Whether a session's OSC 9/99/777 notification goes to a client: always for
+ *  another session, and for its own session with `sessionAlerts`. */
+export function relaysNotification(notifSessionId: string, attachedSessionId: string | null, sessionAlerts: boolean): boolean {
+  return notifSessionId !== attachedSessionId || sessionAlerts;
 }
 
 function sendBinary(ws: WebSocket, cmd: number, payload: string): void {
@@ -117,15 +132,15 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
   let onSyncResize: ((cols: number, rows: number) => void) | null = null;
 
   // Broadcast alerts from any session to this client
-  const unsubAlert = registry.addAlertListener((alertSessionId: string) => {
-    if (alertSessionId !== sessionId && ws.readyState === 1) {
+  const unsubAlert = registry.addAlertListener((alertSessionId, reason) => {
+    if (ws.readyState === 1 && relaysAlert(alertSessionId, reason, sessionId, attachedClient?.capabilities.sessionAlerts ?? false)) {
       sendBinary(ws, SESSION_ALERT, alertSessionId);
     }
   });
 
   // Broadcast rich notifications from any session to this client
   const unsubNotification = registry.addNotificationListener((notifSessionId, title, body) => {
-    if (notifSessionId !== sessionId && ws.readyState === 1) {
+    if (ws.readyState === 1 && relaysNotification(notifSessionId, sessionId, attachedClient?.capabilities.sessionAlerts ?? false)) {
       const session = registry.getSession(notifSessionId);
       sendBinary(ws, SESSION_NOTIFICATION, JSON.stringify({
         sessionId: notifSessionId,

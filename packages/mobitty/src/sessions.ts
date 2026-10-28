@@ -92,6 +92,12 @@ interface ViewState {
   resolve: ((outcome: ViewOutcome) => void) | null;
 }
 
+/** Why a session raised its alert: the terminal rang its bell, or a view was
+ *  queued because no client could show it. */
+export type AlertReason = 'bell' | 'view';
+
+export type AlertListener = (sessionId: string, reason: AlertReason) => void;
+
 interface SessionEntry {
   sessionId: string;
   name: string;
@@ -158,7 +164,7 @@ export class SessionRegistry {
   private filePath: string;
   private dataFolder: string;
   private logger: LoggerInterface;
-  private alertListeners = new Set<(sessionId: string) => void>();
+  private alertListeners = new Set<AlertListener>();
   private notificationListeners = new Set<(sessionId: string, title: string, body: string) => void>();
   private maxSessions: number;
   private startDir: string;
@@ -345,8 +351,7 @@ export class SessionRegistry {
       notifyChange();
     });
     headless.onBell(() => {
-      entry.hasAlert = true;
-      for (const cb of this.alertListeners) cb(sessionId);
+      this.raiseAlert(entry, 'bell');
       notifyChange();
     });
     headless.onResize(notifyChange);
@@ -518,7 +523,7 @@ export class SessionRegistry {
     if (entry) entry.hasAlert = false;
   }
 
-  addAlertListener(cb: (sessionId: string) => void): () => void {
+  addAlertListener(cb: AlertListener): () => void {
     this.alertListeners.add(cb);
     return () => { this.alertListeners.delete(cb); };
   }
@@ -988,7 +993,7 @@ export class SessionRegistry {
       entry.viewerSender(VIEWER_NOTICE, JSON.stringify({
         viewId: open.viewId, message: `Queued ${name} (${kind}) for a client that can show it`,
       }));
-      this.raiseAlert(entry);
+      this.raiseAlert(entry, 'view');
       return Promise.resolve('queued');
     }
 
@@ -1008,7 +1013,7 @@ export class SessionRegistry {
     this.logger.info('viewer queued — no client attached', {
       ...summary, viewId: open.viewId, sender: entry.viewerSender !== null, queued: entry.views.length,
     });
-    this.raiseAlert(entry);
+    this.raiseAlert(entry, 'view');
     return Promise.resolve('queued');
   }
 
@@ -1048,9 +1053,9 @@ export class SessionRegistry {
     }
   }
 
-  private raiseAlert(entry: SessionEntry): void {
+  private raiseAlert(entry: SessionEntry, reason: AlertReason): void {
     entry.hasAlert = true;
-    for (const cb of this.alertListeners) cb(entry.sessionId);
+    for (const cb of this.alertListeners) cb(entry.sessionId, reason);
   }
 
   private cancelViews(entry: SessionEntry): void {

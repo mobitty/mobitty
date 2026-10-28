@@ -1,7 +1,18 @@
-import { describe, it } from 'node:test';
+import { describe, it, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { computeAutoInterval } from './protocol.ts';
-import { isUpdateSettingsMessage } from './types.ts';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { createServer, type Server } from 'node:http';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
+import { WebSocket, WebSocketServer } from 'ws';
+import { computeAutoInterval, handleConnection, relaysAlert, relaysNotification } from './protocol.ts';
+import { isUpdateSettingsMessage, SESSION_ALERT, SESSION_NOTIFICATION, SET_SESSION_INFO, VIEWER_NOTICE } from './types.ts';
+import type { ServerState } from './types.ts';
+import { SessionRegistry } from './sessions.ts';
+import type { ViewRequest } from './sessions.ts';
+import { ShellStore } from './shells.ts';
+import { Logger, LogWriter } from './logger.ts';
+import { writePty } from './pty.ts';
 
 describe('isUpdateSettingsMessage — imagePasteDir', () => {
   it('accepts relative directory', () => {
@@ -169,5 +180,173 @@ describe('computeAutoInterval', () => {
     assert.ok(smooth > 100, 'smoothRtt should cross 100ms');
     assert.ok(interval > 33, 'interval should exceed 30fps tier');
     assert.equal(interval, Math.min(Math.round(smooth * 0.5), 250), 'interval should be 0.5×smoothRtt');
+  });
+});
+
+describe('relaysAlert / relaysNotification', () => {
+  it('relays another session\'s bell and queued view with or without sessionAlerts', () => {
+    for (const sessionAlerts of [false, true]) {
+      assert.equal(relaysAlert('b', 'bell', 'a', sessionAlerts), true);
+      assert.equal(relaysAlert('b', 'view', 'a', sessionAlerts), true);
+      assert.equal(relaysNotification('b', 'a', sessionAlerts), true);
+    }
+  });
+  it('relays the attached session\'s bell and notification only with sessionAlerts', () => {
+    assert.equal(relaysAlert('a', 'bell', 'a', false), false);
+    assert.equal(relaysAlert('a', 'bell', 'a', true), true);
+    assert.equal(relaysNotification('a', 'a', false), false);
+    assert.equal(relaysNotification('a', 'a', true), true);
+  });
+  it('never relays the attached session\'s queued view as an alert', () => {
+    assert.equal(relaysAlert('a', 'view', 'a', false), false);
+    assert.equal(relaysAlert('a', 'view', 'a', true), false);
+  });
+  it('relays everything before the handshake attached a session', () => {
+    assert.equal(relaysAlert('a', 'bell', null, false), true);
+    assert.equal(relaysNotification('a', null, false), true);
+  });
+});
+
+const testShellArgv = process.platform === 'win32' ? ['cmd.exe'] : ['/bin/sh'];
+
+interface Frame {
+  cmd: number;
+  text: string;
+}
+
+/** A client attached over a real WebSocket, recording every server frame. */
+interface TestClient {
+  frames: Frame[];
+  /** SET_SESSION_INFO of the attach. */
+  info: Record<string, unknown>;
+  /** Resolves once every frame the server sent before this call has arrived. */
+  flush(): Promise<void>;
+}
+
+describe('handleConnection', { skip: process.platform === 'win32' }, () => {
+  let tmpDir: string;
+  let registry: SessionRegistry;
+  let server: Server;
+  let wss: WebSocketServer;
+  let port: number;
+  const clients: WebSocket[] = [];
+
+  beforeEach(async () => {
+    tmpDir = mkdtempSync(join(tmpdir(), 'mobitty-protocol-test-'));
+    const logger = new Logger(new LogWriter(join(tmpDir, 'logs'), 3_600_000, 3_600_000), 'error', 'error');
+    registry = new SessionRegistry(join(tmpDir, 'data'), logger);
+    registry.init();
+    const state: ServerState = {
+      clientCount: 0,
+      config: {
+        port: 0, host: '127.0.0.1', terminalType: 'xterm-256color', prefsJson: '{}',
+        dataFolder: join(tmpDir, 'data'), startDir: tmpDir, maxPayloadBytes: 1 << 20,
+        maxConnections: 0, maxSessions: 0,
+      },
+    };
+    const shellStore = new ShellStore(join(tmpDir, 'data'));
+    server = createServer();
+    wss = new WebSocketServer({ server });
+    wss.on('connection', (ws, req) => handleConnection(ws, req, state, registry, shellStore, logger));
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const address = server.address();
+    assert.ok(address !== null && typeof address === 'object');
+    port = address.port;
+  });
+
+  afterEach(async () => {
+    for (const ws of clients.splice(0)) ws.terminate();
+    registry.destroyAll();
+    await new Promise<void>(r => wss.close(() => r()));
+    await new Promise<void>(r => server.close(() => r()));
+    rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  async function attach(handshake: Record<string, unknown>): Promise<TestClient> {
+    const ws = new WebSocket(`ws://127.0.0.1:${port}/`);
+    clients.push(ws);
+    const frames: Frame[] = [];
+    const info = new Promise<Record<string, unknown>>((resolve, reject) => {
+      ws.on('message', (data: Buffer) => {
+        const frame = { cmd: data[0] ?? 0, text: data.subarray(1).toString('utf-8') };
+        frames.push(frame);
+        if (frame.cmd === SET_SESSION_INFO) resolve(JSON.parse(frame.text));
+      });
+      ws.on('close', (code) => reject(new Error(`closed ${code}`)));
+    });
+    await new Promise<void>((resolve, reject) => { ws.on('open', resolve); ws.on('error', reject); });
+    ws.send(Buffer.from(JSON.stringify(handshake)));
+    const flush = () => new Promise<void>(resolve => { ws.once('pong', () => resolve()); ws.ping(); });
+    return { frames, info: await info, flush };
+  }
+
+  const newSession = () =>
+    registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
+
+  /** Resolve once the session raises an alert, after every earlier listener ran. */
+  const nextAlert = (sessionId: string) => new Promise<void>(resolve => {
+    const unsub = registry.addAlertListener((id) => { if (id === sessionId) { unsub(); resolve(); } });
+  });
+  const nextNotification = (sessionId: string) => new Promise<void>(resolve => {
+    const unsub = registry.addNotificationListener((id) => { if (id === sessionId) { unsub(); resolve(); } });
+  });
+
+  const framesOf = (client: TestClient, cmd: number) => client.frames.filter(f => f.cmd === cmd);
+
+  it('relays the attached session\'s bell and notification with sessionAlerts', async () => {
+    const { info, handle } = newSession();
+    const client = await attach({ sessionId: info.sessionId, capabilities: { sessionAlerts: true } });
+
+    const bell = nextAlert(info.sessionId);
+    writePty(handle, "printf '\\a'\n");
+    await bell;
+    const notified = nextNotification(info.sessionId);
+    writePty(handle, "printf '\\033]9;done\\007'\n");
+    await notified;
+    await client.flush();
+
+    assert.deepEqual(framesOf(client, SESSION_ALERT).map(f => f.text), [info.sessionId]);
+    const notes: unknown[] = framesOf(client, SESSION_NOTIFICATION).map(f => JSON.parse(f.text));
+    assert.equal(notes.length, 1);
+    assert.partialDeepStrictEqual(notes[0], { sessionId: info.sessionId, body: 'done', sessionName: info.name });
+  });
+
+  it('does not relay the attached session\'s bell or notification without sessionAlerts', async () => {
+    const { info, handle } = newSession();
+    const other = newSession();
+    const client = await attach({ sessionId: info.sessionId });
+
+    const bell = nextAlert(info.sessionId);
+    writePty(handle, "printf '\\a'\n");
+    await bell;
+    const notified = nextNotification(info.sessionId);
+    writePty(handle, "printf '\\033]9;done\\007'\n");
+    await notified;
+    // Another session's bell still arrives.
+    const otherBell = nextAlert(other.info.sessionId);
+    writePty(other.handle, "printf '\\a'\n");
+    await otherBell;
+    await client.flush();
+
+    assert.deepEqual(framesOf(client, SESSION_ALERT).map(f => f.text), [other.info.sessionId]);
+    assert.deepEqual(framesOf(client, SESSION_NOTIFICATION), []);
+  });
+
+  it('never relays a view queued for the attached session as a bell', async () => {
+    const { info } = newSession();
+    const client = await attach({ sessionId: info.sessionId, capabilities: { sessionAlerts: true, viewer: ['text'] } });
+
+    // An image this client cannot show is queued, and the session's alert raised.
+    const alert = nextAlert(info.sessionId);
+    const request: ViewRequest = { root: '/r', isDir: false, initial: 'a.png', entries: [], truncated: false, kind: 'image' };
+    assert.equal(await registry.requestView(info.sessionId, request, () => {}), 'queued');
+    await alert;
+    await client.flush();
+
+    assert.equal(framesOf(client, VIEWER_NOTICE).length, 1);
+    assert.deepEqual(framesOf(client, SESSION_ALERT), []);
   });
 });
