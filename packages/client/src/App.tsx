@@ -120,6 +120,9 @@ export function App() {
   const [modifiers, setModifiers] = useState<ModifierFlags>(emptyModifiers());
   const [meterOpen, setMeterOpen] = useState(false);
   const [alertedSessionIds, setAlertedSessionIds] = useState<Set<string>>(() => new Set());
+  // The session on screen rang its bell or sent a notification; cleared when
+  // the user types into it or switches session.
+  const [currentSessionAlerted, setCurrentSessionAlerted] = useState(false);
   const [pendingShellSelection, setPendingShellSelection] = useState<boolean>(() => getLastSessionId() === null);
   // When there's no stored session ID, we must check for alive sessions on the server before
   // showing the shell selection UI — otherwise we'd force shell selection even if sessions exist.
@@ -537,6 +540,7 @@ export function App() {
         return next;
       });
     },
+    onOwnAlertChange: (alerted: boolean) => setCurrentSessionAlerted(alerted),
     onSessionNotification: (notifSessionId: string, title: string, body: string, sessionName: string, sessionTitle: string, sessionCwd: string) => {
       if (notifSessionId === currentSessionIdRef.current) return;
       const sessionLabel = sessionTitle || sessionName;
@@ -933,6 +937,7 @@ export function App() {
           onRefreshSessions={refreshSessions}
           currentSessionId={currentSessionId}
           alertedSessionIds={alertedSessionIds}
+          currentSessionAlerted={currentSessionAlerted}
           onSwitchSession={handleSwitchSession}
           onCreateSession={handleCreateSession}
           onSettingsOpen={() => setSettingsOpen(true)}
@@ -983,7 +988,7 @@ export function App() {
           activeContainerId={openContainerId}
           batchInputOpen={batchInputOpen}
           softkeySize={softkeySize}
-          hasAlerts={alertedSessionIds.size > 0}
+          hasAlerts={alertedSessionIds.size > 0 || currentSessionAlerted}
           isMobile={isMobile}
           isNativeApp={isNativeApp()}
           autocorrect={autocorrect}

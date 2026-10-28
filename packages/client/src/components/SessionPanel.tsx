@@ -23,6 +23,8 @@ interface SessionPanelProps {
   onRefreshSessions: () => Promise<SessionInfo[]>;
   currentSessionId?: string;
   alertedSessionIds?: Set<string>;
+  /** The current session has an alert of its own (bell or notification). */
+  currentSessionAlerted?: boolean;
   onSwitchSession: (sessionId: string) => void;
   onCreateSession: (shell?: string) => void;
   onSettingsOpen: () => void;
@@ -30,7 +32,7 @@ interface SessionPanelProps {
   isMobile: boolean;
 }
 
-export function SessionPanel({ open, onClose, sessions, onRefreshSessions, currentSessionId, alertedSessionIds, onSwitchSession, onCreateSession, onSettingsOpen, onNoSessionsLeft, isMobile }: SessionPanelProps) {
+export function SessionPanel({ open, onClose, sessions, onRefreshSessions, currentSessionId, alertedSessionIds, currentSessionAlerted, onSwitchSession, onCreateSession, onSettingsOpen, onNoSessionsLeft, isMobile }: SessionPanelProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [status, setStatus] = useState('');
@@ -356,7 +358,9 @@ export function SessionPanel({ open, onClose, sessions, onRefreshSessions, curre
           const isCurrent = session.sessionId === currentSessionId;
           const isEditing = editingId === session.sessionId;
           const isFocused = index === focusedIndex;
-          const hasAlert = !isCurrent && (alertedSessionIds?.has(session.sessionId) || session.hasAlert);
+          const hasAlert = isCurrent
+            ? currentSessionAlerted === true
+            : (alertedSessionIds?.has(session.sessionId) || session.hasAlert);
           const isRowDragging = dragIndex === index;
           const isDropTarget = dropIndex === index && dragIndex !== null && dragIndex !== index;
           const swipeOpenSide: SwipeOpenSide = openSwipe?.id === session.sessionId ? openSwipe.side : null;

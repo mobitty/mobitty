@@ -26,6 +26,7 @@ import type { SessionInfo } from './sessions';
 import { findFontOption, loadFont } from './fonts';
 import { openExternalUrl } from './open-external-url';
 import { getNativeBridge } from './native-bridge';
+import { BROWSER_CAPABILITIES, isTypedInput, markTitle } from './session-alert';
 import type { ViewerAction, ViewerFileKind, ViewerFilePayload, ViewerOpenPayload } from './file-viewer/types';
 
 const CMD_CLIPBOARD_IMAGE = 0x36;
@@ -149,6 +150,9 @@ export interface TerminalCoreCallbacks {
   onBytesReceived?: (bytes: number) => void;
   onTargetFps?: (fps: number) => void;
   onSessionAlert?: (sessionId: string) => void;
+  /** The session on screen rang its bell or sent a notification (`true`), or
+   *  the user typed into it or switched away (`false`). */
+  onOwnAlertChange?: (alerted: boolean) => void;
   onSessionNotification?: (sessionId: string, title: string, body: string, sessionName: string, sessionTitle: string, sessionCwd: string) => void;
   onImagePasteError?: (error: ImagePasteErrorInfo) => void;
   onEditorOpen?: (editId: number, filePath: string, content: string, contentType?: string) => void;
@@ -236,6 +240,10 @@ export class TerminalCore {
   get clientLogger(): ClientLogger { return this.logger; }
 
   private currentSessionId?: string;
+  /** The session on screen raised an alert the user has not acted on yet. */
+  private ownAlert = false;
+  /** The title last shown, before the alert mark. */
+  private shownTitle = document.title;
   private scrollPositions = new Map<string, number>();   // sessionId → distFromBottom at last switch-out
   private lastConnectedSessionId: string | null = null;  // sessionId whose content the buffer currently holds
   /** Counter for `state-update-applied` info-level logging — reset on each
@@ -571,7 +579,7 @@ export class TerminalCore {
     this.registerTerminal(terminal.onTitleChange(data => {
       if (data && data !== '' && !this.titleFixed) {
         this.title = data;
-        document.title = data;
+        this.showTitle(data);
         this.callbacks.onTitleChange?.(data);
       }
     }));
@@ -683,6 +691,7 @@ export class TerminalCore {
       this.logger.debug('scroll-saved', { sessionId: outgoing, dist });
     }
     this.logger.setSession(sessionId || null);
+    this.setOwnAlert(false);
     this.options.sessionId = sessionId;
     this.options.shellName = shellName;
     this.doReconnect = true;
@@ -694,11 +703,26 @@ export class TerminalCore {
     }
   }
 
+  /** Show a title in the tab, marked while the session has an alert. */
+  private showTitle(title: string): void {
+    this.shownTitle = title;
+    document.title = markTitle(title, this.ownAlert);
+  }
+
+  private setOwnAlert(alerted: boolean): void {
+    if (this.ownAlert === alerted) return;
+    this.ownAlert = alerted;
+    document.title = markTitle(this.shownTitle, alerted);
+    this.callbacks.onOwnAlertChange?.(alerted);
+  }
+
   sendData(data: string | Uint8Array) {
     const { socket } = this;
     if (socket?.readyState !== WebSocket.OPEN) return;
 
     if (typeof data === 'string') {
+      if (isTypedInput(data)) this.setOwnAlert(false);
+
       // Suppress focus reporting sequences from internal UI focus transitions.
       // When focus moves within the page (terminal → batch input, dialog, etc.),
       // document.hasFocus() stays true.  When focus leaves the page (tab switch),
@@ -1788,6 +1812,7 @@ export class TerminalCore {
       }
       handshake['notificationMode'] = this.notificationMode;
       handshake['remoteEditor'] = this.remoteEditor;
+      handshake['capabilities'] = BROWSER_CAPABILITIES;
       if (this.themeForeground) handshake['themeForeground'] = this.themeForeground;
       if (this.themeBackground) handshake['themeBackground'] = this.themeBackground;
       this.logger.info('handshake', {
@@ -1988,7 +2013,8 @@ export class TerminalCore {
 
     if (cmd === CMD_SESSION_ALERT && rawData.byteLength > 1) {
       const alertSessionId = this.textDecoder.decode(new Uint8Array(rawData, 1));
-      this.callbacks.onSessionAlert?.(alertSessionId);
+      if (alertSessionId === this.currentSessionId) this.setOwnAlert(true);
+      else this.callbacks.onSessionAlert?.(alertSessionId);
       return;
     }
 
@@ -1998,7 +2024,9 @@ export class TerminalCore {
         const parsed: unknown = JSON.parse(jsonStr);
         if (typeof parsed === 'object' && parsed !== null) {
           const r = parsed as Record<string, unknown>;
-          if (typeof r['sessionId'] === 'string' && typeof r['title'] === 'string') {
+          if (typeof r['sessionId'] === 'string' && r['sessionId'] === this.currentSessionId) {
+            this.setOwnAlert(true);
+          } else if (typeof r['sessionId'] === 'string' && typeof r['title'] === 'string') {
             const sName = typeof r['sessionName'] === 'string' ? r['sessionName'] : '';
             const sShell = typeof r['sessionShell'] === 'string' ? r['sessionShell'] : '';
             this.callbacks.onSessionNotification?.(
@@ -2281,7 +2309,7 @@ export class TerminalCore {
         break;
       case Command.SET_WINDOW_TITLE:
         this.title = this.textDecoder.decode(payload);
-        document.title = this.title;
+        this.showTitle(this.title);
         this.callbacks.onTitleChange?.(this.title);
         break;
       case Command.SET_PREFERENCES:
@@ -2323,7 +2351,7 @@ export class TerminalCore {
           if (value) { this.closeOnDisconnect = true; this.autoReconnect = false; this.doReconnect = false; }
           break;
         case 'titleFixed':
-          if (value && value !== '') { this.titleFixed = value as string; document.title = this.titleFixed; }
+          if (value && value !== '') { this.titleFixed = value as string; this.showTitle(this.titleFixed); }
           break;
         case 'isWindows': break;
         case 'enableSixel': break;
