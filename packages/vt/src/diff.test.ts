@@ -89,6 +89,42 @@ describe('captureSnapshot', () => {
     assert.equal(snap.title, 'MyTitle');
     term.dispose();
   });
+
+  it('captures a viewport scrolled back to `top`', async () => {
+    const term = new Terminal({ cols: 20, rows: 4, scrollback: 100, allowProposedApi: true });
+    const lines: string[] = [];
+    for (let i = 0; i < 10; i++) lines.push(`line${i}`);
+    await writeAndWait(term, lines.join('\r\n'));
+    const baseY = term.buffer.active.baseY;
+    assert.equal(baseY, 6);
+
+    const live = captureSnapshot(term, '', false, baseY);
+    const liveDefault = captureSnapshot(term, '', false, baseY, undefined, baseY);
+    assert.deepEqual(liveDefault.cells, live.cells, 'top defaults to baseY');
+    assert.equal(live.cells[0]!.map(c => c.char).join('').trimEnd(), 'line6');
+
+    const scrolled = captureSnapshot(term, '', false, baseY, undefined, 2);
+    const text = scrolled.cells.map(row => row.map(c => c.char).join('').trimEnd());
+    assert.deepEqual(text, ['line2', 'line3', 'line4', 'line5']);
+    // Cursor and baseY still describe the live screen.
+    assert.equal(scrolled.baseY, baseY);
+    assert.equal(scrolled.cursorY, live.cursorY);
+    assert.equal(scrolled.cursorX, live.cursorX);
+
+    // Diffing live → scrolled repaints the rows of a screen showing live.
+    const diff = generateDiff(live, scrolled);
+    assert.ok(diff !== null);
+    const screen = new Terminal({ cols: 20, rows: 4, allowProposedApi: true });
+    await writeAndWait(screen, lines.slice(6).join('\r\n'));
+    await writeAndWait(screen, diff);
+    const painted: string[] = [];
+    for (let y = 0; y < 4; y++) {
+      painted.push(screen.buffer.active.getLine(screen.buffer.active.baseY + y)!.translateToString(true));
+    }
+    assert.deepEqual(painted, ['line2', 'line3', 'line4', 'line5']);
+    screen.dispose();
+    term.dispose();
+  });
 });
 
 describe('generateDiff', () => {

@@ -1,0 +1,25 @@
+{
+  "name": "@mobitty/vt",
+  "version": "0.1.0",
+  "description": "VT stream snapshot, diff and mode tracking shared by mobitty's packages",
+  "author": "Mobitty <info@mobitty.dev>",
+  "license": "BSL-1.1",
+  "private": true,
+  "type": "module",
+  "exports": "./src/index.ts",
+  "files": [
+    "src/**/*.ts",
+    "!src/**/*.test.ts"
+  ],
+  "scripts": {
+    "check": "tsc --noEmit && node --test 'src/**/*.test.ts'"
+  },
+  "peerDependencies": {
+    "@xterm/headless": "6.1.0-beta.313"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@xterm/headless": "6.1.0-beta.313",
+    "typescript": "^5.9.3"
+  }
+}

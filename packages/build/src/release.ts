@@ -8,6 +8,10 @@ const rootDir = resolve(__dirname, '..', '..', '..');
 const distDir = resolve(rootDir, 'dist');
 const serverDir = resolve(rootDir, 'packages', 'mobitty');
 const clientDir = resolve(rootDir, 'packages', 'client');
+const vtDir = resolve(rootDir, 'packages', 'vt');
+// Workspace packages bundled into the mobitty tarball (bundleDependencies):
+// compiled to dist/node_modules/<name>, never published on their own.
+const vtDistDir = resolve(distDir, 'node_modules', '@mobitty', 'vt');
 
 // 1. Clean dist/
 if (existsSync(distDir)) {
@@ -27,6 +31,34 @@ if (!existsSync(resolve(clientDist, 'index.html'))) {
 // 3. Compile server TS → JS into dist/
 console.log('Compiling server...');
 execSync('pnpm tsc -p tsconfig.build.json', { cwd: serverDir, stdio: 'inherit' });
+
+// 3b. Compile @mobitty/vt TS → JS into dist/node_modules/@mobitty/vt, with a
+// package.json that points at the JS. The server's compiled imports of
+// '@mobitty/vt' resolve to it.
+console.log('Compiling @mobitty/vt...');
+execSync('pnpm tsc -p tsconfig.build.json', { cwd: vtDir, stdio: 'inherit' });
+const vtPkg: Record<string, unknown> = JSON.parse(readFileSync(resolve(vtDir, 'package.json'), 'utf-8'));
+const vtVersion = vtPkg['version'];
+if (typeof vtVersion !== 'string') {
+  console.error('@mobitty/vt package.json has no version');
+  process.exit(1);
+}
+const vtExports = vtPkg['exports'];
+if (typeof vtExports !== 'string') {
+  console.error('@mobitty/vt package.json exports must be a single path');
+  process.exit(1);
+}
+vtPkg['exports'] = vtExports.replace(/\.ts$/, '.js');
+delete vtPkg['scripts'];
+delete vtPkg['devDependencies'];
+delete vtPkg['files'];
+// npm treats the dependencies of a bundled package, peers included, as part
+// of the bundle and so never installs @xterm/headless for mobitty itself if
+// it stays listed here. @mobitty/vt imports it as types only, so the compiled
+// JS needs no peer.
+delete vtPkg['peerDependencies'];
+writeFileSync(resolve(vtDistDir, 'package.json'), JSON.stringify(vtPkg, null, 2) + '\n');
+cpSync(resolve(rootDir, 'LICENSE'), resolve(vtDistDir, 'LICENSE'));
 
 // 4. Copy non-TS source assets (shell-init hooks etc.) — tsc doesn't emit these
 cpSync(resolve(serverDir, 'src', 'shell-init'), resolve(distDir, 'src', 'shell-init'), {
@@ -49,6 +81,15 @@ if (files) {
     files[i] = files[i]!.replace(/\.ts/g, '.js');
   }
 }
+// The workspace:* dependency on @mobitty/vt becomes its exact version, shipped
+// inside the tarball as a bundled dependency.
+const deps = pkg['dependencies'];
+if (!isRecord(deps) || deps['@mobitty/vt'] === undefined) {
+  console.error('packages/mobitty/package.json does not depend on @mobitty/vt');
+  process.exit(1);
+}
+deps['@mobitty/vt'] = vtVersion;
+pkg['bundleDependencies'] = ['@mobitty/vt'];
 writeFileSync(resolve(distDir, 'package.json'), JSON.stringify(pkg, null, 2) + '\n');
 const npmignore = resolve(serverDir, '.npmignore');
 if (existsSync(npmignore)) {
@@ -58,6 +99,10 @@ cpSync(resolve(rootDir, 'README.md'), resolve(distDir, 'README.md'));
 
 // 6. Place built client assets
 cpSync(clientDist, resolve(distDir, 'client'), { recursive: true });
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
 
 // 7. Summary
 console.log('');

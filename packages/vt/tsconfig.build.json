@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": false,
+    "rootDir": ".",
+    "outDir": "../../dist/node_modules/@mobitty/vt",
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  },
+  "exclude": ["src/**/*.test.ts"]
+}

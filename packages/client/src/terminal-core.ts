@@ -1204,7 +1204,7 @@ export class TerminalCore {
     return { bufferLen: buf.length, cols, wrappedLines: wrapped, fullWidthNonWrappedLines: fullNonWrapped, staleWidthLines: staleWidth };
   }
 
-  // Mirror of server-side detectLineRepetition (diff.ts). Scans the
+  // Mirror of server-side detectLineRepetition (@mobitty/vt diff.ts). Scans the
   // entire buffer for repeated content-rich lines — corruption can
   // sit deep in scrollback (todo-bug-resize-induced-terminal-corruption.md).
   // Only call from low-frequency events.

@@ -154,16 +154,21 @@ function readModes(terminal: Terminal, tracked: Readonly<TrackedModes> = DEFAULT
   };
 }
 
-export function captureSnapshot(terminal: Terminal, title: string, cursorHidden: boolean, scrollCount: number, tracked: Readonly<TrackedModes> = DEFAULT_TRACKED_MODES): FrameSnapshot {
+// Captures `rows` lines of the active buffer starting at absolute line `top`.
+// The default, `baseY`, is the live screen; a smaller `top` captures a
+// viewport scrolled back into history. `cursorX`/`cursorY` and `baseY` in the
+// result always describe the live screen, whatever `top` is.
+export function captureSnapshot(terminal: Terminal, title: string, cursorHidden: boolean, scrollCount: number, tracked: Readonly<TrackedModes> = DEFAULT_TRACKED_MODES, top?: number): FrameSnapshot {
   const buf = terminal.buffer.active;
   const cols = terminal.cols;
   const rows = terminal.rows;
   const baseY = buf.baseY;
+  const firstLine = top ?? baseY;
   const cells: CellSnapshot[][] = [];
   const urlIdToUri = new Map<number, string>();
 
   for (let y = 0; y < rows; y++) {
-    const line = buf.getLine(baseY + y);
+    const line = buf.getLine(firstLine + y);
     const row: CellSnapshot[] = [];
     if (line) {
       for (let x = 0; x < cols; x++) {

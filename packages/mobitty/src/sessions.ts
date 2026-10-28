@@ -10,12 +10,11 @@ import { generateUniqueSessionName } from './session-names.ts';
 import type { LoggerInterface } from './types.ts';
 import headlessPkg from '@xterm/headless';
 const { Terminal } = headlessPkg;
-import { trackCursorVisibility } from './cursor-visibility.ts';
-import type { CursorVisibilityTracker } from './cursor-visibility.ts';
-import { trackMouseEncoding } from './mouse-encoding.ts';
-import type { MouseEncodingTracker } from './mouse-encoding.ts';
-import { trackKittyKeyboard } from './kitty-keyboard.ts';
-import type { KittyKeyboardTracker } from './kitty-keyboard.ts';
+import {
+  trackCursorVisibility, trackMouseEncoding, trackKittyKeyboard,
+  bufferStats, summarizeBytes, sampleBufferLines, sampleAltBuffer, detectLineRepetition,
+} from '@mobitty/vt';
+import type { CursorVisibilityTracker, MouseEncodingTracker, KittyKeyboardTracker, TrackedModes } from '@mobitty/vt';
 import { registerNotificationHandlers } from './osc-notifications.ts';
 import { registerCwdHandler } from './osc-cwd.ts';
 import { registerClipboardHandler } from './osc-clipboard.ts';
@@ -23,8 +22,6 @@ import { registerColorQueryHandlers } from './osc-color-query.ts';
 import type { OscColorQueryTracker, OscColorConfig } from './osc-color-query.ts';
 import { BUILTIN_THEMES } from './themes.ts';
 import { normalizeSgrColors } from './sgr-normalize.ts';
-import { bufferStats, summarizeBytes, sampleBufferLines, sampleAltBuffer, detectLineRepetition } from './diff.ts';
-import type { TrackedModes } from './diff.ts';
 import { getProcessCwd } from './clipboard.ts';
 
 const HOME = homedir();
@@ -324,7 +321,7 @@ export class SessionRegistry {
     // Kitty keyboard protocol (`CSI = | ? | > | < u`). The headless parser
     // would drop an app's `CSI > 5 u` and the client would keep sending `\r`
     // for Ctrl+Enter; track the flags here, answer `CSI ? u` straight to the
-    // PTY, and replay the flags to the client as `CSI = N ; 1 u` (diff.ts).
+    // PTY, and replay the flags to the client as `CSI = N ; 1 u` (@mobitty/vt diff.ts).
     // Registered before spawnPty so an app's startup probe gets its answer.
     // See docs/todo-bug-ctrl-enter-alt-buffer.md.
     const kittyKeyboardTracker = trackKittyKeyboard(headless, {

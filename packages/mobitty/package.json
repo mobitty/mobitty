@@ -44,6 +44,7 @@
     "check": "tsc --noEmit && node --test 'src/**/*.test.ts'"
   },
   "dependencies": {
+    "@mobitty/vt": "workspace:*",
     "@xterm/headless": "6.1.0-beta.313",
     "node-pty": "1.2.0-beta.3",
     "ws": "8.20.0"
