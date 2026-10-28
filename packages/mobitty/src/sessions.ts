@@ -92,6 +92,9 @@ interface ViewState {
   resolve: ((outcome: ViewOutcome) => void) | null;
 }
 
+/** Scrollback lines of a new session whose client did not ask for a size. */
+export const DEFAULT_SCROLLBACK = 5000;
+
 /** Why a session raised its alert: the terminal rang its bell, or a view was
  *  queued because no client could show it. */
 export type AlertReason = 'bell' | 'view';
@@ -1166,6 +1169,7 @@ export class SessionRegistry {
       title: entry.title,
       hasAlert: entry.hasAlert,
       cwd: this.resolveCwd(entry),
+      scrollback: entry.headless?.options.scrollback ?? DEFAULT_SCROLLBACK,
     };
   }
 }

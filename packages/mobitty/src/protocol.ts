@@ -13,11 +13,11 @@ import {
   isClientLogBatch, resolveCapabilities,
 } from './types.ts';
 import type { ServerState } from './types.ts';
-const DEFAULT_SCROLLBACK = 5000;
 import { resolve, relative, isAbsolute } from 'node:path';
 import { writePty } from './pty.ts';
 import { writeImageToSystemClipboard, writeImageToFile } from './clipboard.ts';
 import { writeUploadToCwd, shellQuoteForBash } from './upload.ts';
+import { DEFAULT_SCROLLBACK } from './sessions.ts';
 import type { AlertReason, AttachedClient, SessionRegistry } from './sessions.ts';
 import type { ShellStore } from './shells.ts';
 import type { Logger } from './logger.ts';
@@ -434,11 +434,12 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         socketLogger.info('client capabilities', { ...client.capabilities });
       }
 
-      // Parse scrollback preference
+      // Parse scrollback preference. Without one, an attach keeps the
+      // session's own and a new session gets the default.
       const scrollback = typeof parsed.scrollback === 'number'
         && Number.isInteger(parsed.scrollback)
         && parsed.scrollback >= 100 && parsed.scrollback <= 50000
-        ? parsed.scrollback : DEFAULT_SCROLLBACK;
+        ? parsed.scrollback : undefined;
 
       // Parse image paste directory
       if (typeof parsed.imagePasteDir === 'string' && parsed.imagePasteDir.length <= 256
@@ -528,14 +529,16 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
               repeat: headlessBeforeResize ? detectLineRepetition(headlessBeforeResize) : null,
             });
             registry.resizeSession(sessionId, columns, rows);
-            registry.updateSessionScrollback(sessionId, scrollback);
+            if (scrollback !== undefined) registry.updateSessionScrollback(sessionId, scrollback);
             if (themeForeground && themeBackground) {
               registry.updateSessionThemeColors(sessionId, themeForeground, themeBackground);
             }
+            // Rebuilt so it reports what the attach just changed (scrollback).
+            const attachedInfo = registry.getSession(sessionId)?.info ?? info;
 
-            sendBinary(ws, SET_WINDOW_TITLE, info.name);
+            sendBinary(ws, SET_WINDOW_TITLE, attachedInfo.name);
             sendBinary(ws, SET_PREFERENCES, state.config.prefsJson);
-            sendBinary(ws, SET_SESSION_INFO, JSON.stringify(info));
+            sendBinary(ws, SET_SESSION_INFO, JSON.stringify(attachedInfo));
 
             // Reset snapshot so next tick sends STATE_FULL after resize
             lastSnapshot = null;
@@ -596,7 +599,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
           state.config.terminalType,
           columns,
           rows,
-          scrollback,
+          scrollback ?? DEFAULT_SCROLLBACK,
           shell.name,
           { ...shell.env, ...notificationModeEnv, ...cliEnv },
         );

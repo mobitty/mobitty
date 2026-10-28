@@ -119,6 +119,8 @@ export interface SessionInfo {
   title: string;
   hasAlert: boolean;
   cwd: string;
+  /** Scrollback lines the session's terminal keeps. */
+  scrollback: number;
 }
 
 export interface ServerState {

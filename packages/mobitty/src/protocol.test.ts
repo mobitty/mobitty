@@ -283,8 +283,8 @@ describe('handleConnection', { skip: process.platform === 'win32' }, () => {
     return { frames, info: await info, flush };
   }
 
-  const newSession = () =>
-    registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
+  const newSession = (scrollback = 5000) =>
+    registry.createSession(testShellArgv, 'xterm-256color', 80, 24, scrollback, 'sh');
 
   /** Resolve once the session raises an alert, after every earlier listener ran. */
   const nextAlert = (sessionId: string) => new Promise<void>(resolve => {
@@ -348,5 +348,19 @@ describe('handleConnection', { skip: process.platform === 'win32' }, () => {
 
     assert.equal(framesOf(client, VIEWER_NOTICE).length, 1);
     assert.deepEqual(framesOf(client, SESSION_ALERT), []);
+  });
+
+  it('keeps the session\'s scrollback when the attach handshake has none', async () => {
+    const { info } = newSession(1234);
+    const client = await attach({ sessionId: info.sessionId });
+    assert.equal(client.info['scrollback'], 1234);
+    assert.equal(registry.getHeadless(info.sessionId)?.options.scrollback, 1234);
+  });
+
+  it('applies a handshake scrollback and reports it in SET_SESSION_INFO and the session list', async () => {
+    const { info } = newSession(1234);
+    const client = await attach({ sessionId: info.sessionId, scrollback: 2000 });
+    assert.equal(client.info['scrollback'], 2000);
+    assert.equal(registry.listSessions().find(s => s.sessionId === info.sessionId)?.scrollback, 2000);
   });
 });
