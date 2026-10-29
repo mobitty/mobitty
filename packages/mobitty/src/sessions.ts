@@ -123,6 +123,9 @@ interface SessionEntry {
   fallbackCwdPending: boolean;
   onExitCallbacks: Array<() => void>;
   onDetachCallbacks: Array<() => void>;
+  /** Run by deleteSession, so the attached connection learns its session is
+   *  gone: the pty's exit event arrives after the entry was dropped. */
+  onDeletedCallbacks: Array<() => void>;
   onChangeCallbacks: Array<() => void>;
   editorPending: {
     editId: number;
@@ -279,6 +282,7 @@ export class SessionRegistry {
         fallbackCwdPending: false,
         onExitCallbacks: [],
         onDetachCallbacks: [],
+        onDeletedCallbacks: [],
         onChangeCallbacks: [],
         editorPending: null,
         editorSender: null,
@@ -338,6 +342,7 @@ export class SessionRegistry {
 
     const onExitCallbacks: Array<() => void> = [];
     const onDetachCallbacks: Array<() => void> = [];
+    const onDeletedCallbacks: Array<() => void> = [];
     const onChangeCallbacks: Array<() => void> = [];
 
     const notifyChange = () => {
@@ -487,6 +492,7 @@ export class SessionRegistry {
       fallbackCwdPending: false,
       onExitCallbacks,
       onDetachCallbacks,
+      onDeletedCallbacks,
       onChangeCallbacks,
       editorPending: null,
       editorSender: null,
@@ -512,6 +518,7 @@ export class SessionRegistry {
     sessionId: string,
     onExit: () => void,
     onDetach: () => void,
+    onDeleted: () => void,
     client: AttachedClient = { capabilities: { ...DEFAULT_CAPABILITIES } },
   ): SessionInfo | undefined {
     const entry = this.sessions.get(sessionId);
@@ -519,6 +526,7 @@ export class SessionRegistry {
 
     entry.onExitCallbacks.push(onExit);
     entry.onDetachCallbacks.push(onDetach);
+    entry.onDeletedCallbacks.push(onDeleted);
     entry.attachedClient = client;
     if (!client.capabilities.imageEdit && entry.editorPending?.contentType?.startsWith('image/')) {
       this.cancelPendingEdit(entry, 'client cannot show images');
@@ -544,6 +552,7 @@ export class SessionRegistry {
     this.logger.info('session detached', { sessionId });
     entry.onDetachCallbacks.length = 0;
     entry.onExitCallbacks.length = 0;
+    entry.onDeletedCallbacks.length = 0;
     entry.onChangeCallbacks.length = 0;
   }
 
@@ -684,6 +693,13 @@ export class SessionRegistry {
     this.sessions.delete(sessionId);
     this.persist();
     this.logger.info('session deleted', { sessionId, name: entry.name });
+    // After the entry is gone, so a client that reacts by listing or
+    // re-attaching no longer finds it.
+    for (const cb of entry.onDeletedCallbacks) cb();
+    entry.onDeletedCallbacks.length = 0;
+    entry.onExitCallbacks.length = 0;
+    entry.onDetachCallbacks.length = 0;
+    entry.onChangeCallbacks.length = 0;
     return true;
   }
 

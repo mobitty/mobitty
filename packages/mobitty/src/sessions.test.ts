@@ -125,7 +125,7 @@ describe('SessionRegistry', () => {
 
   it('attaches and detaches', () => {
     const { info } = registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
-    const attached = registry.attachSession(info.sessionId, () => {}, () => {});
+    const attached = registry.attachSession(info.sessionId, () => {}, () => {}, () => {});
     assert.ok(attached);
     registry.detachSession(info.sessionId);
   });
@@ -133,7 +133,7 @@ describe('SessionRegistry', () => {
   it('detachSession fires onDetach callbacks', () => {
     const { info } = registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
     let detached = false;
-    registry.attachSession(info.sessionId, () => {}, () => { detached = true; });
+    registry.attachSession(info.sessionId, () => {}, () => { detached = true; }, () => {});
     registry.detachSession(info.sessionId);
     assert.ok(detached, 'onDetach callback should have been called');
   });
@@ -141,7 +141,7 @@ describe('SessionRegistry', () => {
   it('detachSession does not fire onDetach after process exit clears callbacks', async () => {
     const { info, handle } = registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
     let detachCount = 0;
-    registry.attachSession(info.sessionId, () => {}, () => { detachCount++; });
+    registry.attachSession(info.sessionId, () => {}, () => { detachCount++; }, () => {});
     // Kill the process — onExit clears onExitCallbacks but onDetachCallbacks remain
     handle.pty.kill();
     await new Promise(resolve => setTimeout(resolve, 200));
@@ -175,10 +175,24 @@ describe('SessionRegistry', () => {
     assert.equal(headless.rows, 40);
   });
 
+  it('deleteSession fires onDeleted once, after the session is gone, and not onExit', async () => {
+    const { info } = registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
+    let exited = 0;
+    const deleted: Array<boolean> = [];
+    registry.attachSession(info.sessionId, () => { exited++; }, () => {}, () => {
+      deleted.push(registry.getSession(info.sessionId) === undefined);
+    });
+    assert.equal(registry.deleteSession(info.sessionId), true);
+    // Let the killed pty's exit event arrive.
+    await new Promise(resolve => setTimeout(resolve, 200));
+    assert.deepEqual(deleted, [true]);
+    assert.equal(exited, 0);
+  });
+
   it('resizeSession survives a pty that exited before node-pty reported it', () => {
     const { info, handle } = registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh');
     let exited = false;
-    registry.attachSession(info.sessionId, () => { exited = true; }, () => {});
+    registry.attachSession(info.sessionId, () => { exited = true; }, () => {}, () => {});
     // node-pty knows the child is gone but has not emitted `exit` yet: resize
     // throws instead of returning.
     handle.pty.resize = () => { throw new Error('Cannot resize a pty that has already exited'); };

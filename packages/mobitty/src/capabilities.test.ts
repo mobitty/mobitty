@@ -78,7 +78,7 @@ describe('SessionRegistry with client capabilities', () => {
     const client: AttachedClient = { capabilities };
     const frames: Frame[] = [];
     registry.detachSession(sessionId);
-    registry.attachSession(sessionId, noop, noop, client);
+    registry.attachSession(sessionId, noop, noop, noop, client);
     const send = (cmd: number, json: string) => { frames.push([cmd, JSON.parse(json)]); return true; };
     registry.setViewerSender(sessionId, send);
     registry.replayViews(sessionId, send, capabilities);
@@ -234,7 +234,7 @@ describe('HTTP with client capabilities', () => {
   function sessionWith(capabilities?: ClientCapabilities): { sessionId: string; frames: Frame[] } {
     const sessionId = registry.createSession(testShellArgv, 'xterm-256color', 80, 24, 5000, 'sh').info.sessionId;
     const frames: Frame[] = [];
-    registry.attachSession(sessionId, noop, noop, capabilities ? { capabilities } : undefined);
+    registry.attachSession(sessionId, noop, noop, noop, capabilities ? { capabilities } : undefined);
     registry.setViewerSender(sessionId, (cmd, json) => { frames.push([cmd, JSON.parse(json)]); return true; });
     registry.setDownloadSender(sessionId, (fileName, fileSize, token) => { frames.push([DOWNLOAD_START, { fileName, fileSize, token }]); });
     registry.setEditorSender(sessionId, () => true);

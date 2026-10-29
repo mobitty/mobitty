@@ -238,6 +238,8 @@ interface TestClient {
   flush(): Promise<void>;
   /** Send INPUT to the attached session. */
   input(data: string): void;
+  /** Resolves with the close code once the socket closes. */
+  closed: Promise<number>;
 }
 
 describe('handleConnection', { skip: process.platform === 'win32' }, () => {
@@ -298,11 +300,12 @@ describe('handleConnection', { skip: process.platform === 'win32' }, () => {
       });
       ws.on('close', (code) => reject(new Error(`closed ${code}`)));
     });
+    const closed = new Promise<number>(resolve => ws.on('close', (code) => resolve(code)));
     await new Promise<void>((resolve, reject) => { ws.on('open', resolve); ws.on('error', reject); });
     ws.send(Buffer.from(JSON.stringify(handshake)));
     const flush = () => new Promise<void>(resolve => { ws.once('pong', () => resolve()); ws.ping(); });
     const input = (data: string) => ws.send(Buffer.concat([Buffer.from([INPUT]), Buffer.from(data)]));
-    return { frames, info: await info, flush, input };
+    return { frames, info: await info, flush, input, closed };
   }
 
   const newSession = (scrollback = 5000) =>
@@ -402,5 +405,25 @@ describe('handleConnection', { skip: process.platform === 'win32' }, () => {
     const client = await attach({ sessionId: info.sessionId, scrollback: 2000 });
     assert.equal(client.info['scrollback'], 2000);
     assert.equal(registry.listSessions().find(s => s.sessionId === info.sessionId)?.scrollback, 2000);
+  });
+
+  it('closes the attached connection with 4004 when its session is deleted', async () => {
+    const { info } = newSession();
+    const other = newSession();
+    const client = await attach({ sessionId: info.sessionId });
+    const bystander = await attach({ sessionId: other.info.sessionId });
+
+    assert.equal(registry.deleteSession(info.sessionId), true);
+    const timeout = new Promise<string>(resolve => setTimeout(() => resolve('still open'), 1000).unref());
+    assert.equal(await Promise.race([client.closed, timeout]), 4004);
+
+    // A connection attached to another session stays open.
+    await bystander.flush();
+  });
+
+  it('deletes a session with no connection attached', () => {
+    const { info } = newSession();
+    assert.equal(registry.deleteSession(info.sessionId), true);
+    assert.equal(registry.getSession(info.sessionId), undefined);
   });
 });

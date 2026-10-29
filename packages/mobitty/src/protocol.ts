@@ -529,6 +529,8 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
             ws.close(4002, 'Process exited');
           }, () => {
             if (ws.readyState === 1) ws.close(4003, 'Replaced');
+          }, () => {
+            if (ws.readyState === 1) ws.close(4004, 'Session deleted');
           }, client);
           if (info) {
             sessionId = requestedSessionId;
@@ -630,6 +632,8 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
           ws.close(4002, 'Process exited');
         }, () => {
           if (ws.readyState === 1) ws.close(4003, 'Replaced');
+        }, () => {
+          if (ws.readyState === 1) ws.close(4004, 'Session deleted');
         }, client);
         attachedClient = client;
 
