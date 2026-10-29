@@ -33,7 +33,8 @@ export class ProfileStore {
     if (!PROFILE_NAME_RE.test(name)) return undefined;
     try {
       const raw = readFileSync(join(this.profilesDir, `${name}.json`), 'utf-8');
-      return JSON.parse(raw) as unknown;
+      const parsed: unknown = JSON.parse(raw);
+      return parsed;
     } catch {
       return undefined;
     }

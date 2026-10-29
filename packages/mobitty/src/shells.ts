@@ -2,6 +2,7 @@ import { mkdirSync, readFileSync, writeFileSync, unlinkSync, readdirSync } from 
 import { join } from 'node:path';
 import { discoverShells } from './shell-discovery.ts';
 import type { DiscoveredShell } from './shell-discovery.ts';
+import { isRecord } from './types.ts';
 
 export const SHELL_NAME_RE = /^[a-zA-Z0-9_-]{1,64}$/;
 
@@ -28,6 +29,30 @@ function commandToArgv(command: string): string[] {
 
 export interface ShellInfo extends Shell {
   source: 'saved' | 'discovered';
+}
+
+/** Read a saved shell file's parsed JSON. `undefined` when it is not an
+ *  object or yields no command to run; unknown fields and non-string argv
+ *  entries or env values are dropped. */
+export function parseSavedShell(name: string, data: unknown): Shell | undefined {
+  if (!isRecord(data)) return undefined;
+  const rawCommand = data['command'];
+  const command = typeof rawCommand === 'string' && rawCommand.trim() ? rawCommand.trim() : undefined;
+  const rawArgv = data['argv'];
+  let argv = Array.isArray(rawArgv) ? rawArgv.filter((a): a is string => typeof a === 'string') : [];
+  if (argv.length === 0 && command) argv = commandToArgv(command);
+  if (argv.length === 0) return undefined;
+  const shell: Shell = { name, argv };
+  if (command) shell.command = command;
+  const rawEnv = data['env'];
+  if (isRecord(rawEnv)) {
+    const env: Record<string, string> = {};
+    for (const [k, v] of Object.entries(rawEnv)) {
+      if (typeof v === 'string') env[k] = v;
+    }
+    if (Object.keys(env).length > 0) shell.env = env;
+  }
+  return shell;
 }
 
 export class ShellStore {
@@ -58,29 +83,8 @@ export class ShellStore {
         if (!SHELL_NAME_RE.test(name)) continue;
         try {
           const raw = readFileSync(join(this.shellsDir, f), 'utf-8');
-          const data = JSON.parse(raw) as Record<string, unknown>;
-          const command = typeof data['command'] === 'string' && data['command'].trim()
-            ? data['command'].trim()
-            : undefined;
-          let argv: string[];
-          if (Array.isArray(data['argv'])) {
-            argv = (data['argv'] as unknown[]).filter((a): a is string => typeof a === 'string');
-          } else {
-            argv = [];
-          }
-          if (argv.length === 0 && command) {
-            argv = commandToArgv(command);
-          }
-          if (argv.length === 0) continue;
-          const shell: Shell = { name, argv };
-          if (command) shell.command = command;
-          if (typeof data['env'] === 'object' && data['env'] !== null && !Array.isArray(data['env'])) {
-            const env: Record<string, string> = {};
-            for (const [k, v] of Object.entries(data['env'] as Record<string, unknown>)) {
-              if (typeof v === 'string') env[k] = v;
-            }
-            if (Object.keys(env).length > 0) shell.env = env;
-          }
+          const shell = parseSavedShell(name, JSON.parse(raw));
+          if (!shell) continue;
           shells.push(shell);
         } catch {
           // skip malformed files
@@ -112,30 +116,12 @@ export class ShellStore {
     // Check saved first
     try {
       const raw = readFileSync(join(this.shellsDir, `${name}.json`), 'utf-8');
-      const data = JSON.parse(raw) as Record<string, unknown>;
-      const command = typeof data['command'] === 'string' && data['command'].trim()
-        ? data['command'].trim()
-        : undefined;
-      let argv: string[];
-      if (Array.isArray(data['argv'])) {
-        argv = (data['argv'] as unknown[]).filter((a): a is string => typeof a === 'string');
-      } else {
-        argv = [];
-      }
-      if (argv.length === 0 && command) {
-        argv = commandToArgv(command);
-      }
-      if (argv.length > 0) {
-        const shell: ShellInfo = { name, argv, source: 'saved' };
-        if (command) shell.command = command;
-        if (typeof data['env'] === 'object' && data['env'] !== null && !Array.isArray(data['env'])) {
-          const env: Record<string, string> = {};
-          for (const [k, v] of Object.entries(data['env'] as Record<string, unknown>)) {
-            if (typeof v === 'string') env[k] = v;
-          }
-          if (Object.keys(env).length > 0) shell.env = env;
-        }
-        return shell;
+      const shell = parseSavedShell(name, JSON.parse(raw));
+      if (shell) {
+        const info: ShellInfo = { name, argv: shell.argv, source: 'saved' };
+        if (shell.command) info.command = shell.command;
+        if (shell.env) info.env = shell.env;
+        return info;
       }
     } catch {
       // not saved

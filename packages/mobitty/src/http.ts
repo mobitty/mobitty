@@ -9,6 +9,7 @@ import { type ThemeStore, BUILTIN_THEME_NAMES } from './themes.ts';
 import type { ShellStore } from './shells.ts';
 import { IMAGE_EDIT_UNSUPPORTED, type SessionRegistry } from './sessions.ts';
 import { classifyViewTarget, listViewTree } from './viewer.ts';
+import { isRecord } from './types.ts';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -422,11 +423,11 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
         jsonResponse(res, 400, { error: 'Invalid JSON' });
         return;
       }
-      if (typeof parsed !== 'object' || parsed === null) {
+      if (!isRecord(parsed)) {
         jsonResponse(res, 400, { error: 'Invalid body' });
         return;
       }
-      const name = (parsed as Record<string, unknown>)['name'];
+      const name = parsed['name'];
       if (typeof name !== 'string') {
         jsonResponse(res, 400, { error: 'Missing name field' });
         return;
@@ -453,11 +454,11 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
         jsonResponse(res, 400, { error: 'Invalid JSON' });
         return;
       }
-      if (typeof parsed !== 'object' || parsed === null) {
+      if (!isRecord(parsed)) {
         jsonResponse(res, 400, { error: 'Invalid body' });
         return;
       }
-      const index = (parsed as Record<string, unknown>)['index'];
+      const index = parsed['index'];
       if (typeof index !== 'number' || !Number.isInteger(index) || index < 0) {
         jsonResponse(res, 400, { error: 'Missing or invalid index field' });
         return;
@@ -484,11 +485,11 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
         jsonResponse(res, 400, { error: 'Invalid JSON' });
         return;
       }
-      if (typeof parsed !== 'object' || parsed === null) {
+      if (!isRecord(parsed)) {
         jsonResponse(res, 400, { error: 'Invalid body' });
         return;
       }
-      const r = parsed as Record<string, unknown>;
+      const r = parsed;
       if (typeof r['filePath'] !== 'string' || typeof r['content'] !== 'string') {
         jsonResponse(res, 400, { error: 'Missing filePath or content' });
         return;
@@ -546,11 +547,11 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
         jsonResponse(res, 400, { error: 'Invalid JSON' });
         return;
       }
-      if (typeof parsed !== 'object' || parsed === null) {
+      if (!isRecord(parsed)) {
         jsonResponse(res, 400, { error: 'Invalid body' });
         return;
       }
-      const target = (parsed as Record<string, unknown>)['path'];
+      const target = parsed['path'];
       if (typeof target !== 'string' || !isAbsolute(target)) {
         jsonResponse(res, 400, { error: 'path must be absolute' });
         return;
@@ -611,11 +612,11 @@ export function handleHttpRequest(req: IncomingMessage, res: ServerResponse, pro
         jsonResponse(res, 400, { error: 'Invalid JSON' });
         return;
       }
-      if (typeof parsed !== 'object' || parsed === null) {
+      if (!isRecord(parsed)) {
         jsonResponse(res, 400, { error: 'Invalid body' });
         return;
       }
-      const r = parsed as Record<string, unknown>;
+      const r = parsed;
       if (typeof r['filePath'] !== 'string') {
         jsonResponse(res, 400, { error: 'Missing filePath' });
         return;

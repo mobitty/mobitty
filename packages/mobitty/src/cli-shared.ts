@@ -10,6 +10,7 @@ import { fileURLToPath } from 'node:url';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { extname, basename, resolve } from 'node:path';
+import { isRecord } from './types.ts';
 
 export const IMAGE_EXTENSIONS: Record<string, string> = {
   '.png': 'image/png',
@@ -147,8 +148,8 @@ export async function runEdit(env: CliEnv, prefix: string, filePath: string): Pr
   } catch {
     fail(prefix, 'invalid response from server');
   }
-  if (typeof parsed !== 'object' || parsed === null) fail(prefix, 'unexpected response format');
-  const record = parsed as Record<string, unknown>;
+  if (!isRecord(parsed)) fail(prefix, 'unexpected response format');
+  const record = parsed;
   const resultContent = record['content'];
   const resultCancelled = record['cancelled'];
   if (typeof resultContent !== 'string' || typeof resultCancelled !== 'boolean') {

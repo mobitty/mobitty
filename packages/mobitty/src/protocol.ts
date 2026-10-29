@@ -10,7 +10,7 @@ import {
   VIEWER_FILE, VIEWER_NOTICE, VIEWER_REQUEST, VIEWER_DONE,
   HEARTBEAT_INTERVAL_MS, HEARTBEAT_TIMEOUT_MS,
   isResizeMessage, isHandshakeMessage, isUpdateSettingsMessage,
-  isClientLogBatch, resolveCapabilities,
+  isClientLogBatch, isRecord, resolveCapabilities,
 } from './types.ts';
 import type { ServerState } from './types.ts';
 import { resolve, relative, isAbsolute } from 'node:path';
@@ -406,7 +406,11 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
   }, HEARTBEAT_INTERVAL_MS);
 
   ws.on('message', (rawData: Buffer | ArrayBuffer | Buffer[]) => {
-    const buf = Buffer.isBuffer(rawData) ? rawData : Buffer.from(rawData as ArrayBuffer);
+    // ws hands over a Buffer with the default binaryType ('nodebuffer');
+    // the other two shapes come only with 'arraybuffer' / 'fragments'.
+    const buf = Buffer.isBuffer(rawData) ? rawData
+      : Array.isArray(rawData) ? Buffer.concat(rawData)
+      : Buffer.from(rawData);
     if (buf.length === 0) return;
 
     const command = buf[0];
@@ -855,8 +859,8 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         socketLogger.debug('EDITOR_DONE parse failed');
         return;
       }
-      if (typeof parsed !== 'object' || parsed === null) return;
-      const r = parsed as Record<string, unknown>;
+      if (!isRecord(parsed)) return;
+      const r = parsed;
       if (typeof r['content'] !== 'string' || typeof r['cancelled'] !== 'boolean') return;
       const editId = typeof r['editId'] === 'number' ? r['editId'] : undefined;
       const matched = registry.completeEdit(sessionId, r['content'], r['cancelled'], editId);
@@ -875,8 +879,8 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         socketLogger.debug('viewer message parse failed', { command });
         return;
       }
-      if (typeof parsed !== 'object' || parsed === null) return;
-      const r = parsed as Record<string, unknown>;
+      if (!isRecord(parsed)) return;
+      const r = parsed;
       const viewId = r['viewId'];
       if (typeof viewId !== 'number') return;
       if (command === VIEWER_DONE) {
@@ -911,8 +915,8 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
         socketLogger.debug('EDITOR_ACK parse failed');
         return;
       }
-      if (typeof parsed !== 'object' || parsed === null) return;
-      const editId = (parsed as Record<string, unknown>)['editId'];
+      if (!isRecord(parsed)) return;
+      const editId = parsed['editId'];
       if (typeof editId !== 'number') return;
       registry.ackEdit(sessionId, editId);
       return;

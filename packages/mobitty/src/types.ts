@@ -68,17 +68,21 @@ export interface LoggerInterface {
 
 const VALID_LOG_LEVELS = new Set<string>(['debug', 'info', 'warn', 'error']);
 
+/** A plain JSON object: not `null`, not an array. Lets parsed input be read
+ *  field by field, each field still `unknown` until checked. */
+export function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export function isLogLevel(value: unknown): value is LogLevel {
   return typeof value === 'string' && VALID_LOG_LEVELS.has(value);
 }
 
 export function isClientLogMessage(obj: unknown): obj is ClientLogMessage {
-  if (typeof obj !== 'object' || obj === null) return false;
-  const record = obj as Record<string, unknown>;
-  return typeof record['seq'] === 'number'
-    && typeof record['level'] === 'string'
-    && VALID_LOG_LEVELS.has(record['level'] as string)
-    && typeof record['msg'] === 'string';
+  if (!isRecord(obj)) return false;
+  return typeof obj['seq'] === 'number'
+    && isLogLevel(obj['level'])
+    && typeof obj['msg'] === 'string';
 }
 
 export function isClientLogBatch(obj: unknown): obj is ClientLogMessage[] {
@@ -218,12 +222,13 @@ export interface EditorResult {
 }
 
 export function isResizeMessage(obj: unknown): obj is ResizeMessage {
-  if (typeof obj !== 'object' || obj === null) return false;
-  const record = obj as Record<string, unknown>;
-  return typeof record['columns'] === 'number' && Number.isInteger(record['columns'])
-    && record['columns'] >= 1 && record['columns'] <= 800
-    && typeof record['rows'] === 'number' && Number.isInteger(record['rows'])
-    && record['rows'] >= 1 && record['rows'] <= 400;
+  if (!isRecord(obj)) return false;
+  const columns = obj['columns'];
+  const rows = obj['rows'];
+  return typeof columns === 'number' && Number.isInteger(columns)
+    && columns >= 1 && columns <= 800
+    && typeof rows === 'number' && Number.isInteger(rows)
+    && rows >= 1 && rows <= 400;
 }
 
 // Heartbeat configuration
@@ -272,8 +277,8 @@ export function isHandshakeMessage(obj: unknown): obj is HandshakeMessage {
 }
 
 export function isUpdateSettingsMessage(obj: unknown): obj is UpdateSettingsMessage {
-  if (typeof obj !== 'object' || obj === null) return false;
-  const r = obj as Record<string, unknown>;
+  if (!isRecord(obj)) return false;
+  const r = obj;
   if (r['scrollback'] !== undefined) {
     if (typeof r['scrollback'] !== 'number' || !Number.isInteger(r['scrollback'])
         || r['scrollback'] < 100 || r['scrollback'] > 50000) return false;

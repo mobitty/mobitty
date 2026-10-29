@@ -240,7 +240,8 @@ export class ThemeStore {
     if (!THEME_NAME_RE.test(name)) return undefined;
     try {
       const raw = readFileSync(join(this.themesDir, `${name}.json`), 'utf-8');
-      return JSON.parse(raw) as unknown;
+      const parsed: unknown = JSON.parse(raw);
+      return parsed;
     } catch {
       return undefined;
     }
