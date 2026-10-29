@@ -62,6 +62,18 @@ export function relaysAlert(alertSessionId: string, reason: AlertReason, attache
   return sessionAlerts && reason === 'bell';
 }
 
+/** Whether input a client sends to its session is the user typing, which
+ *  clears the session's alert: the user has seen the screen. Focus reports and
+ *  mouse reports are not. Mirror of the web client's `isTypedInput`
+ *  (packages/client/src/session-alert.ts), which clears its own mark on the
+ *  same input. */
+export function isTypedInput(data: string): boolean {
+  if (data === '\x1b[I' || data === '\x1b[O') return false;
+  if (/^\x1b\[<\d+;\d+;\d+[Mm]$/.test(data)) return false; // SGR mouse
+  if (data.length === 6 && data.startsWith('\x1b[M')) return false; // X10 mouse
+  return true;
+}
+
 /** Whether a session's OSC 9/99/777 notification goes to a client: always for
  *  another session, and for its own session with `sessionAlerts`. */
 export function relaysNotification(notifSessionId: string, attachedSessionId: string | null, sessionAlerts: boolean): boolean {
@@ -660,6 +672,7 @@ export function handleConnection(ws: WebSocket, req: IncomingMessage, state: Ser
       }
       const data = buf.subarray(1).toString('utf-8');
       writePty(handle, data);
+      if (isTypedInput(data)) registry.clearAlert(sessionId);
       return;
     }
 

@@ -5,8 +5,8 @@ import { createServer, type Server } from 'node:http';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { WebSocket, WebSocketServer } from 'ws';
-import { computeAutoInterval, handleConnection, relaysAlert, relaysNotification } from './protocol.ts';
-import { isUpdateSettingsMessage, SESSION_ALERT, SESSION_NOTIFICATION, SET_SESSION_INFO, VIEWER_NOTICE } from './types.ts';
+import { computeAutoInterval, handleConnection, isTypedInput, relaysAlert, relaysNotification } from './protocol.ts';
+import { INPUT, isUpdateSettingsMessage, SESSION_ALERT, SESSION_NOTIFICATION, SET_SESSION_INFO, VIEWER_NOTICE } from './types.ts';
 import type { ServerState } from './types.ts';
 import { SessionRegistry } from './sessions.ts';
 import type { ViewRequest } from './sessions.ts';
@@ -207,6 +207,21 @@ describe('relaysAlert / relaysNotification', () => {
   });
 });
 
+describe('isTypedInput', () => {
+  it('counts keys and pasted text', () => {
+    assert.equal(isTypedInput('a'), true);
+    assert.equal(isTypedInput('\r'), true);
+    assert.equal(isTypedInput('\x1b[A'), true);
+  });
+
+  it('does not count focus or mouse reports', () => {
+    assert.equal(isTypedInput('\x1b[I'), false);
+    assert.equal(isTypedInput('\x1b[O'), false);
+    assert.equal(isTypedInput('\x1b[<0;10;5M'), false);
+    assert.equal(isTypedInput('\x1b[M #!'), false);
+  });
+});
+
 const testShellArgv = process.platform === 'win32' ? ['cmd.exe'] : ['/bin/sh'];
 
 interface Frame {
@@ -221,6 +236,8 @@ interface TestClient {
   info: Record<string, unknown>;
   /** Resolves once every frame the server sent before this call has arrived. */
   flush(): Promise<void>;
+  /** Send INPUT to the attached session. */
+  input(data: string): void;
 }
 
 describe('handleConnection', { skip: process.platform === 'win32' }, () => {
@@ -284,7 +301,8 @@ describe('handleConnection', { skip: process.platform === 'win32' }, () => {
     await new Promise<void>((resolve, reject) => { ws.on('open', resolve); ws.on('error', reject); });
     ws.send(Buffer.from(JSON.stringify(handshake)));
     const flush = () => new Promise<void>(resolve => { ws.once('pong', () => resolve()); ws.ping(); });
-    return { frames, info: await info, flush };
+    const input = (data: string) => ws.send(Buffer.concat([Buffer.from([INPUT]), Buffer.from(data)]));
+    return { frames, info: await info, flush, input };
   }
 
   const newSession = (scrollback = 5000) =>
@@ -316,6 +334,25 @@ describe('handleConnection', { skip: process.platform === 'win32' }, () => {
     const notes: unknown[] = framesOf(client, SESSION_NOTIFICATION).map(f => JSON.parse(f.text));
     assert.equal(notes.length, 1);
     assert.partialDeepStrictEqual(notes[0], { sessionId: info.sessionId, body: 'done', sessionName: info.name });
+  });
+
+  it('clears the attached session\'s alert when the user types, not on a focus report', async () => {
+    const { info, handle } = newSession();
+    const client = await attach({ sessionId: info.sessionId, capabilities: { sessionAlerts: true } });
+    const hasAlert = () => registry.listSessions().find(s => s.sessionId === info.sessionId)?.hasAlert;
+
+    const bell = nextAlert(info.sessionId);
+    writePty(handle, "printf '\\a'\n");
+    await bell;
+    assert.equal(hasAlert(), true);
+
+    client.input('\x1b[I');
+    await client.flush();
+    assert.equal(hasAlert(), true);
+
+    client.input('x');
+    await client.flush();
+    assert.equal(hasAlert(), false);
   });
 
   it('does not relay the attached session\'s bell or notification without sessionAlerts', async () => {
