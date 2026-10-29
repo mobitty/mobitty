@@ -1,4 +1,4 @@
-import type { Terminal } from '@xterm/headless';
+import type { IBufferCell, IBufferLine, Terminal } from '@xterm/headless';
 
 // xterm.js color mode constants from getFgColorMode()/getBgColorMode()
 const CM_P16     = 0x1000000;  // 16-color palette
@@ -246,7 +246,17 @@ export function blankSnapshot(cols: number, rows: number): FrameSnapshot {
   };
 }
 
-function sgrSequence(cell: CellSnapshot): string {
+/** The SGR state of a cell (or of the writing pen). Colors are -1 in the
+ *  default mode, as xterm.js reports them. */
+interface SgrCell {
+  fg: number;
+  bg: number;
+  fgMode: number;
+  bgMode: number;
+  attrs: number;
+}
+
+function sgrSequence(cell: SgrCell): string {
   const parts: string[] = ['0'];
 
   if (cell.attrs & 1) parts.push('1');
@@ -286,6 +296,22 @@ function cellSgrEqual(a: CellSnapshot, b: CellSnapshot): boolean {
 
 function cellEqual(a: CellSnapshot, b: CellSnapshot): boolean {
   return a.char === b.char && a.width === b.width && a.urlId === b.urlId && cellSgrEqual(a, b);
+}
+
+/**
+ * Whether a VT stream can put a cell of `width` where it is, given the widths
+ * of its neighbours in the row (undefined past either end). A wide character
+ * and its second half are written as a pair. xterm.js can hold half a pair: a
+ * wide character in the last column whose second half lies past `cols` (a
+ * line the alternate buffer kept wider on shrink, or a reflow), or a half left
+ * by ICH, DCH or a reflow. A stream cannot reproduce it — a wide character in
+ * the last column wraps onto the next row, scrolling at the bottom — so each
+ * half is sent as a null cell with its attributes.
+ */
+function isWritableCell(width: number, prevWidth: number | undefined, nextWidth: number | undefined): boolean {
+  if (width === 2) return nextWidth === 0;
+  if (width === 0) return prevWidth === 2;
+  return true;
 }
 
 function osc8Open(uri: string): string {
@@ -419,8 +445,9 @@ export function generateDiff(prev: FrameSnapshot, curr: FrameSnapshot): string |
 
         if (p && cellEqual(p, c)) break;
 
-        if (c.width === 0) {
-          // Continuation cell for wide char — skip
+        const writable = isWritableCell(c.width, currRow[x - 1]?.width, currRow[x + 1]?.width);
+        if (c.width === 0 && writable) {
+          // Second half of a wide char, written with it — skip
           x++;
           continue;
         }
@@ -439,7 +466,7 @@ export function generateDiff(prev: FrameSnapshot, curr: FrameSnapshot): string |
           lastUrlId = c.urlId;
         }
 
-        out += c.char;
+        out += writable ? c.char : ' ';
         x++;
       }
     }
@@ -653,36 +680,6 @@ export function summarizeBytes(data: string | Uint8Array, maxLen = 120): BytesSu
   return { len: str.length, sample, crlfCount: crlf, bareLfCount: bareLf, escCount: esc };
 }
 
-// Internal: SGR sequence for a live cell (during full-state serialization).
-// Mirrors sgrSequence(CellSnapshot) but reads directly from a cell.
-interface SgrCell {
-  fg: number; bg: number; fgMode: number; bgMode: number; attrs: number;
-}
-
-function sgrSequenceLive(cell: SgrCell): string {
-  const parts: string[] = ['0'];
-  if (cell.attrs & 1) parts.push('1');
-  if (cell.attrs & 2) parts.push('2');
-  if (cell.attrs & 4) parts.push('3');
-  if (cell.attrs & 8) parts.push('4');
-  if (cell.attrs & 16) parts.push('5');
-  if (cell.attrs & 32) parts.push('7');
-  if (cell.attrs & 64) parts.push('8');
-  if (cell.attrs & 128) parts.push('9');
-  if (cell.attrs & 256) parts.push('53');
-  if (cell.fgMode === CM_P16) parts.push(cell.fg < 8 ? `${30 + cell.fg}` : `${90 + cell.fg - 8}`);
-  else if (cell.fgMode === CM_P256) parts.push(`38;5;${cell.fg}`);
-  else if (cell.fgMode === CM_RGB) parts.push(`38;2;${(cell.fg >> 16) & 0xff};${(cell.fg >> 8) & 0xff};${cell.fg & 0xff}`);
-  if (cell.bgMode === CM_P16) parts.push(cell.bg < 8 ? `${40 + cell.bg}` : `${100 + cell.bg - 8}`);
-  else if (cell.bgMode === CM_P256) parts.push(`48;5;${cell.bg}`);
-  else if (cell.bgMode === CM_RGB) parts.push(`48;2;${(cell.bg >> 16) & 0xff};${(cell.bg >> 8) & 0xff};${cell.bg & 0xff}`);
-  return `\x1b[${parts.join(';')}m`;
-}
-
-function sgrLiveEqual(a: SgrCell, b: SgrCell): boolean {
-  return a.attrs === b.attrs && a.fg === b.fg && a.bg === b.bg && a.fgMode === b.fgMode && a.bgMode === b.bgMode;
-}
-
 function serializeModes(modes: TerminalModes): string {
   let out = '';
   if (modes.applicationCursorKeysMode) out += '\x1b[?1h';
@@ -721,11 +718,12 @@ function serializeModes(modes: TerminalModes): string {
 // before reaching the client; only the underline + color survived).
 export function serializeFullState(terminal: Terminal, title: string, cursorHidden: boolean, tracked: Readonly<TrackedModes> = DEFAULT_TRACKED_MODES): string {
   // Hide cursor for the duration of the client's write to prevent flicker.
-  // Reset SGR + clear screen + home cursor before the buffer payload so the
-  // client starts from a known-clean slate. SGR reset MUST precede `\x1b[2J`:
-  // xterm.js uses BCE (Background Color Erase) and fills cleared cells with
-  // the current SGR background, not the terminal default.
-  let out = '\x1b[?25l\x1b[0m\x1b[2J\x1b[H';
+  // Reset the pen (SGR and any open OSC 8 link) + clear screen + home cursor
+  // before the buffer payload so the client starts from a known-clean slate.
+  // SGR reset MUST precede `\x1b[2J`: xterm.js uses BCE (Background Color
+  // Erase) and fills cleared cells with the current SGR background, not the
+  // terminal default. serializeBufferOf relies on starting with that pen.
+  let out = '\x1b[?25l\x1b[0m' + OSC8_CLOSE + '\x1b[2J\x1b[H';
 
   const isAlt = terminal.buffer.active.type === 'alternate';
   if (isAlt) {
@@ -733,7 +731,9 @@ export function serializeFullState(terminal: Terminal, title: string, cursorHidd
     // mode, serialize the normal buffer first, then enter alt and serialize
     // the alt buffer. The client's STATE_FULL prefix has already exited any
     // prior alt mode (see terminal-core.ts STATE_FULL handler), so a fresh
-    // serializer starts from normal mode.
+    // serializer starts from normal mode. serializeBufferOf ends with the pen
+    // reset, so `?1049h` fills the alternate screen with the default
+    // background.
     out += serializeBufferOf(terminal, terminal.buffer.normal, /* isAlt */ false);
     out += '\x1b[?1049h\x1b[H';
     out += serializeBufferOf(terminal, terminal.buffer.alternate, /* isAlt */ true);
@@ -755,110 +755,258 @@ export function serializeFullState(terminal: Terminal, title: string, cursorHidd
 
 type HeadlessBuffer = Terminal['buffer']['active'];
 
-// Internal helper: walks `buf` and emits a byte stream that reconstructs it on
-// a client xterm. The terminal is still required for `_oscLinkService` lookups.
+/** One cell as serializeBufferOf reads it. */
+interface LiveCell extends SgrCell {
+  /** '' for a null cell: never written, or erased. */
+  chars: string;
+  /** 0 for the second half of a wide character. */
+  width: number;
+  /** OSC 8 link target, '' for none. */
+  uri: string;
+}
+
+const DEFAULT_SGR: Readonly<SgrCell> = Object.freeze({ fg: -1, bg: -1, fgMode: 0, bgMode: 0, attrs: 0 });
+const NULL_CELL: Readonly<LiveCell> = Object.freeze({ ...DEFAULT_SGR, chars: '', width: 1, uri: '' });
+
+function bgEqual(a: SgrCell, b: SgrCell): boolean {
+  return a.bgMode === b.bgMode && (a.bgMode === 0 || a.bg === b.bg);
+}
+
+function sgrEqual(a: SgrCell, b: SgrCell): boolean {
+  return a.attrs === b.attrs && a.fgMode === b.fgMode && (a.fgMode === 0 || a.fg === b.fg) && bgEqual(a, b);
+}
+
+function isDefaultSgr(c: SgrCell): boolean {
+  return c.attrs === 0 && c.fgMode === 0 && c.bgMode === 0;
+}
+
+/** The pen an erase (ECH, EL, ED, a scroll) fills cells with in xterm.js:
+ *  the current background only. */
+function eraseSgr(c: SgrCell): SgrCell {
+  return { ...DEFAULT_SGR, bg: c.bg, bgMode: c.bgMode };
+}
+
+/** A null cell an erase can produce: no foreground, flags or link. Other null
+ *  cells come from wide characters (the pad left when one wraps, the half left
+ *  when one is overwritten), which take the full pen; those are written as a
+ *  space with their attributes. */
+function isErasedCell(c: LiveCell): boolean {
+  return c.chars === '' && c.width === 1 && c.fgMode === 0 && c.attrs === 0 && c.uri === '';
+}
+
+/** Written as a character (a null cell that is not an erased cell as a space). */
+function isPrintedCell(c: LiveCell): boolean {
+  return c.width !== 0 && !isErasedCell(c);
+}
+
+function isBlankCell(c: LiveCell): boolean {
+  return isErasedCell(c) && c.bgMode === 0;
+}
+
+// `cols` cells of `line`; cells past `line.length` read as null. Capped at
+// `cols`, not `line.length`: xterm.js's alternate buffer does not reflow on
+// shrink — line memory keeps the pre-shrink width, and the cells past `cols`
+// hold stale pre-resize content. Emitting them produced text > cols per row,
+// and the client's xterm.js autowrapped at `cols`, creating phantom wrap-pair
+// continuations that pushed real alt-buffer content off the viewport. See
+// done-bug-reconnect-alt-buffer-misaligned.md.
+//
+// Half a wide-character pair reads as a null cell with its attributes (see
+// isWritableCell).
+function readRow(terminal: Terminal, line: IBufferLine | undefined, cols: number): LiveCell[] {
+  const cells: IBufferCell[] = [];
+  const width = line ? Math.min(line.length, cols) : 0;
+  for (let x = 0; x < width; x++) {
+    // Allocate a fresh cell per position. The dest-pointer overload of
+    // `getCell(x, cell)` updates the SGR fields but leaves `cell.extended`
+    // (where `urlId` lives) stale from the previous cell, which collapses
+    // OSC 8 spans into "single endless link" output and breaks the close
+    // emission. Until xterm.js stops sharing `extended` across getCell
+    // calls, the per-cell allocation is required for correctness.
+    const cell = line?.getCell(x);
+    if (!cell) break;
+    cells.push(cell);
+  }
+  const row = cells.map((cell, x): LiveCell => {
+    const writable = isWritableCell(cell.getWidth(), cells[x - 1]?.getWidth(), cells[x + 1]?.getWidth());
+    return {
+      chars: writable ? cell.getChars() : '',
+      width: writable ? cell.getWidth() : 1,
+      fg: cell.getFgColor(),
+      bg: cell.getBgColor(),
+      fgMode: cell.getFgColorMode(),
+      bgMode: cell.getBgColorMode(),
+      attrs: packAttrs(cell),
+      uri: readUriForUrlId(terminal, readCellUrlId(cell)) ?? '',
+    };
+  });
+  while (row.length < cols) row.push(NULL_CELL);
+  return row;
+}
+
+// Internal helper: walks `buf` and emits a byte stream that reconstructs it,
+// cell for cell, on a client xterm whose screen is clear, cursor home and pen
+// reset (SGR default, no link). The terminal is still required for
+// `_oscLinkService` lookups. Ported from `@xterm/addon-serialize` 0.15's
+// string serializer, plus OSC 8 links and the `isAlt` rule below.
 //
 // Row-count rule (mirrors `@xterm/addon-serialize`): when the buffer fits in
 // the viewport (`buf.length <= rows`), only emit rows up to the last row that
-// contains a non-blank cell — emitting trailing blank rows would write extra
-// `\r\n`s that scroll real content off the top. When the buffer has spilled
-// into scrollback (`buf.length > rows`), emit every row so the client ends up
-// with the same `baseY`. Either way, `\r\n` separators go *between* rows, not
-// after the last one — that final `\r\n` would also scroll.
+// is not blank — emitting trailing blank rows would write extra `\r\n`s that
+// scroll real content off the top. When the buffer has spilled into
+// scrollback (`buf.length > rows`), emit every row so the client ends up with
+// the same `baseY`. The alternate buffer always sends its viewport only.
+// Either way, separators go *between* rows, not after the last one — that
+// final `\r\n` would also scroll. Pen changes are emitted only in rows that
+// are emitted, so the stream ends with the pen it reports.
+//
+// Cells: characters are written with their SGR and link. Null cells that an
+// erase can produce (background only) are not written: a run whose
+// background differs from the row's is set with ECH (`CSI n X`, which does
+// not move the cursor), the rest is skipped with CUF. ECH keeps them null,
+// where spaces would make them content (copied text, reflow). Other null
+// cells (a wide character's pad, or a half it left) carry a full pen, which
+// no erase sets: they are written as a space with their attributes.
+//
+// Rows: the client's row starts blank with the default background, except a
+// row that scrolls in (a row index >= `rows`): xterm.js fills it with the
+// background of the pen that scrolled it (BCE). So the pen goes back to the
+// default before a `\r\n` that scrolls, and a row entered by autowrap takes
+// the background of its first cell.
 //
 // `isAlt` controls how `isWrapped` continuation rows are emitted. For the
-// normal buffer (`isAlt=false`), wrap-paired rows are emitted *without* a
-// `\r\n` between them so the client's xterm.js can reflow them at its own
-// width. For the alternate buffer (`isAlt=true`) every row gets a `\r\n` —
-// alt-buffer `isWrapped` flags are not semantic (they come from xterm.js's
-// asymmetric shrink path splitting full-width CRLF rows like Claude Code's
-// separators) and joining them causes the client to autowrap differently
-// from the server, producing the wrap-pair misalignment documented in
-// done-bug-reconnect-alt-buffer-misaligned.md.
+// normal buffer (`isAlt=false`) a continuation row is entered by autowrap, so
+// the client marks it wrapped and can reflow the pair at its own width. When
+// the row before it does not end on its last column (erased or partly
+// overwritten after it wrapped, or left short by a resize), the wrap is
+// forced: print a placeholder in the last column, print one more character
+// to wrap, erase it, and restore the last cell. For the alternate buffer (`isAlt=true`) every row gets a
+// `\r\n` — alt-buffer `isWrapped` flags are not semantic (they come from
+// xterm.js's asymmetric shrink path splitting full-width CRLF rows like
+// Claude Code's separators) and joining them causes the client to autowrap
+// differently from the server, producing the wrap-pair misalignment
+// documented in done-bug-reconnect-alt-buffer-misaligned.md.
 function serializeBufferOf(terminal: Terminal, buf: HeadlessBuffer, isAlt: boolean): string {
-  let lastSgr: SgrCell | null = null;
-  let lastUrlId = 0;
-  const total = buf.length;
   const rows = terminal.rows;
   const cols = terminal.cols;
-  let lastContentRow = -1;
+  // Lines [top, end) of `buf`; lines past its length read blank. The
+  // alternate buffer has no scrollback on the client, so only its viewport is
+  // sent: after a shrink xterm.js can keep lines above it (`baseY > 0`), and
+  // after a later grow the viewport can even run past the last line.
+  const top = isAlt ? buf.baseY : 0;
+  const end = isAlt ? top + rows : buf.length;
 
-  const rowOutputs: string[] = new Array(total);
-
-  for (let y = 0; y < total; y++) {
-    const line = buf.getLine(y);
-    if (!line) { rowOutputs[y] = ''; continue; }
-    let rowOut = '';
-    // Cap at `cols`, not `line.length`. xterm.js's alternate buffer does not
-    // reflow on shrink — line memory keeps the pre-shrink width, so
-    // `line.length` can exceed `cols` and the cells past `cols` hold stale
-    // pre-resize content. Emitting them produced text > cols per row, and the
-    // client's xterm.js autowrapped at `cols`, creating phantom wrap-pair
-    // continuations that pushed real alt-buffer content off the viewport.
-    // See done-bug-reconnect-alt-buffer-misaligned.md.
-    const width = Math.min(line.length, cols);
-    let trailing = 0;
-    for (let x = 0; x < width; x++) {
-      // Allocate a fresh cell per position. The dest-pointer overload of
-      // `getCell(x, cell)` updates the SGR fields but leaves `cell.extended`
-      // (where `urlId` lives) stale from the previous cell, which collapses
-      // OSC 8 spans into "single endless link" output and breaks the close
-      // emission. Until xterm.js stops sharing `extended` across getCell
-      // calls, the per-cell allocation is required for correctness.
-      const cellRef = line.getCell(x);
-      if (!cellRef) continue;
-      const w = cellRef.getWidth();
-      if (w === 0) continue;
-      const chars = cellRef.getChars();
-      const sgr: SgrCell = {
-        fg: cellRef.getFgColor(),
-        bg: cellRef.getBgColor(),
-        fgMode: cellRef.getFgColorMode(),
-        bgMode: cellRef.getBgColorMode(),
-        attrs: packAttrs(cellRef),
-      };
-      const urlId = readCellUrlId(cellRef);
-
-      if (!lastSgr || !sgrLiveEqual(lastSgr, sgr)) {
-        rowOut += sgrSequenceLive(sgr);
-        lastSgr = sgr;
-      }
-      if (urlId !== lastUrlId) {
-        if (lastUrlId !== 0) rowOut += OSC8_CLOSE;
-        if (urlId !== 0) {
-          const uri = readUriForUrlId(terminal, urlId);
-          if (uri !== undefined) rowOut += osc8Open(uri);
-        }
-        lastUrlId = urlId;
-      }
-      if (chars === '') {
-        trailing++;
-      } else {
-        if (trailing > 0) { rowOut += ' '.repeat(trailing); trailing = 0; }
-        rowOut += chars;
-        lastContentRow = y;
-      }
+  let emitEnd = end;
+  if (end - top <= rows) {
+    emitEnd = top;
+    for (let y = top; y < end; y++) {
+      if (!readRow(terminal, buf.getLine(y), cols).every(isBlankCell)) emitEnd = y + 1;
     }
-    rowOutputs[y] = rowOut;
   }
-
-  const emitCount = total > rows ? total : Math.max(lastContentRow + 1, 0);
 
   let out = '';
-  for (let i = 0; i < emitCount; i++) {
-    out += rowOutputs[i];
-    if (i + 1 < emitCount) {
-      const nextLine = buf.getLine(i + 1);
-      // Normal buffer: skip the separator on wrap-pair continuations so the
-      // client can reflow at its own width. Alt buffer: always emit — its
-      // wrap flags are resize artifacts, not soft-wrap semantics. See
-      // done-bug-reconnect-alt-buffer-misaligned.md.
-      if (isAlt || !nextLine || !nextLine.isWrapped) out += '\r\n';
+  // The client's pen.
+  let pen: SgrCell = DEFAULT_SGR;
+  let penUri = '';
+  const setSgr = (c: SgrCell): void => {
+    if (!sgrEqual(pen, c)) { out += sgrSequence(c); pen = c; }
+  };
+  const setUri = (uri: string): void => {
+    if (uri !== penUri) { out += uri ? osc8Open(uri) : OSC8_CLOSE; penUri = uri; }
+  };
+
+  // Writes `cells[0, end)` of a row whose blank cells have `rowBg`, starting
+  // with the cursor at column 0 (or pending a wrap onto this row). Returns the
+  // cursor column: `cols` when the row ends with a character in its last
+  // column, so the next printed character wraps.
+  const emitRow = (cells: LiveCell[], rowBg: SgrCell, end: number): number => {
+    let col = 0;
+    let runStart = 0;
+    let runCount = 0;
+    let runBg: SgrCell = DEFAULT_SGR;
+    const moveTo = (x: number): void => {
+      if (x > col) out += x - col === 1 ? '\x1b[C' : `\x1b[${x - col}C`;
+      col = x;
+    };
+    const flushRun = (): void => {
+      if (runCount === 0) return;
+      moveTo(runStart);
+      if (!bgEqual(pen, runBg)) setSgr(eraseSgr(runBg));
+      out += runCount === 1 ? '\x1b[X' : `\x1b[${runCount}X`;
+      runCount = 0;
+    };
+    for (let x = 0; x < end; x++) {
+      const c = cells[x]!;
+      if (c.width === 0) continue;
+      if (isErasedCell(c)) {
+        if (bgEqual(c, rowBg)) { flushRun(); continue; }
+        if (runCount > 0 && bgEqual(runBg, c) && runStart + runCount === x) { runCount++; continue; }
+        flushRun();
+        runStart = x;
+        runCount = 1;
+        runBg = c;
+        continue;
+      }
+      flushRun();
+      moveTo(x);
+      setSgr(c);
+      setUri(c.uri);
+      out += c.chars || ' ';
+      col = x + c.width;
     }
+    flushRun();
+    return col;
+  };
+
+  let rowBg: SgrCell = DEFAULT_SGR;
+  let cells = emitEnd > top ? readRow(terminal, buf.getLine(top), cols) : [];
+  for (let y = top; y < emitEnd; y++) {
+    const isLast = y + 1 >= emitEnd;
+    const nextLine = isLast ? undefined : buf.getLine(y + 1);
+    const nextCells = isLast ? [] : readRow(terminal, nextLine, cols);
+    const wrapsNext = !isAlt && !isLast && nextLine?.isWrapped === true;
+    const last = cells[cols - 1] ?? NULL_CELL;
+    const first = nextCells[0] ?? NULL_CELL;
+
+    // A wide character that did not fit in the last column wrapped and left a
+    // null pad cell there with its pen: written the same way, the client
+    // leaves the same pad.
+    const padWraps = wrapsNext && cols >= 2 && last.chars === '' && last.width === 1
+      && first.width === 2 && first.chars !== ''
+      && sgrEqual(last, first) && last.uri === first.uri
+      && !isErasedCell(cells[cols - 2]!);
+
+    const col = emitRow(cells, rowBg, padWraps ? cols - 1 : cols);
+
+    if (!isLast) {
+      const scrolls = y + 1 - top >= rows;
+      if (!wrapsNext) {
+        if (scrolls && pen.bgMode !== 0) setSgr(DEFAULT_SGR);
+        out += '\r\n';
+        rowBg = DEFAULT_SGR;
+      } else if (padWraps || (col === cols && isPrintedCell(first))) {
+        // The next row's first character wraps onto it.
+        rowBg = scrolls ? eraseSgr(first) : DEFAULT_SGR;
+      } else {
+        // Force the wrap. Not at the last column: print a placeholder there
+        // (restored below) so the cursor is pending a wrap. Then wrap with a
+        // default-pen space and erase it, so the new row is blank default.
+        if (col !== cols) out += `\x1b[${cols}G `;
+        setSgr(DEFAULT_SGR);
+        out += ' \b\x1b[X';
+        if (col !== cols) {
+          out += `\x1b[A\x1b[${cols}G`;
+          if (!bgEqual(pen, last)) setSgr(eraseSgr(last));
+          out += '\x1b[X\x1b[B\r';
+        }
+        rowBg = DEFAULT_SGR;
+      }
+    }
+    cells = nextCells;
   }
 
-  if (lastUrlId !== 0) out += OSC8_CLOSE;
-  if (lastSgr) out += '\x1b[0m';
+  setUri('');
+  if (!isDefaultSgr(pen)) out += '\x1b[0m';
   return out;
 }
 

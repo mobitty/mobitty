@@ -992,3 +992,125 @@ describe('diff round-trip verification', () => {
     shadow.dispose();
   });
 });
+
+type Term = InstanceType<typeof Terminal>;
+
+/** A viewport cell as the comparison sees it: the link as its target. */
+interface ViewCell {
+  char: string;
+  width: number;
+  fg: number;
+  bg: number;
+  fgMode: number;
+  bgMode: number;
+  attrs: number;
+  uri: string;
+}
+
+function viewCells(term: Term): ViewCell[][] {
+  const snap = captureSnapshot(term, '', false, 0);
+  return snap.cells.map(row => row.map(c => ({
+    char: c.char, width: c.width, fg: c.fg, bg: c.bg, fgMode: c.fgMode, bgMode: c.bgMode, attrs: c.attrs,
+    uri: c.urlId ? snap.urlIdToUri.get(c.urlId) ?? '?' : '',
+  })));
+}
+
+function lineText(term: Term, y: number): string {
+  const buf = term.buffer.active;
+  return buf.getLine(buf.baseY + y)?.translateToString(true) ?? '';
+}
+
+/** A fresh client of `src`'s size that has applied `src`'s STATE_FULL. */
+async function replay(src: Term): Promise<Term> {
+  const dst = new Terminal({ cols: src.cols, rows: src.rows, scrollback: 100, allowProposedApi: true });
+  await writeAndWait(dst, '\x1b[?1049l\x1b[3J' + serializeFullState(src, '', false));
+  return dst;
+}
+
+describe('serializeFullState carries every cell', () => {
+  it('keeps the background of erased cells at the end of a row', async () => {
+    const src = new Terminal({ cols: 10, rows: 3, allowProposedApi: true });
+    await writeAndWait(src, 'ab\x1b[41m\x1b[K\x1b[0m\r\ncd');
+    const dst = await replay(src);
+    assert.deepEqual(viewCells(dst), viewCells(src));
+    assert.equal(dst.buffer.active.getLine(0)?.getCell(5)?.getChars(), '', 'erased cells stay null cells, not spaces');
+  });
+
+  it('keeps the background of erased cells inside a row', async () => {
+    const src = new Terminal({ cols: 10, rows: 3, allowProposedApi: true });
+    await writeAndWait(src, 'a\x1b[44m\x1b[3X\x1b[0m\x1b[4Cb');
+    const dst = await replay(src);
+    assert.deepEqual(viewCells(dst), viewCells(src));
+  });
+
+  it('keeps the pad cell a wrapped wide character left', async () => {
+    // 中 does not fit after `abcd`: xterm.js pads column 4 with the
+    // underlined pen and wraps. 文 then replaces 中 with another pen.
+    const src = new Terminal({ cols: 5, rows: 3, allowProposedApi: true });
+    await writeAndWait(src, 'abcd\x1b[4m中\x1b[0m\x1b[2;1H\x1b[42m文\x1b[0m');
+    const dst = await replay(src);
+    assert.deepEqual(viewCells(dst), viewCells(src));
+  });
+
+  it('re-wraps a soft-wrapped row that no longer reaches the last column', async () => {
+    const src = new Terminal({ cols: 10, rows: 4, allowProposedApi: true });
+    await writeAndWait(src, 'a'.repeat(15) + '\x1b[1;6H\x1b[K');
+    const dst = await replay(src);
+    assert.deepEqual(viewCells(dst), viewCells(src));
+    assert.equal(dst.buffer.active.getLine(1)?.isWrapped, true, 'the pair stays a pair');
+  });
+
+  it('closes an OSC 8 link that ends in the last column', async () => {
+    const src = new Terminal({ cols: 10, rows: 4, allowProposedApi: true });
+    await writeAndWait(src, 'abcdefghi\x1b]8;;https://example.com/\x07j\x1b]8;;\x07');
+    const dst = await replay(src);
+    await writeAndWait(dst, '\x1b[3;1Hz');
+    const snap = captureSnapshot(dst, '', false, 0);
+    assert.notEqual(snap.cells[0]![9]!.urlId, 0, 'the link survives');
+    assert.equal(snap.cells[2]![0]!.urlId, 0, 'text written after the STATE_FULL is not linked');
+  });
+
+  it('sends the alternate screen viewport, not the lines xterm.js keeps above it', async () => {
+    // The alternate buffer, cleared at 5 rows and resized to 3 while
+    // inactive, keeps room for 5 lines; growing back with the cursor above
+    // the bottom leaves its viewport 2 lines down.
+    const src = new Terminal({ cols: 10, rows: 5, allowProposedApi: true });
+    await writeAndWait(src, '\x1b[?1049h\x1b[?1049l');
+    src.resize(10, 3);
+    await writeAndWait(src, '\x1b[?1049hone\r\ntwo\r\nthree\r\nfour\r\nfive\x1b[2;1H');
+    src.resize(10, 5);
+    await writeAndWait(src, '');
+    assert.equal(src.buffer.active.baseY, 2, 'precondition: lines above the alternate viewport');
+    const dst = await replay(src);
+    assert.deepEqual(viewCells(dst), viewCells(src));
+  });
+
+  it('does not wrap a wide character cut by the last column', async () => {
+    // The alternate buffer does not reflow: after the shrink, 中 starts in
+    // the last column and its second half lies past it.
+    const src = new Terminal({ cols: 5, rows: 3, allowProposedApi: true });
+    await writeAndWait(src, '\x1b[?1049habc中\r\nxyz');
+    src.resize(4, 3);
+    await writeAndWait(src, '');
+    const dst = await replay(src);
+    assert.deepEqual([0, 1, 2].map(y => lineText(dst, y)), ['abc', 'xyz', '']);
+  });
+});
+
+describe('generateDiff wide characters', () => {
+  it('does not wrap a wide character cut by the last column', async () => {
+    const src = new Terminal({ cols: 5, rows: 3, allowProposedApi: true });
+    await writeAndWait(src, '\x1b[?1049habc中\r\nwxyz\r\nwxyz');
+    src.resize(4, 3);
+    await writeAndWait(src, '');
+    const dst = await replay(src);
+    const prev = takeSnapshot(src);
+    // Insert a line: the cut row moves down to row 1 and is sent again.
+    await writeAndWait(src, '\x1b[H\x1b[L');
+    const diff = generateDiff(prev, takeSnapshot(src));
+    assert.ok(diff);
+    await writeAndWait(dst, diff);
+    // The diff writes blank cells as spaces.
+    assert.deepEqual([0, 1, 2].map(y => lineText(dst, y).trimEnd()), ['', 'abc', 'wxyz']);
+  });
+});
