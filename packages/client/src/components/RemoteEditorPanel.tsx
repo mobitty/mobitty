@@ -1,6 +1,8 @@
 import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } from 'react';
+import { flushSync } from 'react-dom';
+import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { Save, X, Minimize2, History, SpellCheck } from 'lucide-react';
+import { Save, X, Minimize2, History, SpellCheck, Hash, WandSparkles, LoaderCircle } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { autocorrectAttrs } from '@/lib/autocorrect';
 import { useShakeToUndoOnFocus } from '@/hooks/use-shake-to-undo-on-focus';
@@ -12,6 +14,9 @@ import {
   type EditorHistoryEntry, type EditorHistoryOutcome,
 } from '@/editor-history';
 import { EditorHistoryPanel } from '@/components/EditorHistoryPanel';
+import { MarkdownMirror } from '@/components/MarkdownMirror';
+import { looksLikeMarkdown, isMarkdownFileName } from '@/markdown-syntax';
+import { formatMarkdown } from '@/markdown-format';
 
 export type RemoteEditorMode = 'remote-editor' | 'fullscreen-input';
 
@@ -40,6 +45,23 @@ function basename(filePath: string): string {
   return parts[parts.length - 1] ?? filePath;
 }
 
+/** Offset of the start of line `line` in `text`, clamped to the last line. */
+function lineStartOffset(text: string, line: number): number {
+  let pos = 0;
+  for (let i = 0; i < line; i++) {
+    const nl = text.indexOf('\n', pos);
+    if (nl === -1) return pos;
+    pos = nl + 1;
+  }
+  return pos;
+}
+
+function countNewlines(text: string): number {
+  let n = 0;
+  for (let i = text.indexOf('\n'); i !== -1; i = text.indexOf('\n', i + 1)) n++;
+  return n;
+}
+
 export function RemoteEditorPanel({
   open,
   mode = 'remote-editor',
@@ -59,12 +81,26 @@ export function RemoteEditorPanel({
   /** Identity of the edit whose text is currently in `draft`; null while the
    *  panel is closed or showing an image. */
   const [loadedKey, setLoadedKey] = useState<string | null>(null);
+  /** Content detection's verdict; re-run on open and on a paste into an empty
+   *  editor, never per keystroke. */
+  const [mdDetected, setMdDetected] = useState(false);
+  /** The header toggle's choice, overriding detection until the next open. */
+  const [mdOverride, setMdOverride] = useState<boolean | null>(null);
+  const [formatting, setFormatting] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  /** The same element as state, so the mirror's effects run once it is attached:
+   *  the mirror renders first, and a ref is not set yet when its effects run. */
+  const [textareaEl, setTextareaEl] = useState<HTMLTextAreaElement | null>(null);
+  const attachTextarea = useCallback((el: HTMLTextAreaElement | null) => {
+    textareaRef.current = el;
+    setTextareaEl(el);
+  }, []);
   const isFullscreenInput = mode === 'fullscreen-input';
   const isImage = !isFullscreenInput && (contentType?.startsWith('image/') ?? false);
   /** History only makes sense for the $EDITOR path: the fullscreen-input draft
    *  already persists forever under its own key, and images are view-only. */
   const historyEnabled = !isFullscreenInput && !isImage;
+  const markdownMode = !isImage && (mdOverride ?? mdDetected);
   /** Reported with the ack, so the log can separate "the panel is up" from
    *  "the panel is up *with the file in it*". Kept in a ref because the ack
    *  effect must not re-fire on every keystroke. */
@@ -93,6 +129,9 @@ export function RemoteEditorPanel({
     loadedBytesRef.current = initial.length;
     setLoadedKey(openKey);
     setDraft(initial);
+    // Ctrl+G prompt files don't end in .md, so the content decides too.
+    setMdDetected(openKey !== null && (isMarkdownFileName(filePath) || looksLikeMarkdown(initial)));
+    setMdOverride(null);
     // A history list left up when the last edit ended must not be what the
     // next one opens into.
     setHistoryOpen(false);
@@ -177,9 +216,57 @@ export function RemoteEditorPanel({
     commitToHistory(draft, 'cancelled', content);
     setDraft(entry.text);
     setRemoteEditorDraft(filePath, entry.text);
+    if (looksLikeMarkdown(entry.text)) setMdDetected(true);
     setHistoryOpen(false);
     setTimeout(() => textareaRef.current?.focus({ preventScroll: true }), 0);
   }, [draft, content, filePath, commitToHistory]);
+
+  /** Mirror an edit into React state and the draft store. */
+  const applyText = useCallback((val: string) => {
+    setDraft(val);
+    if (isFullscreenInput) {
+      setBatchInputDraft(val);
+    } else {
+      setRemoteEditorDraft(filePath, val);
+    }
+  }, [isFullscreenInput, filePath]);
+
+  const handleFormat = useCallback(async () => {
+    const ta = textareaRef.current;
+    if (!ta || formatting) return;
+    const before = ta.value;
+    const caretLine = countNewlines(before.slice(0, ta.selectionStart));
+    setFormatting(true);
+    let formatted: string;
+    try {
+      formatted = await formatMarkdown(before);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error('Format failed', { description: msg.split('\n')[0] });
+      return;
+    } finally {
+      setFormatting(false);
+    }
+    if (ta.value !== before) {
+      toast('Text changed while formatting — try again');
+      return;
+    }
+    if (formatted === before) {
+      toast('Already formatted');
+      return;
+    }
+    // Replace through the editing pipeline rather than by setting state, so
+    // the change lands in WebKit's undo stack: Cmd+Z and iOS shake-to-undo
+    // take the document back to its unformatted text in one step.
+    ta.focus({ preventScroll: true });
+    ta.select();
+    const native = document.execCommand('insertText', false, formatted);
+    if (!native || ta.value !== formatted) {
+      flushSync(() => applyText(formatted));
+    }
+    const pos = lineStartOffset(formatted, caretLine);
+    ta.setSelectionRange(pos, pos);
+  }, [formatting, applyText]);
 
   const handleDeleteHistoryEntry = useCallback((id: string) => {
     deleteEditorHistoryEntry(id);
@@ -245,6 +332,43 @@ export function RemoteEditorPanel({
             <SpellCheck className="h-4 w-4" />
           </Button>
         )}
+        {!isImage && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className={cn(
+              markdownMode
+                ? 'text-foreground bg-accent'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+            onClick={() => setMdOverride(!markdownMode)}
+            onPointerDown={e => e.preventDefault()}
+            tabIndex={-1}
+            aria-pressed={markdownMode}
+            aria-label={markdownMode ? 'Markdown on' : 'Markdown off'}
+            title={markdownMode ? 'Markdown on' : 'Markdown off'}
+          >
+            <Hash className="h-4 w-4" />
+          </Button>
+        )}
+        {markdownMode && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className="text-muted-foreground hover:text-foreground"
+            onClick={() => { void handleFormat(); }}
+            // Keep the textarea focused (and the iOS keyboard up).
+            onPointerDown={e => e.preventDefault()}
+            tabIndex={-1}
+            disabled={formatting}
+            aria-label="Format markdown"
+            title="Format markdown"
+          >
+            {formatting
+              ? <LoaderCircle className="h-4 w-4 animate-spin" />
+              : <WandSparkles className="h-4 w-4" />}
+          </Button>
+        )}
         {historyEnabled && history.length > 0 && (
           <Button
             variant="ghost"
@@ -306,21 +430,28 @@ export function RemoteEditorPanel({
           />
         </div>
       ) : (
-        <textarea
-          ref={textareaRef}
-          className="flex-1 min-h-0 w-full bg-background text-foreground font-mono text-sm resize-none outline-none p-3"
-          value={draft}
-          onChange={(e) => {
-            const val = e.target.value;
-            setDraft(val);
-            if (isFullscreenInput) {
-              setBatchInputDraft(val);
-            } else {
-              setRemoteEditorDraft(filePath, val);
-            }
-          }}
-          {...autocorrectAttrs(autocorrect)}
-          aria-label={isFullscreenInput ? 'Fullscreen input' : 'Remote editor'}        />
+        // The wrapper is always rendered, and the mirror only ever comes and
+        // goes *before* the textarea, so toggling markdown mode never remounts
+        // the textarea — that would drop its undo history and the focus
+        // listeners shake-to-undo hangs off it.
+        <div className="relative flex-1 min-h-0">
+          {markdownMode && <MarkdownMirror text={draft} textarea={textareaEl} />}
+          <textarea
+            ref={attachTextarea}
+            className={cn(
+              'md-metrics absolute inset-0 h-full w-full font-mono text-sm resize-none outline-none',
+              markdownMode ? 'md-input' : 'bg-background text-foreground',
+            )}
+            value={draft}
+            onChange={(e) => applyText(e.target.value)}
+            onPaste={(e) => {
+              if (mdOverride !== null || mdDetected || e.currentTarget.value !== '') return;
+              if (looksLikeMarkdown(e.clipboardData.getData('text/plain'))) setMdDetected(true);
+            }}
+            {...autocorrectAttrs(autocorrect)}
+            aria-label={isFullscreenInput ? 'Fullscreen input' : 'Remote editor'}
+          />
+        </div>
       )}
 
       {historyEnabled && historyOpen && (

@@ -234,3 +234,101 @@ html, body {
 .fv-markdown th, .fv-markdown td { border: 1px solid var(--border); padding: 0.4em 0.75em; text-align: left; }
 .fv-markdown th { font-weight: 600; background: var(--card); }
 .fv-markdown img { max-width: 100%; }
+
+/* ── Remote editor: markdown mirror ──────────────────────────────────────────
+   A highlighted <pre> (.md-mirror) behind a transparent-text <textarea>
+   (.md-input). Every property that moves a glyph is pinned here, on both
+   elements, so they wrap at the same columns; the font family and size come
+   from the same `font-mono text-sm` utilities on both. Ligatures and kerning
+   are off because the pre splits text into spans and the textarea does not —
+   a ligature across a span boundary would shift everything after it. Colors
+   only in the token rules below: bold or italic can change glyph advances.
+   See components/MarkdownMirror.tsx. */
+.md-metrics {
+  margin: 0;
+  border: 0;
+  box-sizing: border-box;
+  padding: 0.75rem;
+  letter-spacing: normal;
+  word-spacing: normal;
+  tab-size: 8;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  word-break: normal;
+  font-variant-ligatures: none;
+  font-kerning: none;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+.md-mirror {
+  /* The textarea's scrollbar (if it takes layout space) narrows its content
+     box; MarkdownMirror publishes its width so the pre wraps at the same
+     column. */
+  padding-right: calc(0.75rem + var(--md-sbw, 0px));
+}
+/* iOS WebKit insets a textarea's text 3px on each side beyond its padding. */
+@supports (-webkit-touch-callout: none) {
+  .md-mirror {
+    padding-left: calc(0.75rem + 3px);
+    padding-right: calc(0.75rem + 3px + var(--md-sbw, 0px));
+  }
+}
+.md-input {
+  -webkit-appearance: none;
+  appearance: none;
+  background: transparent;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--foreground);
+}
+.md-input::selection {
+  background: var(--md-selection);
+}
+
+:root {
+  --md-heading: oklch(0.78 0.13 250);
+  --md-punct: oklch(0.6 0 0);
+  --md-code: oklch(0.8 0.13 150);
+  --md-codeblock: oklch(0.83 0.08 150);
+  --md-fence: oklch(0.62 0.08 150);
+  --md-link: oklch(0.78 0.12 220);
+  --md-url: oklch(0.62 0.05 220);
+  --md-list: oklch(0.78 0.14 60);
+  --md-quote: oklch(0.72 0.12 300);
+  --md-table: oklch(0.68 0.11 200);
+  --md-strong: oklch(0.87 0.13 85);
+  --md-em: oklch(0.8 0.11 340);
+  --md-selection: oklch(0.6 0.15 250 / 40%);
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    --md-heading: oklch(0.48 0.17 255);
+    --md-punct: oklch(0.6 0 0);
+    --md-code: oklch(0.5 0.14 150);
+    --md-codeblock: oklch(0.42 0.09 150);
+    --md-fence: oklch(0.6 0.08 150);
+    --md-link: oklch(0.5 0.15 230);
+    --md-url: oklch(0.58 0.06 230);
+    --md-list: oklch(0.58 0.16 55);
+    --md-quote: oklch(0.5 0.15 300);
+    --md-table: oklch(0.55 0.12 200);
+    --md-strong: oklch(0.52 0.14 70);
+    --md-em: oklch(0.52 0.16 345);
+    --md-selection: oklch(0.7 0.12 250 / 35%);
+  }
+}
+.md-mirror .md-heading { color: var(--md-heading); }
+.md-mirror .md-punct { color: var(--md-punct); }
+.md-mirror .md-code { color: var(--md-code); }
+.md-mirror .md-codeblock { color: var(--md-codeblock); }
+.md-mirror .md-fence,
+.md-mirror .md-info { color: var(--md-fence); }
+.md-mirror .md-link { color: var(--md-link); }
+.md-mirror .md-url { color: var(--md-url); }
+.md-mirror .md-list { color: var(--md-list); }
+.md-mirror .md-quote { color: var(--md-quote); }
+.md-mirror .md-pipe,
+.md-mirror .md-tablesep { color: var(--md-table); }
+.md-mirror .md-hr { color: var(--md-punct); }
+.md-mirror .md-strong { color: var(--md-strong); }
+.md-mirror .md-em { color: var(--md-em); }
