@@ -218,7 +218,16 @@ export function SessionPanel({ open, onClose, sessions, onRefreshSessions, curre
 
   const handleDelete = async (sessionId: string) => {
     const isCurrent = sessionId === currentSessionId;
-    const deletedIndex = sessions.findIndex(s => s.sessionId === sessionId);
+
+    // Leave the current session before deleting it. The server closes a
+    // deleted session's connection with 4004, which would otherwise race this
+    // switch and open the session picker instead.
+    if (isCurrent) {
+      const deletedIndex = sessions.findIndex(s => s.sessionId === sessionId);
+      const remaining = sessions.filter(s => s.sessionId !== sessionId);
+      const target = remaining[Math.max(0, deletedIndex - 1)];
+      if (target) handleSwitch(target.sessionId);
+    }
 
     const ok = await deleteSession(sessionId);
     if (!ok) {
@@ -229,15 +238,7 @@ export function SessionPanel({ open, onClose, sessions, onRefreshSessions, curre
     const updated = await onRefreshSessions();
     showStatus('Deleted');
 
-    if (isCurrent) {
-      if (updated.length === 0) {
-        onNoSessionsLeft();
-        return;
-      }
-      const targetIndex = Math.max(0, deletedIndex - 1);
-      const target = updated[targetIndex];
-      if (target) handleSwitch(target.sessionId);
-    }
+    if (isCurrent && updated.length === 0) onNoSessionsLeft();
   };
 
   const handleCreate = async () => {

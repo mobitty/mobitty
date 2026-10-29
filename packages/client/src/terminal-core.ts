@@ -206,6 +206,10 @@ export class TerminalCore {
   private resizeOverlay = true;
   private autoReconnect = true;
   private doReconnect = true;
+  /** Set while switchSession waits for the old socket to close. Whatever
+   *  code that close carries — the server may have closed it first, e.g. 4004
+   *  for a session deleted meanwhile — the switch still connects. */
+  private switching = false;
   private closeOnDisconnect = false;
   private reconnectDelay = 0;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
@@ -628,6 +632,7 @@ export class TerminalCore {
     // Close any stale socket still in CONNECTING or OPEN state and
     // remove its event listeners so its async close event cannot
     // dispose the new socket's listeners (Layer 2 race prevention).
+    this.switching = false;
     const prev = this.socket;
     if (prev) {
       if (prev.readyState === WebSocket.CONNECTING || prev.readyState === WebSocket.OPEN) {
@@ -697,6 +702,7 @@ export class TerminalCore {
     this.options.shellName = shellName;
     this.doReconnect = true;
     if (this.socket?.readyState === WebSocket.OPEN || this.socket?.readyState === WebSocket.CONNECTING) {
+      this.switching = true;
       this.socket.close(4001, 'Switching session');
     } else {
       // Socket already closed (e.g. process exited) — connect directly
@@ -1940,19 +1946,19 @@ export class TerminalCore {
     const { overlayAddon } = this;
     this.dispose();
 
+    if (event.code === 4001 || this.switching) {
+      // Replaced by another connection or switching sessions — auto-reconnect
+      this.logger.info('session switch, reconnecting');
+      overlayAddon.showOverlay('Reconnecting...');
+      this.connect();
+      return;
+    }
+
     if (event.code === 4004) {
       // Requested session not found on server — delegate to UI for shell selection
       this.logger.info('session not found on server, showing session picker');
       this.options.sessionId = undefined;
       this.callbacks.onSessionNotFound?.();
-      return;
-    }
-
-    if (event.code === 4001) {
-      // Replaced by another connection or switching sessions — auto-reconnect
-      this.logger.info('session switch, reconnecting');
-      overlayAddon.showOverlay('Reconnecting...');
-      this.connect();
       return;
     }
 
