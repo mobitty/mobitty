@@ -266,13 +266,6 @@ html, body {
      column. */
   padding-right: calc(0.75rem + var(--md-sbw, 0px));
 }
-/* iOS WebKit insets a textarea's text 3px on each side beyond its padding. */
-@supports (-webkit-touch-callout: none) {
-  .md-mirror {
-    padding-left: calc(0.75rem + 3px);
-    padding-right: calc(0.75rem + 3px + var(--md-sbw, 0px));
-  }
-}
 .md-input {
   -webkit-appearance: none;
   appearance: none;
