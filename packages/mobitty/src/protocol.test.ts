@@ -246,12 +246,16 @@ describe('handleConnection', { skip: process.platform === 'win32' }, () => {
     };
     const shellStore = new ShellStore(join(tmpDir, 'data'));
     server = createServer();
-    wss = new WebSocketServer({ server });
-    wss.on('connection', (ws, req) => handleConnection(ws, req, state, registry, shellStore, logger));
+    // Reject on a refused bind (EPERM in a sandbox) so the suite fails rather
+    // than hangs. Listen before attaching the WebSocketServer: it re-emits the
+    // server's `error` on itself, where nothing listens, and that throw would
+    // keep this reject from running.
     await new Promise<void>((resolve, reject) => {
       server.once('error', reject);
       server.listen(0, '127.0.0.1', resolve);
     });
+    wss = new WebSocketServer({ server });
+    wss.on('connection', (ws, req) => handleConnection(ws, req, state, registry, shellStore, logger));
     const address = server.address();
     assert.ok(address !== null && typeof address === 'object');
     port = address.port;

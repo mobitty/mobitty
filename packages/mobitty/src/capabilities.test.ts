@@ -199,7 +199,11 @@ describe('HTTP with client capabilities', () => {
     server = createServer((req, res) => handleHttpRequest(
       req, res, {} as ProfileStore, {} as ThemeStore, {} as ShellStore, registry,
     ));
-    await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+    // Reject on a refused bind (EPERM in a sandbox) so the suite fails rather than hangs.
+    await new Promise<void>((resolve, reject) => {
+      server.once('error', reject);
+      server.listen(0, '127.0.0.1', resolve);
+    });
     const address = server.address();
     port = typeof address === 'object' && address !== null ? address.port : 0;
   });
