@@ -336,7 +336,10 @@ describe('handleConnection', { skip: process.platform === 'win32' }, () => {
     assert.partialDeepStrictEqual(notes[0], { sessionId: info.sessionId, body: 'done', sessionName: info.name });
   });
 
-  it('clears the attached session\'s alert when the user types, not on a focus report', async () => {
+  // Focus and mouse reports are covered by the isTypedInput tests: sent to the
+  // shell here, its line editor rings for the unbound sequence and raises the
+  // alert again.
+  it('clears the attached session\'s alert when the user types', async () => {
     const { info, handle } = newSession();
     const client = await attach({ sessionId: info.sessionId, capabilities: { sessionAlerts: true } });
     const hasAlert = () => registry.listSessions().find(s => s.sessionId === info.sessionId)?.hasAlert;
@@ -344,10 +347,6 @@ describe('handleConnection', { skip: process.platform === 'win32' }, () => {
     const bell = nextAlert(info.sessionId);
     writePty(handle, "printf '\\a'\n");
     await bell;
-    assert.equal(hasAlert(), true);
-
-    client.input('\x1b[I');
-    await client.flush();
     assert.equal(hasAlert(), true);
 
     client.input('x');
