@@ -20,7 +20,9 @@ export function markTitle(title: string, alerted: boolean): string {
 }
 
 /** Whether input the client sends to the session is the user typing, which
- *  clears the session's alert. Focus reports and mouse reports are not. */
+ *  clears the session's alert. Focus reports and mouse reports are not. The
+ *  server clears its `hasAlert` on the same input with a mirror of this
+ *  (`isTypedInput` in packages/mobitty/src/protocol.ts). */
 export function isTypedInput(data: string): boolean {
   if (data === '\x1b[I' || data === '\x1b[O') return false;
   if (/^\x1b\[<\d+;\d+;\d+[Mm]$/.test(data)) return false; // SGR mouse
