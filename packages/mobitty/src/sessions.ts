@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { release, homedir } from 'node:os';
 import type { PtyHandle, SessionInfo, EditorResult, ClientCapabilities, ViewKind } from './types.ts';
-import { DEFAULT_CAPABILITIES, VIEWER_CLOSE, VIEWER_NOTICE, VIEWER_OPEN, VIEWER_SYNC } from './types.ts';
+import { DEFAULT_CAPABILITIES, VIEWER_CLOSE, VIEWER_NOTICE, VIEWER_OPEN, VIEWER_SYNC, isRecord } from './types.ts';
 import type { ViewEntry } from './viewer.ts';
 import { spawnPty, writePty, resizePty, killPty } from './pty.ts';
 import { generateUniqueSessionName } from './session-names.ts';
@@ -148,15 +148,38 @@ interface SessionEntry {
   scrollCount: number;
 }
 
+interface SavedSession {
+  sessionId: string;
+  name: string;
+  pid: number;
+  createdAt: string;
+  command: string;
+  shell: string;
+}
+
 interface SessionsDiskData {
-  sessions: Array<{
-    sessionId: string;
-    name: string;
-    pid: number;
-    createdAt: string;
-    command: string;
-    shell: string;
-  }>;
+  sessions: SavedSession[];
+}
+
+function isSavedSession(value: unknown): value is SavedSession {
+  return isRecord(value)
+    && typeof value['sessionId'] === 'string'
+    && typeof value['name'] === 'string'
+    && typeof value['pid'] === 'number'
+    && typeof value['createdAt'] === 'string'
+    && typeof value['command'] === 'string'
+    && typeof value['shell'] === 'string';
+}
+
+/** Validate a parsed sessions.json. `undefined` when the file as a whole is
+ *  not in the expected shape; otherwise the well-formed entries, with a count
+ *  of the entries dropped, so one bad entry does not cost the others. */
+export function parseSessionsFile(data: unknown): { sessions: SavedSession[]; skipped: number } | undefined {
+  if (!isRecord(data)) return undefined;
+  const entries = data['sessions'];
+  if (!Array.isArray(entries)) return undefined;
+  const sessions = entries.filter(isSavedSession);
+  return { sessions, skipped: entries.length - sessions.length };
 }
 
 export class SessionRegistry {
@@ -196,18 +219,36 @@ export class SessionRegistry {
   }
 
   private loadFromDisk(): void {
-    let data: SessionsDiskData;
+    let raw: string;
     try {
-      const raw = readFileSync(this.filePath, 'utf-8');
-      data = JSON.parse(raw) as SessionsDiskData;
-    } catch {
+      raw = readFileSync(this.filePath, 'utf-8');
+    } catch (err) {
+      if (!(err instanceof Error && 'code' in err && err.code === 'ENOENT')) {
+        this.logger.warn('cannot read sessions file', {
+          path: this.filePath, error: err instanceof Error ? err.message : String(err),
+        });
+      }
       return;
     }
-
-    if (!Array.isArray(data.sessions)) return;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(raw);
+    } catch (err) {
+      this.logger.warn('sessions file is not valid JSON, ignored', {
+        path: this.filePath, error: err instanceof Error ? err.message : String(err),
+      });
+      return;
+    }
+    const data = parseSessionsFile(parsed);
+    if (!data) {
+      this.logger.warn('sessions file has an unexpected format, ignored', { path: this.filePath });
+      return;
+    }
+    if (data.skipped > 0) {
+      this.logger.warn('skipped malformed entries in sessions file', { path: this.filePath, skipped: data.skipped });
+    }
 
     for (const s of data.sessions) {
-      if (typeof s.sessionId !== 'string') continue;
       let alive = false;
       try {
         process.kill(s.pid, 0);
