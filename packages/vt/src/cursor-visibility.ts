@@ -20,37 +20,29 @@ export function trackCursorVisibility(
     }
   }
 
-  // DECSET: CSI ? <n> h — mode 25 shows cursor, mode 1049 enters alt screen (cursor visible)
+  // DECTCEM (`?25`) only, as xterm.js keeps it: `?25h` shows, `?25l` hides.
+  // Alternate-screen switches (`?47`, `?1047`, `?1049`) leave visibility
+  // alone, so an app that hides the cursor and then enters the alternate
+  // screen keeps it hidden. Parser hooks run before xterm.js's own handler,
+  // so onChange could not read `terminal.modes.showCursor` here: it would
+  // still hold the old value.
   disposables.push(
     terminal.parser.registerCsiHandler({ prefix: '?', final: 'h' }, params => {
-      for (const p of params) {
-        if (p === 25 || p === 1049) {
-          setHidden(false);
-          break;
-        }
-      }
+      if (params.includes(25)) setHidden(false);
       return false;
     }),
   );
 
-  // DECRST: CSI ? <n> l — mode 25 hides cursor, mode 1049 leaves alt screen (cursor visible)
   disposables.push(
     terminal.parser.registerCsiHandler({ prefix: '?', final: 'l' }, params => {
-      for (const p of params) {
-        if (p === 25) { setHidden(true); break; }
-        if (p === 1049) { setHidden(false); break; }
-      }
+      if (params.includes(25)) setHidden(true);
       return false;
     }),
   );
 
-  // RIS: ESC c — full terminal reset, cursor becomes visible
-  disposables.push(
-    terminal.parser.registerEscHandler({ final: 'c' }, () => {
-      setHidden(false);
-      return false;
-    }),
-  );
+  // RIS (ESC c) is not handled: xterm.js's full reset leaves the cursor's
+  // visibility as it was (its CoreService.reset() does not touch it), in
+  // the headless and the browser build alike.
 
   // DECSTR: CSI ! p — soft terminal reset, cursor becomes visible
   disposables.push(

@@ -52,12 +52,21 @@ describe('CursorVisibilityTracker', () => {
     term.dispose();
   });
 
-  it('resets on RIS (ESC c)', async () => {
+  it('keeps the cursor hidden across RIS (ESC c), as xterm.js does', async () => {
     const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
     const tracker = trackCursorVisibility(term);
     await writeAndWait(term, '\x1b[?25l');
     assert.equal(tracker.cursorHidden, true);
     await writeAndWait(term, '\x1bc');
+    assert.equal(tracker.cursorHidden, true);
+    tracker.dispose();
+    term.dispose();
+  });
+
+  it('shows the cursor on DECSTR (CSI ! p)', async () => {
+    const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
+    const tracker = trackCursorVisibility(term);
+    await writeAndWait(term, '\x1b[?25l\x1b[!p');
     assert.equal(tracker.cursorHidden, false);
     tracker.dispose();
     term.dispose();
@@ -75,16 +84,40 @@ describe('CursorVisibilityTracker', () => {
     term.dispose();
   });
 
-  it('handles alt screen enter (1049h) as cursor visible', async () => {
+  it('keeps the cursor hidden across alternate-screen switches', async () => {
     const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
     const tracker = trackCursorVisibility(term);
-    await writeAndWait(term, '\x1b[?25l');
+    await writeAndWait(term, '\x1b[?25l\x1b[?1049h');
     assert.equal(tracker.cursorHidden, true);
-    await writeAndWait(term, '\x1b[?1049h');
-    assert.equal(tracker.cursorHidden, false);
+    await writeAndWait(term, '\x1b[?1049l');
+    assert.equal(tracker.cursorHidden, true);
     tracker.dispose();
     term.dispose();
   });
+
+  // The tracker must agree with xterm.js's own state (`modes.showCursor`),
+  // which is what a client's xterm ends up with for the same stream.
+  const sequences: ReadonlyArray<readonly [string, string]> = [
+    ['hide then 1049h', '\x1b[?25l\x1b[?1049h'],
+    ['hide, 1049h, 1049l', '\x1b[?25l\x1b[?1049h\x1b[?1049l'],
+    ['hide then 1047h / 47h', '\x1b[?25l\x1b[?1047h\x1b[?47h'],
+    ['hide then 1049l', '\x1b[?25l\x1b[?1049l'],
+    ['1049h then hide then 1049l', '\x1b[?1049h\x1b[?25l\x1b[?1049l'],
+    ['multi-param hide', '\x1b[?1049;25l'],
+    ['multi-param show', '\x1b[?25l\x1b[?1;25h'],
+    ['hide then RIS', '\x1b[?25l\x1bc'],
+    ['hide then DECSTR', '\x1b[?25l\x1b[!p'],
+  ];
+  for (const [name, seq] of sequences) {
+    it(`matches xterm.js modes.showCursor: ${name}`, async () => {
+      const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
+      const tracker = trackCursorVisibility(term);
+      await writeAndWait(term, seq);
+      assert.equal(tracker.cursorHidden, !term.modes.showCursor);
+      tracker.dispose();
+      term.dispose();
+    });
+  }
 
   it('dispose stops tracking', async () => {
     const term = new Terminal({ cols: 80, rows: 24, allowProposedApi: true });
