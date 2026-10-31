@@ -108,6 +108,7 @@ export function App() {
   const [imagePasteError, setImagePasteError] = useState<ImagePasteErrorInfo | null>(null);
   const [connectionClosedReason, setConnectionClosedReason] = useState<ConnectionClosedReason | null>(null);
   const [connectingSlow, setConnectingSlow] = useState(false);
+  const [nextReconnectAt, setNextReconnectAt] = useState<number | null>(null);
   const [batchInputOpen, setBatchInputOpen] = useState(false);
   const [batchInputFullscreen, setBatchInputFullscreen] = useState(false);
   // null = follow the profile setting. Set by the per-surface toggle buttons and
@@ -574,6 +575,7 @@ export function App() {
     },
     onConnectingSlow: () => setConnectingSlow(true),
     onConnected: () => setConnectingSlow(false),
+    onReconnectScheduled: (at: number | null) => setNextReconnectAt(at),
     onEditorOpen: (editId: number, filePath: string, content: string, contentType?: string) => {
       const startedAt = performance.now();
       terminalRef.current?.core?.clientLogger.info('editor panel opening', {
@@ -1034,7 +1036,11 @@ export function App() {
 
       {connectingSlow && connectionClosedReason === null && (
         <Suspense fallback={null}>
-          <ConnectionSlowOverlay open={connectingSlow} />
+          <ConnectionSlowOverlay
+            open={connectingSlow}
+            nextRetryAt={nextReconnectAt}
+            onRetryNow={handleReconnect}
+          />
         </Suspense>
       )}
 

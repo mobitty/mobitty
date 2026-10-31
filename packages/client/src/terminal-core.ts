@@ -146,6 +146,9 @@ export interface TerminalCoreCallbacks {
   onConnectingSlow?: () => void;
   /** Socket reached OPEN; pair with `onConnectingSlow` to hide the overlay. */
   onConnected?: () => void;
+  /** Auto-reconnect state for the slow-connect overlay: the epoch-ms time of
+   *  the next scheduled attempt, or null while an attempt is in flight. */
+  onReconnectScheduled?: (nextAttemptAt: number | null) => void;
   onRttReport?: (rttMs: number) => void;
   onBytesSent?: (bytes: number) => void;
   onBytesReceived?: (bytes: number) => void;
@@ -644,6 +647,7 @@ export class TerminalCore {
 
     this.socket = new WebSocket(this.options.wsUrl, ['tty']);
     const { socket } = this;
+    this.callbacks.onReconnectScheduled?.(null);
 
     socket.binaryType = 'arraybuffer';
     this.registerSocket(addEventListener(socket, 'open', () => this.onSocketOpen()));
@@ -1842,6 +1846,7 @@ export class TerminalCore {
       delay: this.reconnectDelay,
       dims: this.clientDimSnapshot(),
     });
+    this.callbacks.onReconnectScheduled?.(Date.now() + this.reconnectDelay);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = undefined;
       this.connect();
