@@ -40,6 +40,7 @@ Sessions are given auto-generated names like `bold_maple` or `quiet_falcon` when
 |--------|-----|
 | Create | Open the session panel and tap **New** |
 | Switch | Open the session panel and tap a session |
+| Open in a new tab | Use the open-in-new-tab button on a session in the panel, or press **O** on the selected one. The tab's address (`?session=<id>`) opens that session directly, so you can also bookmark it |
 | Rename | Long-press or use the rename option in the session panel |
 | Delete | Swipe or use the delete option in the session panel — this also kills the shell process |
 

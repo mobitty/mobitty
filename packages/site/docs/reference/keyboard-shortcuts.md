@@ -23,6 +23,7 @@ The session switcher hotkey is configurable under the **Hotkey** setting in the 
 | **Escape** | Close panel |
 | **N** | New session |
 | **R** | Rename selected session |
+| **O** | Open selected session in a new browser tab |
 | **Delete** | Delete selected session |
 | **Shift+Up / Shift+Down** | Reorder selected session |
 | **?** | Show help |

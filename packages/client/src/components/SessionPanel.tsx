@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { GripVertical, Pencil, Server, Settings, Trash2, X } from 'lucide-react';
+import { ExternalLink, GripVertical, Pencil, Server, Settings, Trash2, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -8,6 +8,7 @@ import {
   renameSession,
   reorderSession,
   deleteSession,
+  buildSessionUrl,
   type SessionInfo,
 } from '@/sessions';
 import { fetchShells, type ShellInfo } from '@/shells';
@@ -32,6 +33,18 @@ interface SessionPanelProps {
   isMobile: boolean;
 }
 
+/** True when a keystroke aimed at `target` is text entry inside `root`, so a
+ *  single-letter hotkey must not steal it. Editable elements outside the panel
+ *  (the terminal's hidden textarea, which can keep focus behind the panel) do
+ *  not count: the panel owns the keyboard while it is open. */
+function isTypingInPanel(target: EventTarget | null, root: HTMLElement | null): boolean {
+  if (!(target instanceof HTMLElement) || !root || !root.contains(target)) return false;
+  return target.isContentEditable || target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.tagName === 'SELECT';
+}
+
+/** Tabs exist only in a browser; the native app's web view has none. */
+const canOpenTabs = !isNativeApp();
+
 export function SessionPanel({ open, onClose, sessions, onRefreshSessions, currentSessionId, alertedSessionIds, currentSessionAlerted, onSwitchSession, onCreateSession, onSettingsOpen, onNoSessionsLeft, isMobile }: SessionPanelProps) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -46,6 +59,7 @@ export function SessionPanel({ open, onClose, sessions, onRefreshSessions, curre
   const [showHelp, setShowHelp] = useState(false);
   const [editMode, setEditMode] = useState(false);
   const [openSwipe, setOpenSwipe] = useState<{ id: string; side: 'left' | 'right' } | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
 
   const showStatus = useCallback((msg: string) => {
     setStatus(msg);
@@ -149,6 +163,13 @@ export function SessionPanel({ open, onClose, sessions, onRefreshSessions, curre
         if (!session) return;
         setEditingId(session.sessionId);
         setEditName(session.name);
+      } else if ((e.key === 'o' || e.key === 'O') && canOpenTabs
+        && !e.ctrlKey && !e.metaKey && !e.altKey && !isTypingInPanel(e.target, panelRef.current)) {
+        e.preventDefault();
+        e.stopPropagation();
+        const session = sessions[focusedIndex];
+        if (!session || !session.alive) return;
+        window.open(buildSessionUrl(session.sessionId), '_blank', 'noopener');
       } else if (e.key === '?') {
         e.preventDefault();
         e.stopPropagation();
@@ -275,7 +296,7 @@ export function SessionPanel({ open, onClose, sessions, onRefreshSessions, curre
   if (!open) return null;
 
   return (
-    <div className="absolute inset-0 z-50 bg-background text-foreground flex flex-col">
+    <div ref={panelRef} className="absolute inset-0 z-50 bg-background text-foreground flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <h2 className="text-lg font-semibold">Sessions</h2>
@@ -462,7 +483,31 @@ function SessionRowItem({
   });
 
   const showStackedActions = !isMobile && !isEditing;
+  const showOpenInNewTab = canOpenTabs && session.alive && !isEditing && !editMode;
   const cwd = session.cwd;
+
+  // A real link so the browser owns every way of following it: plain click
+  // opens a new tab (target), Ctrl/Cmd/Shift/middle-click do whatever the
+  // browser does natively. Only stop the click reaching the row's own handler.
+  const openInNewTab = (
+    <Button
+      asChild
+      variant="ghost"
+      size={isMobile ? 'icon-sm' : 'icon-xs'}
+      className="shrink-0"
+    >
+      <a
+        href={buildSessionUrl(session.sessionId)}
+        target="_blank"
+        rel="noopener"
+        aria-label="Open in new tab"
+        title="Open in new tab (o)"
+        onClick={e => e.stopPropagation()}
+      >
+        <ExternalLink />
+      </a>
+    </Button>
+  );
 
   const rowBody = (
     <div
@@ -531,8 +576,11 @@ function SessionRowItem({
         <Badge variant="outline" className="shrink-0">current</Badge>
       )}
 
+      {isMobile && showOpenInNewTab && openInNewTab}
+
       {showStackedActions && (
         <div className="flex flex-col gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
+          {showOpenInNewTab && openInNewTab}
           <Button
             variant="ghost"
             size="icon-xs"

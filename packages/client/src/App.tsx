@@ -22,7 +22,7 @@ import { DEFAULT_GESTURE_MAPPING } from '@/gesture-types';
 import type { GestureMapping } from '@/gesture-types';
 import { findFontOption, loadFont } from '@/fonts';
 import { isNativeApp, getNativeBridge } from '@/native-bridge';
-import { getLastSessionId, setLastSessionId, clearLastSessionId, fetchSessions, type SessionInfo } from '@/sessions';
+import { getInitialSessionId, setLastSessionId, clearLastSessionId, syncSessionUrl, fetchSessions, type SessionInfo } from '@/sessions';
 import { fetchShells, type ShellInfo } from '@/shells';
 import { openExternalUrl } from '@/open-external-url';
 import { ShellSelectionPanel } from '@/components/ShellSelectionPanel';
@@ -124,10 +124,10 @@ export function App() {
   // The session on screen rang its bell or sent a notification; cleared when
   // the user types into it or switches session.
   const [currentSessionAlerted, setCurrentSessionAlerted] = useState(false);
-  const [pendingShellSelection, setPendingShellSelection] = useState<boolean>(() => getLastSessionId() === null);
+  const [pendingShellSelection, setPendingShellSelection] = useState<boolean>(() => getInitialSessionId() === null);
   // When there's no stored session ID, we must check for alive sessions on the server before
   // showing the shell selection UI — otherwise we'd force shell selection even if sessions exist.
-  const [initialCheckComplete, setInitialCheckComplete] = useState(() => getLastSessionId() !== null);
+  const [initialCheckComplete, setInitialCheckComplete] = useState(() => getInitialSessionId() !== null);
   const [initialShellName, setInitialShellName] = useState<string | undefined>();
   const [initialShells, setInitialShells] = useState<ShellInfo[]>([]);
   const [editorOpen, setEditorOpen] = useState(false);
@@ -206,10 +206,11 @@ export function App() {
   }, [clearInFlight, setActiveView]);
   const softkeyBarRef = useRef<SoftkeyBarHandle>(null);
 
-  // Keep ref in sync and clear alerts for newly-active session
+  // Keep ref and address bar in sync, and clear alerts for newly-active session
   useEffect(() => {
     currentSessionIdRef.current = currentSessionId;
     if (currentSessionId) {
+      syncSessionUrl(currentSessionId);
       setAlertedSessionIds(prev => {
         if (!prev.has(currentSessionId)) return prev;
         const next = new Set(prev);
@@ -317,7 +318,7 @@ export function App() {
   useEffect(() => {
     refreshSessions()
       .then(list => {
-        if (getLastSessionId() === null && list.some(s => s.alive)) {
+        if (getInitialSessionId() === null && list.some(s => s.alive)) {
           setPendingShellSelection(false);
           setSessionPanelOpen(true);
         }
@@ -452,7 +453,7 @@ export function App() {
         unicodeVersion: '11',
       },
       termOptions: defaultTermOptions,
-      sessionId: getLastSessionId() ?? undefined,
+      sessionId: getInitialSessionId() ?? undefined,
       shellName: initialShellName,
     };
     // Recompute when initialShellName becomes available (new-user shell selection)
@@ -513,6 +514,7 @@ export function App() {
     },
     onSessionNotFound: () => {
       clearLastSessionId();
+      syncSessionUrl(null);
       setCurrentSessionId(undefined);
       refreshSessions()
         .then((list) => {
@@ -760,12 +762,14 @@ export function App() {
 
   const handleCreateSession = useCallback((shell?: string) => {
     clearLastSessionId();
+    syncSessionUrl(null);
     setCurrentSessionId(undefined);
     terminalRef.current?.core?.switchSession('', shell);
   }, []);
 
   const handleNoSessionsLeft = useCallback(() => {
     clearLastSessionId();
+    syncSessionUrl(null);
     setCurrentSessionId(undefined);
     setSessionPanelOpen(false);
     setInitialShellName(undefined);
