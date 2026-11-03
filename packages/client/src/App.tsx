@@ -572,7 +572,7 @@ export function App() {
     onImagePasteError: (error: ImagePasteErrorInfo) => {
       setImagePasteError(error);
     },
-    onConnectionClosed: (reason: ConnectionClosedReason) => {
+    onConnectionClosedChange: (reason: ConnectionClosedReason | null) => {
       setConnectionClosedReason(reason);
     },
     onConnectingSlow: () => setConnectingSlow(true),
@@ -847,7 +847,6 @@ export function App() {
   const activeView = views.find(v => v.viewId === activeViewId);
 
   const handleReconnect = useCallback(() => {
-    setConnectionClosedReason(null);
     terminalRef.current?.core?.reconnect();
     terminalRef.current?.core?.focus();
   }, []);
@@ -873,6 +872,18 @@ export function App() {
             gestureMapping={gestureMapping}
             customKeyMap={customKeyMap}
           />
+        )}
+
+        {/* Session-scoped: covers only the terminal (below the viewer, editor
+            and session panel, all z-50), so switching sessions keeps working.
+            The core re-reports the state on each session switch. */}
+        {!pendingShellSelection && connectionClosedReason !== null && (
+          <Suspense fallback={null}>
+            <ConnectionClosedDialog
+              reason={connectionClosedReason}
+              onReconnect={handleReconnect}
+            />
+          </Suspense>
         )}
 
         {/* Before the editor: both are `absolute inset-0 z-50`, so an edit
@@ -1025,15 +1036,6 @@ export function App() {
           <ImagePasteErrorDialog
             error={imagePasteError}
             onClose={() => setImagePasteError(null)}
-          />
-        </Suspense>
-      )}
-
-      {connectionClosedReason !== null && (
-        <Suspense fallback={null}>
-          <ConnectionClosedDialog
-            reason={connectionClosedReason}
-            onReconnect={handleReconnect}
           />
         </Suspense>
       )}

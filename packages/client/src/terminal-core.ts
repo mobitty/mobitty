@@ -140,7 +140,11 @@ export interface TerminalCoreCallbacks {
   onSessionInfo?: (info: SessionInfo) => void;
   onSessionDied?: (sessionId: string) => void;
   onSessionNotFound?: () => void;
-  onConnectionClosed?: (reason: ConnectionClosedReason) => void;
+  /** Closed state of the *current* session's connection changed. Non-null
+   *  when it closed without auto-reconnect (or the user switched to a session
+   *  another client took over); null once a connect attempt starts. Scoped to
+   *  the session being shown, so the UI should block only the terminal area. */
+  onConnectionClosedChange?: (reason: ConnectionClosedReason | null) => void;
   /** Connect / reconnect has been pending long enough that we should warn
    *  the user to check VPN / server / host. Cleared via onConnected. */
   onConnectingSlow?: () => void;
@@ -214,6 +218,13 @@ export class TerminalCore {
    *  for a session deleted meanwhile — the switch still connects. */
   private switching = false;
   private closeOnDisconnect = false;
+  /** Closed state of the session currently shown (see onConnectionClosedChange).
+   *  `undefined` until first reported, so a fresh core always syncs the UI. */
+  private closedReason: ConnectionClosedReason | null | undefined = undefined;
+  /** Sessions another client took over (close code 4003). Switching back to one
+   *  does not connect — that would silently steal it back — but shows the
+   *  replaced state again until the user explicitly reconnects. */
+  private replacedSessions = new Set<string>();
   private reconnectDelay = 0;
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private connectTimer?: ReturnType<typeof setTimeout>;
@@ -645,6 +656,7 @@ export class TerminalCore {
       this.socket = undefined;
     }
 
+    this.setClosedReason(null);
     this.socket = new WebSocket(this.options.wsUrl, ['tty']);
     const { socket } = this;
     this.callbacks.onReconnectScheduled?.(null);
@@ -681,6 +693,7 @@ export class TerminalCore {
   /** Manual reconnect — called by the React UI when user clicks Reconnect. */
   reconnect() {
     this.logger.info('manual reconnect');
+    if (this.options.sessionId) this.replacedSessions.delete(this.options.sessionId);
     this.doReconnect = true;
     this.reconnectDelay = 0;
     this.idleDisconnected = false;
@@ -705,6 +718,14 @@ export class TerminalCore {
     this.options.sessionId = sessionId;
     this.options.shellName = shellName;
     this.doReconnect = true;
+    if (sessionId && this.replacedSessions.has(sessionId)) {
+      // Taken over by another client: park on it without connecting and show
+      // its replaced state; the user reconnects explicitly.
+      this.logger.info('switched to replaced session, not connecting', { sessionId });
+      this.detachSocket();
+      this.setClosedReason('replaced');
+      return;
+    }
     if (this.socket?.readyState === WebSocket.OPEN || this.socket?.readyState === WebSocket.CONNECTING) {
       this.switching = true;
       this.socket.close(4001, 'Switching session');
@@ -725,6 +746,29 @@ export class TerminalCore {
     this.ownAlert = alerted;
     document.title = markTitle(this.shownTitle, alerted);
     this.callbacks.onOwnAlertChange?.(alerted);
+  }
+
+  /** Drop the current socket without triggering any close handling
+   *  (no auto-reconnect, no dialogs). */
+  private detachSocket() {
+    const prev = this.socket;
+    this.dispose();
+    this.socket = undefined;
+    if (prev && (prev.readyState === WebSocket.CONNECTING || prev.readyState === WebSocket.OPEN)) {
+      prev.close();
+    }
+    if (this.slowConnectTimer !== undefined) {
+      clearTimeout(this.slowConnectTimer);
+      this.slowConnectTimer = undefined;
+    }
+    this.overlayAddon.hideOverlay();
+    this.callbacks.onReconnectScheduled?.(null);
+  }
+
+  private setClosedReason(reason: ConnectionClosedReason | null) {
+    if (this.closedReason === reason) return;
+    this.closedReason = reason;
+    this.callbacks.onConnectionClosedChange?.(reason);
   }
 
   sendData(data: string | Uint8Array) {
@@ -1970,7 +2014,8 @@ export class TerminalCore {
     if (event.code === 4003) {
       // Connection replaced by another client — do not reconnect
       this.logger.info('replaced by another client, showing closed dialog');
-      this.callbacks.onConnectionClosed?.('replaced');
+      if (this.options.sessionId) this.replacedSessions.add(this.options.sessionId);
+      this.setClosedReason('replaced');
       return;
     }
 
@@ -1992,7 +2037,8 @@ export class TerminalCore {
       this.logger.info('connection closed, closing window');
       window.close();
       // window.close() may be a no-op — show dialog as fallback
-      setTimeout(() => this.callbacks.onConnectionClosed?.('closed'), 200);
+      const closed = this.socket;
+      setTimeout(() => { if (this.socket === closed) this.setClosedReason('closed'); }, 200);
       return;
     }
 
@@ -2002,7 +2048,7 @@ export class TerminalCore {
       this.scheduleReconnect();
     } else {
       this.logger.info('connection closed, showing closed dialog');
-      this.callbacks.onConnectionClosed?.('closed');
+      this.setClosedReason('closed');
     }
   }
 
