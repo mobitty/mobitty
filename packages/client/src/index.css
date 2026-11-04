@@ -260,6 +260,12 @@ html, body {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
+/* Wrap off: long lines scroll sideways. On the textarea and the mirror alike,
+   so their columns stay in step; the mirror follows scrollLeft. */
+.md-metrics.md-nowrap {
+  white-space: pre;
+  overflow-wrap: normal;
+}
 .md-mirror {
   /* The textarea's scrollbar (if it takes layout space) narrows its content
      box; MarkdownMirror publishes its width so the pre wraps at the same

@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useLayoutEffect, useCallback, useMemo } fr
 import { flushSync } from 'react-dom';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { Save, X, Minimize2, History, SpellCheck, Hash, WandSparkles, LoaderCircle } from 'lucide-react';
+import { Save, X, Minimize2, History, SpellCheck, Hash, WandSparkles, LoaderCircle, WrapText } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { autocorrectAttrs } from '@/lib/autocorrect';
 import { useShakeToUndoOnFocus } from '@/hooks/use-shake-to-undo-on-focus';
@@ -87,6 +87,8 @@ export function RemoteEditorPanel({
   /** The header toggle's choice, overriding detection until the next open. */
   const [mdOverride, setMdOverride] = useState<boolean | null>(null);
   const [formatting, setFormatting] = useState(false);
+  /** Soft-wrap long lines; back on with every open. */
+  const [wrap, setWrap] = useState(true);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   /** The same element as state, so the mirror's effects run once it is attached:
    *  the mirror renders first, and a ref is not set yet when its effects run. */
@@ -132,6 +134,7 @@ export function RemoteEditorPanel({
     // Ctrl+G prompt files don't end in .md, so the content decides too.
     setMdDetected(openKey !== null && (isMarkdownFileName(filePath) || looksLikeMarkdown(initial)));
     setMdOverride(null);
+    setWrap(true);
     // A history list left up when the last edit ended must not be what the
     // next one opens into.
     setHistoryOpen(false);
@@ -149,10 +152,17 @@ export function RemoteEditorPanel({
   // effect — a layout one, for the same reason the ack is: the passive queue
   // is not something a blocked PTY should wait on. The timeout defers the
   // focus past the commit, which mobile WebKit needs to raise the keyboard.
+  // The caret starts at the end of the text, scrolled into view: what gets
+  // edited is usually a prompt being appended to.
   useLayoutEffect(() => {
     if (openKey === null) return;
     const id = setTimeout(() => {
-      textareaRef.current?.focus({ preventScroll: true });
+      const ta = textareaRef.current;
+      if (!ta) return;
+      ta.focus({ preventScroll: true });
+      const end = ta.value.length;
+      ta.setSelectionRange(end, end);
+      ta.scrollTop = ta.scrollHeight;
     }, 0);
     return () => clearTimeout(id);
   }, [openKey]);
@@ -337,6 +347,25 @@ export function RemoteEditorPanel({
             variant="ghost"
             size="icon-sm"
             className={cn(
+              wrap
+                ? 'text-foreground bg-accent'
+                : 'text-muted-foreground hover:text-foreground',
+            )}
+            onClick={() => setWrap(!wrap)}
+            onPointerDown={e => e.preventDefault()}
+            tabIndex={-1}
+            aria-pressed={wrap}
+            aria-label={wrap ? 'Wrap on' : 'Wrap off'}
+            title={wrap ? 'Wrap on' : 'Wrap off'}
+          >
+            <WrapText className="h-4 w-4" />
+          </Button>
+        )}
+        {!isImage && (
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            className={cn(
               markdownMode
                 ? 'text-foreground bg-accent'
                 : 'text-muted-foreground hover:text-foreground',
@@ -435,13 +464,15 @@ export function RemoteEditorPanel({
         // the textarea — that would drop its undo history and the focus
         // listeners shake-to-undo hangs off it.
         <div className="relative flex-1 min-h-0">
-          {markdownMode && <MarkdownMirror text={draft} textarea={textareaEl} />}
+          {markdownMode && <MarkdownMirror text={draft} textarea={textareaEl} wrap={wrap} />}
           <textarea
             ref={attachTextarea}
             className={cn(
               'md-metrics absolute inset-0 h-full w-full font-mono text-sm resize-none outline-none',
               markdownMode ? 'md-input' : 'bg-background text-foreground',
+              !wrap && 'md-nowrap',
             )}
+            wrap={wrap ? 'soft' : 'off'}
             value={draft}
             onChange={(e) => applyText(e.target.value)}
             onPaste={(e) => {

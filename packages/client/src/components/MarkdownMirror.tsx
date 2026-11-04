@@ -1,5 +1,6 @@
 import { useLayoutEffect, useRef } from 'react';
 import { highlightMarkdown } from '@/markdown-syntax';
+import { cn } from '@/lib/utils';
 
 /** The newline that ends line i-1 is carried at the start of line i's span, so
  *  a line's DOM never depends on whether it happens to be the last one. */
@@ -40,6 +41,8 @@ interface MarkdownMirrorProps {
   text: string;
   /** The textarea it mirrors; null until mounted. */
   textarea: HTMLTextAreaElement | null;
+  /** Must match the textarea's wrap setting, or the lines drift apart. */
+  wrap: boolean;
 }
 
 /**
@@ -49,7 +52,7 @@ interface MarkdownMirrorProps {
  * `md-metrics` class, so they wrap identically; this component keeps the rest
  * in step — scroll position and the textarea's scrollbar width.
  */
-export function MarkdownMirror({ text, textarea }: MarkdownMirrorProps) {
+export function MarkdownMirror({ text, textarea, wrap }: MarkdownMirrorProps) {
   const preRef = useRef<HTMLPreElement>(null);
   const linesRef = useRef<string[]>([]);
   const sentinelRef = useRef<Text | null>(null);
@@ -99,13 +102,16 @@ export function MarkdownMirror({ text, textarea }: MarkdownMirrorProps) {
       pre.scrollTop = ta.scrollTop;
       pre.scrollLeft = ta.scrollLeft;
     }
-  }, [text, textarea]);
+  }, [text, textarea, wrap]);
 
   return (
     <pre
       ref={preRef}
       aria-hidden
-      className="md-metrics md-mirror font-mono text-sm absolute inset-0 overflow-hidden pointer-events-none select-none text-foreground"
+      className={cn(
+        'md-metrics md-mirror font-mono text-sm absolute inset-0 overflow-hidden pointer-events-none select-none text-foreground',
+        !wrap && 'md-nowrap',
+      )}
     />
   );
 }
