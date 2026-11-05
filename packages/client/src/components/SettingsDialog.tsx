@@ -32,6 +32,40 @@ import { fetchThemeList, fetchTheme, saveTheme, deleteTheme, isBuiltinTheme, get
 import { fetchShells, saveShell, deleteShell, rediscoverShells, type ShellInfo } from '@/shells';
 import { FONT_OPTIONS, CUSTOM_FONT_VALUE, findFontOption, loadFont } from '@/fonts';
 import { cn } from '@/lib/utils';
+import { declaredCapabilities } from '@/app-softkey-bar';
+
+type SettingsSection = 'profile' | 'shells' | 'about';
+
+function isSettingsSection(v: string): v is SettingsSection {
+  return v === 'profile' || v === 'shells' || v === 'about';
+}
+
+function AboutRow({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex items-center gap-2">
+      <Label className="min-w-[100px] text-xs text-muted-foreground">{label}</Label>
+      <span className="text-sm font-mono break-all">{value}</span>
+    </div>
+  );
+}
+
+/// Versions and capabilities of both sides, so a support question can start
+/// from them (docs/todo-design-ios-web-compat.md).
+function AboutSection() {
+  const bridge = getNativeBridge();
+  return (
+    <div className="space-y-2">
+      <AboutRow label="Server" value={`mobitty ${__MOBITTY_SERVER_VERSION__}`} />
+      {bridge && (
+        <>
+          <AboutRow label="iOS app" value={bridge.appVersion ?? 'older than 1.2.0'} />
+          <AboutRow label="App features" value={declaredCapabilities(bridge).join(', ') || 'none'} />
+          <AboutRow label="Web features" value="appSoftkeyBar" />
+        </>
+      )}
+    </div>
+  );
+}
 
 function FieldError({ error }: { error: string | undefined }) {
   if (!error) return null;
@@ -162,7 +196,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
   const [shellEditing, setShellEditing] = useState<string | null>(null);
 
   // Top-level section toggle
-  const [settingsSection, setSettingsSection] = useState<'profile' | 'shells'>('profile');
+  const [settingsSection, setSettingsSection] = useState<SettingsSection>('profile');
 
   const editingProfileName = editingDevice === 'desktop' ? desktopProfileName : mobileProfileName;
   const isDefaultProfile = DEFAULT_PROFILE_NAMES.has(editingProfileName);
@@ -566,10 +600,11 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
         <Separator className="mb-4" />
 
         {/* Top-level section tabs */}
-        <Tabs value={settingsSection} onValueChange={v => setSettingsSection(v as 'profile' | 'shells')} className="mb-4">
+        <Tabs value={settingsSection} onValueChange={v => { if (isSettingsSection(v)) setSettingsSection(v); }} className="mb-4">
           <TabsList>
             <TabsTrigger value="profile">Profile</TabsTrigger>
             <TabsTrigger value="shells">Shells</TabsTrigger>
+            <TabsTrigger value="about">About</TabsTrigger>
           </TabsList>
         </Tabs>
 
@@ -1076,6 +1111,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
             </Button>
           </div>
         )}
+        {settingsSection === 'about' && <AboutSection />}
       </div>
 
       {/* Footer */}
