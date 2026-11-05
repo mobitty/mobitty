@@ -102,7 +102,50 @@ async function writeClipboardLinux(tempPath: string, mime: string): Promise<void
   await execFileWithStdin('xclip', ['-selection', 'clipboard', '-t', mime, '-i'], imageData);
 }
 
-export async function writeImageToSystemClipboard(imageData: Buffer, mimeType: string): Promise<ClipboardWriteResult> {
+// Read-back checks. A write tool can exit 0 without the image reaching a
+// pasteboard any program can read (e.g. osascript on a Mac with no GUI login).
+// So success means "an image is on the clipboard now", not "the tool exited 0";
+// anything else counts as failure and the caller falls back to a file.
+// See docs/done-bug-image-paste-headless-mac.md.
+
+async function clipboardHasImageWindows(): Promise<boolean> {
+  const { stdout } = await execFilePromise('powershell', [
+    '-NoProfile', '-NonInteractive', '-Command',
+    'Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Clipboard]::ContainsImage()',
+  ]);
+  return /true/i.test(stdout);
+}
+
+async function clipboardHasImageDarwin(): Promise<boolean> {
+  // e.g. "«class PNGf», 1234, TIFF picture, 5678"; empty when nothing is there.
+  const { stdout } = await execFilePromise('osascript', ['-e', 'clipboard info']);
+  return /PNGf|TIFF/.test(stdout);
+}
+
+async function clipboardHasImageLinux(): Promise<boolean> {
+  const { stdout } = await execFilePromise('xclip', ['-selection', 'clipboard', '-t', 'TARGETS', '-o']);
+  return /^image\//m.test(stdout);
+}
+
+/** Platform clipboard operations, injectable for tests. */
+export interface ClipboardBackend {
+  write(tempPath: string, mimeType: string): Promise<void>;
+  hasImage(): Promise<boolean>;
+}
+
+function platformBackend(): ClipboardBackend {
+  switch (process.platform) {
+    case 'win32': return { write: (p) => writeClipboardWindows(p), hasImage: clipboardHasImageWindows };
+    case 'darwin': return { write: writeClipboardDarwin, hasImage: clipboardHasImageDarwin };
+    default: return { write: writeClipboardLinux, hasImage: clipboardHasImageLinux };
+  }
+}
+
+export async function writeImageToSystemClipboard(
+  imageData: Buffer,
+  mimeType: string,
+  backend: ClipboardBackend = platformBackend(),
+): Promise<ClipboardWriteResult> {
   if (!ALLOWED_MIME_TYPES.has(mimeType)) {
     return { success: false, error: `Unsupported MIME type: ${mimeType}` };
   }
@@ -121,15 +164,10 @@ export async function writeImageToSystemClipboard(imageData: Buffer, mimeType: s
   try {
     await writeFile(tempPath, imageData, { mode: 0o600 });
 
-    const platform = process.platform;
-    if (platform === 'win32') {
-      await writeClipboardWindows(tempPath);
-    } else if (platform === 'darwin') {
-      await writeClipboardDarwin(tempPath, mimeType);
-    } else {
-      await writeClipboardLinux(tempPath, mimeType);
+    await backend.write(tempPath, mimeType);
+    if (!(await backend.hasImage())) {
+      return { success: false, error: 'Clipboard write reported success, but no image could be read back' };
     }
-
     return { success: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);

@@ -48,6 +48,46 @@ describe('writeImageToSystemClipboard', () => {
     });
   });
 
+  describe('read-back', () => {
+    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47]);
+
+    it('fails when the write succeeds but no image can be read back', async () => {
+      const result = await writeImageToSystemClipboard(png, 'image/png', {
+        write: async () => {},
+        hasImage: async () => false,
+      });
+      assert.equal(result.success, false);
+      assert.ok(result.error?.includes('read back'));
+    });
+
+    it('fails when the read-back check itself errors', async () => {
+      const result = await writeImageToSystemClipboard(png, 'image/png', {
+        write: async () => {},
+        hasImage: async () => { throw new Error('xclip: not found'); },
+      });
+      assert.equal(result.success, false);
+      assert.ok(result.error?.includes('xclip'));
+    });
+
+    it('succeeds when the image is read back', async () => {
+      const result = await writeImageToSystemClipboard(png, 'image/png', {
+        write: async () => {},
+        hasImage: async () => true,
+      });
+      assert.deepEqual(result, { success: true });
+    });
+
+    it('does not check read-back when the write fails', async () => {
+      let checked = false;
+      const result = await writeImageToSystemClipboard(png, 'image/png', {
+        write: async () => { throw new Error('write failed'); },
+        hasImage: async () => { checked = true; return true; },
+      });
+      assert.equal(result.success, false);
+      assert.equal(checked, false);
+    });
+  });
+
   describe('ALLOWED_MIME_TYPES', () => {
     it('includes common image formats', () => {
       assert.ok(ALLOWED_MIME_TYPES.has('image/png'));
