@@ -24,6 +24,7 @@ import {
 import { ClientLogger } from './client-logger';
 import type { SessionInfo } from './sessions';
 import { findFontOption, loadFont } from './fonts';
+import { cellSize, swapAndRefit } from './renderer-fit';
 import { openExternalUrl } from './open-external-url';
 import { getNativeBridge } from './native-bridge';
 import { BROWSER_CAPABILITIES, isTypedInput, markTitle } from './session-alert';
@@ -581,6 +582,10 @@ export class TerminalCore {
     this.registerMouseEncodingLogging();
     this.registerKittyFlagsObserver();
     this.syncPageBackground();
+    // Load the requested renderer before the first fit: WebGL cells are
+    // narrower than DOM ones (renderer-fit.ts), so fitting with the DOM
+    // renderer first sizes the handshake's grid for the wrong renderer.
+    this.setRendererType(this.options.clientOptions.rendererType === 'webgl' ? 'webgl' : 'dom');
     fitAddon.fit();
 
     const observer = new ResizeObserver(() => {
@@ -2423,10 +2428,21 @@ export class TerminalCore {
   }
 
   private applyRendererType(value: RendererType) {
-    const { terminal } = this;
     const before: RendererType = this.webglAddon ? 'webgl' : 'dom';
-    const disposeWebgl = () => { try { this.webglAddon?.dispose(); } catch { /* */ } this.webglAddon = undefined; };
+    this.swapRenderer(() => this.loadRenderer(value));
+    const after: RendererType = this.webglAddon ? 'webgl' : 'dom';
+    if (before !== after) this.logger.info('renderer-change', { from: before, to: after, requested: value });
+    this.logger.debug('renderer-applied', this.getRenderDiagnostics(value));
+  }
 
+  /** Swap renderers and refit when the swap changed the cell size. */
+  private swapRenderer(swap: () => void) {
+    swapAndRefit(() => cellSize(this.terminal.dimensions), swap, () => this.fitAddon.fit());
+  }
+
+  private loadRenderer(value: RendererType) {
+    const { terminal } = this;
+    const disposeWebgl = () => { try { this.webglAddon?.dispose(); } catch { /* */ } this.webglAddon = undefined; };
     switch (value) {
       case 'webgl':
         if (this.webglAddon) return;
@@ -2434,8 +2450,7 @@ export class TerminalCore {
         try {
           this.webglAddon.onContextLoss(() => {
             this.logger.warn('webgl-context-loss', this.getRenderDiagnostics('context-loss'));
-            this.webglAddon?.dispose();
-            this.webglAddon = undefined;
+            this.swapRenderer(() => { this.webglAddon?.dispose(); this.webglAddon = undefined; });
           });
           terminal.loadAddon(this.webglAddon);
           void this.scheduleAtlasClear();
@@ -2445,9 +2460,6 @@ export class TerminalCore {
         disposeWebgl();
         break;
     }
-    const after: RendererType = this.webglAddon ? 'webgl' : 'dom';
-    if (before !== after) this.logger.info('renderer-change', { from: before, to: after, requested: value });
-    this.logger.debug('renderer-applied', this.getRenderDiagnostics(value));
   }
 
   /** Capture renderer + font state for diagnosing font-rendering issues. */
