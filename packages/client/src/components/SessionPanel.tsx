@@ -356,7 +356,9 @@ export function SessionPanel({ open, closable = true, hotkeys = true, onClose, s
           </>
         ) : (
           <>
-        <div className="flex gap-2 items-center">
+        {/* Wraps in a narrow dock (the iPhone Duo's ~380 pt pane B); Edit's
+            ml-auto keeps it at the right edge, on the first row or its own. */}
+        <div className="flex flex-wrap gap-2 items-center">
           {isNativeApp() && (
             <Button variant="outline" size="sm" onClick={() => {
               onClose();
@@ -371,8 +373,8 @@ export function SessionPanel({ open, closable = true, hotkeys = true, onClose, s
           <Button variant="outline" size="sm" onClick={() => { onClose(); onSettingsOpen(); }}>
             <Settings className="size-4" /> Settings
           </Button>
-          <div className="flex-1" />
           <Button
+            className="ml-auto"
             variant={editMode ? "default" : "outline"}
             size="sm"
             onClick={() => setEditMode(prev => !prev)}
