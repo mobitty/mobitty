@@ -130,6 +130,8 @@ export interface AppSoftkeyBarInput {
   batchInputOpen: boolean;
   hasAlerts: boolean;
   hidden: boolean;
+  /** The profile's `sessionSwitcherHotkey` ('' = none), for the app's settings hint. */
+  sessionHotkey: string;
 }
 
 function keyState(spec: KeySpec, input: AppSoftkeyBarInput): AppSoftkeyState | undefined {
@@ -179,6 +181,7 @@ export function buildSoftkeyBarPayload(input: AppSoftkeyBarInput): SoftkeyBarPay
     keys: input.pages.flat().map(id => appSoftkey(id, input)),
     sessionsBadge: input.hasAlerts,
     hidden: input.hidden,
+    sessionHotkey: input.sessionHotkey,
   };
 }
 

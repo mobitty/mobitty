@@ -56,6 +56,8 @@ interface SoftkeyBarProps {
   /// The web would hide its bar (hide rule in App). Only consulted with
   /// `appBar`; without it App unmounts the bar instead.
   hidden?: boolean;
+  /// The profile's session switcher hotkey, passed to the app's bar.
+  sessionHotkey?: string;
 }
 
 // --- InlineInput sub-component ---
@@ -144,7 +146,7 @@ function InlineInput({ softkeySize, autocorrect, onAutocorrectToggle, onSubmit, 
 // --- SoftkeyBar ---
 
 export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
-  function SoftkeyBar({ pages, customKeys, containers, activeContainerId, batchInputOpen, softkeySize = 44, hasAlerts, isMobile, isNativeApp, autocorrect, onAutocorrectToggle, onSessionsOpen, onMeterToggle, onAction, onPaste, onFileUpload, onBatchInputToggle, onBatchSubmit, onContainerToggle, onKeepFocus, onModifiersChange, appBar = false, hidden = false }, ref) {
+  function SoftkeyBar({ pages, customKeys, containers, activeContainerId, batchInputOpen, softkeySize = 44, hasAlerts, isMobile, isNativeApp, autocorrect, onAutocorrectToggle, onSessionsOpen, onMeterToggle, onAction, onPaste, onFileUpload, onBatchInputToggle, onBatchSubmit, onContainerToggle, onKeepFocus, onModifiersChange, appBar = false, hidden = false, sessionHotkey = '' }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     useBackdropColorSync(containerRef);
     const [currentPage, setCurrentPage] = useState(0);
@@ -383,8 +385,9 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
         batchInputOpen: batchInputOpen ?? false,
         hasAlerts: hasAlerts ?? false,
         hidden,
+        sessionHotkey,
       }));
-    }, [appBar, sendAppBar, pages, customKeyMap, containers, modifiers, activeContainerId, batchInputOpen, hasAlerts, hidden]);
+    }, [appBar, sendAppBar, pages, customKeyMap, containers, modifiers, activeContainerId, batchInputOpen, hasAlerts, hidden, sessionHotkey]);
 
     const handleKeyPress = useCallback((keySpec: KeySpec) => {
       runKeyBehavior(keySpec.behavior, keySpec.consumesModifiers);

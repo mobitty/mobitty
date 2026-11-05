@@ -59,6 +59,10 @@ export interface SoftkeyBarPayload {
   sessionsBadge: boolean;
   /// True when the web would hide its own bar; the app draws nothing.
   hidden: boolean;
+  /// The profile's session switcher hotkey as written in the profile
+  /// (e.g. 'Ctrl+Shift+q'), '' when none. The app names it in its
+  /// settings, the way to the session list when its bar is hidden.
+  sessionHotkey: string;
 }
 
 export interface MobittyNativeBridge {

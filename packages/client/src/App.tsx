@@ -1053,6 +1053,7 @@ export function App() {
           onModifiersChange={setModifiers}
           appBar={appSoftkeyBar}
           hidden={!webSoftkeyBarVisible}
+          sessionHotkey={profile?.sessionSwitcherHotkey ?? ''}
         />
       )}
 

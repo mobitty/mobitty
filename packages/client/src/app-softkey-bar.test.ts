@@ -26,6 +26,7 @@ function defaultInput(overrides: Partial<AppSoftkeyBarInput> = {}): AppSoftkeyBa
     batchInputOpen: false,
     hasAlerts: false,
     hidden: false,
+    sessionHotkey: 'Ctrl+Shift+q',
     ...overrides,
   };
 }
@@ -57,6 +58,7 @@ describe('buildSoftkeyBarPayload', () => {
       ],
       sessionsBadge: false,
       hidden: false,
+      sessionHotkey: 'Ctrl+Shift+q',
     });
   });
 
@@ -99,6 +101,11 @@ describe('buildSoftkeyBarPayload', () => {
 
   it('shows the alert badge', () => {
     assert.equal(buildSoftkeyBarPayload(defaultInput({ hasAlerts: true })).sessionsBadge, true);
+  });
+
+  it('passes the profile session hotkey through, empty when none', () => {
+    assert.equal(buildSoftkeyBarPayload(defaultInput({ sessionHotkey: 'Ctrl+Shift+s' })).sessionHotkey, 'Ctrl+Shift+s');
+    assert.equal(buildSoftkeyBarPayload(defaultInput({ sessionHotkey: '' })).sessionHotkey, '');
   });
 
   it('passes the hidden rule through and keeps the keys', () => {
