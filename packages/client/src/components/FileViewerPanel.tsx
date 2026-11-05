@@ -22,6 +22,7 @@ import { ZoomableImage } from '@/file-viewer/ZoomableImage';
 import { AudioView } from '@/file-viewer/AudioView';
 import type { ViewerFileCache } from '@/file-viewer/cache';
 import type { ViewerFilePayload, ViewerOpenPayload } from '@/file-viewer/types';
+import { useDuoDock } from '@/hooks/use-screen-pose';
 
 const MarkdownView = lazy(() => import('@/file-viewer/MarkdownView'));
 
@@ -67,6 +68,7 @@ export interface FileViewerPanelProps {
 export default function FileViewerPanel({
   open, active, view, files, filesVersion, tabs, onRequestFile: requestFile, onEdit: edit, onHide, onClose: closeView,
 }: FileViewerPanelProps) {
+  const duoDock = useDuoDock('viewer');
   const viewId = view.viewId;
   const onRequestFile = useCallback((path: string) => requestFile(viewId, path), [requestFile, viewId]);
   const onEdit = useCallback((path: string) => edit(viewId, path), [edit, viewId]);
@@ -177,7 +179,7 @@ export default function FileViewerPanel({
 
   if (isDesktop) {
     return (
-      <div className="absolute inset-0 z-50 bg-background text-foreground flex flex-col">
+      <div data-duo-dock={duoDock} className="absolute inset-0 z-50 bg-background text-foreground flex flex-col">
         <TabStrip tabs={tabs} onClose={closeView} desktop />
         <div className="shrink-0 flex items-center gap-2 px-3 py-2 border-b border-border">
           <Button variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-foreground"
@@ -225,7 +227,7 @@ export default function FileViewerPanel({
   if (mobilePane === 'list' && view.isDir) {
     const dir = findDir(tree, mobileDir) ?? tree;
     return (
-      <div className="absolute inset-0 z-50 bg-background text-foreground flex flex-col">
+      <div data-duo-dock={duoDock} className="absolute inset-0 z-50 bg-background text-foreground flex flex-col">
         <TabStrip tabs={tabs} onClose={closeView} />
         <div className="shrink-0 flex items-center gap-1 px-1 py-1 border-b border-border">
           {dir.path !== '' ? (
@@ -251,7 +253,7 @@ export default function FileViewerPanel({
   }
 
   return (
-    <div className="absolute inset-0 z-50 bg-background text-foreground flex flex-col">
+    <div data-duo-dock={duoDock} className="absolute inset-0 z-50 bg-background text-foreground flex flex-col">
       <TabStrip tabs={tabs} onClose={closeView} />
       <div className="shrink-0 flex items-center gap-0.5 px-1 py-1 border-b border-border">
         {view.isDir ? (

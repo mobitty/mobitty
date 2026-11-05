@@ -1,7 +1,8 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  applyDuoRootState, dockRect, duoRootState, panelDock, parseScreenPose,
+  applyDuoDockVars, applyDuoRootState, dockAttr, dockRect, DUO_DOCK_VARS, duoDockVars, duoRootState,
+  MIN_DOCK_HEIGHT, panelDock, parseScreenPose,
   type DuoDock, type DuoPanel, type DuoRootTarget,
 } from './screen-pose.ts';
 import type { DuoShape, ScreenPosePayload } from './native-bridge.ts';
@@ -232,5 +233,84 @@ describe('dockRect', () => {
   it('tall: a frame ending above the pane gives zero height', () => {
     const frame = { left: 0, top: 0, width: 669, height: 450 };
     assert.equal(dockRect(TALL_FLAT, 'paneB', frame).height, 0);
+  });
+});
+
+describe('dockAttr', () => {
+  it('maps panes to a/b and full to no attribute', () => {
+    assert.equal(dockAttr('paneA'), 'a');
+    assert.equal(dockAttr('paneB'), 'b');
+    assert.equal(dockAttr('full'), undefined);
+  });
+
+  it('per pose, as the panels see it', () => {
+    assert.equal(dockAttr(panelDock(WIDE_FLAT, 'sessions')), 'b');
+    assert.equal(dockAttr(panelDock(WIDE_FLAT, 'editor')), 'b');
+    assert.equal(dockAttr(panelDock(TALL_FLAT, 'input')), 'a');
+    assert.equal(dockAttr(panelDock(TALL_FLAT, 'viewer')), 'b');
+    assert.equal(dockAttr(panelDock(COLUMN, 'settings')), undefined);
+    assert.equal(dockAttr(panelDock(null, 'shell')), undefined);
+  });
+});
+
+describe('duoDockVars', () => {
+  it('empty off the Duo and closed', () => {
+    const frame = { left: 0, top: 0, width: 382, height: 644 };
+    assert.deepEqual(duoDockVars(null, frame), {});
+    assert.deepEqual(duoDockVars(COLUMN, frame), {});
+    assert.deepEqual(duoDockVars(COLUMN_TURNED, frame), {});
+  });
+
+  it('wide flat, keyboard up (frame ends at 405): both panes, full frame height', () => {
+    const vars = duoDockVars(WIDE_FLAT, { left: 0, top: 0, width: 867, height: 405 });
+    assert.deepEqual(vars, {
+      '--duo-dock-a-left': '0px', '--duo-dock-a-top': '0px', '--duo-dock-a-width': '463.5px', '--duo-dock-a-height': '405px',
+      '--duo-dock-b-left': '487.5px', '--duo-dock-b-top': '0px', '--duo-dock-b-width': '379.5px', '--duo-dock-b-height': '405px',
+    });
+  });
+
+  it('book: pane B narrows past the wider gutter', () => {
+    const vars = duoDockVars(BOOK, { left: 0, top: 0, width: 867, height: 635 });
+    assert.equal(vars['--duo-dock-b-left'], '503.5px');
+    assert.equal(vars['--duo-dock-b-width'], '363.5px');
+    assert.equal(vars['--duo-dock-a-width'], '447.5px');
+  });
+
+  it('tall flat below the status strip', () => {
+    const vars = duoDockVars(TALL_FLAT, { left: 0, top: 82, width: 669, height: 835 });
+    assert.equal(vars['--duo-dock-a-top'], '0px');
+    assert.equal(vars['--duo-dock-a-height'], '381.5px');
+    assert.equal(vars['--duo-dock-b-top'], '405.5px');
+    assert.equal(vars['--duo-dock-b-height'], '429.5px');
+  });
+
+  it('tall: a pane cut below MIN_DOCK_HEIGHT falls back to the whole frame', () => {
+    // 601-tall frame from 0: pane B keeps 113.5 (usable).
+    assert.equal(duoDockVars(TALL_FLAT, { left: 0, top: 0, width: 669, height: 601 })['--duo-dock-b-height'], '113.5px');
+    const frame = { left: 0, top: 82, width: 669, height: 450 }; // ends at 532: B would be 44.5
+    assert.ok(532 - 487.5 < MIN_DOCK_HEIGHT);
+    const vars = duoDockVars(TALL_FLAT, frame);
+    assert.equal(vars['--duo-dock-b-top'], '0px');
+    assert.equal(vars['--duo-dock-b-height'], '450px');
+    assert.equal(vars['--duo-dock-a-height'], '381.5px');
+  });
+
+  it('a pose without pane B writes only pane A', () => {
+    const pose = { ...WIDE_FLAT, paneB: null };
+    const vars = duoDockVars(pose, { left: 0, top: 0, width: 867, height: 635 });
+    assert.equal(Object.keys(vars).length, 4);
+    assert.equal(vars['--duo-dock-b-left'], undefined);
+  });
+});
+
+describe('applyDuoDockVars', () => {
+  it('writes the vars and clears them when the Duo closes', () => {
+    const frame = new FakeRoot();
+    frame.style.setProperty('--other', '1');
+    applyDuoDockVars(frame, duoDockVars(WIDE_FLAT, { left: 0, top: 0, width: 867, height: 635 }));
+    assert.equal(frame.props.size, 9);
+    applyDuoDockVars(frame, duoDockVars(COLUMN, { left: 0, top: 0, width: 382, height: 644 }));
+    assert.deepEqual([...frame.props.keys()], ['--other']);
+    assert.equal(DUO_DOCK_VARS.length, 8);
   });
 });

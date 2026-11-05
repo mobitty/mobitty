@@ -16,6 +16,7 @@ import { isNativeApp, getNativeBridge } from '@/native-bridge';
 import { HotkeyHelpOverlay } from '@/components/HotkeyHelpOverlay';
 import { useListDrag } from '@/hooks/use-list-drag';
 import { useSwipeActions, type SwipeOpenSide } from '@/hooks/use-swipe-actions';
+import { useDuoDock } from '@/hooks/use-screen-pose';
 
 interface SessionPanelProps {
   open: boolean;
@@ -46,6 +47,7 @@ function isTypingInPanel(target: EventTarget | null, root: HTMLElement | null): 
 const canOpenTabs = !isNativeApp();
 
 export function SessionPanel({ open, onClose, sessions, onRefreshSessions, currentSessionId, alertedSessionIds, currentSessionAlerted, onSwitchSession, onCreateSession, onSettingsOpen, onNoSessionsLeft, isMobile }: SessionPanelProps) {
+  const duoDock = useDuoDock('sessions');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
   const [status, setStatus] = useState('');
@@ -296,7 +298,7 @@ export function SessionPanel({ open, onClose, sessions, onRefreshSessions, curre
   if (!open) return null;
 
   return (
-    <div ref={panelRef} className="absolute inset-0 z-50 bg-background text-foreground flex flex-col">
+    <div ref={panelRef} data-duo-dock={duoDock} className="absolute inset-0 z-50 bg-background text-foreground flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <h2 className="text-lg font-semibold">Sessions</h2>

@@ -17,6 +17,7 @@ import { EditorHistoryPanel } from '@/components/EditorHistoryPanel';
 import { MarkdownMirror } from '@/components/MarkdownMirror';
 import { looksLikeMarkdown, isMarkdownFileName } from '@/markdown-syntax';
 import { formatMarkdown } from '@/markdown-format';
+import { useDuoDock } from '@/hooks/use-screen-pose';
 
 export type RemoteEditorMode = 'remote-editor' | 'fullscreen-input';
 
@@ -75,6 +76,7 @@ export function RemoteEditorPanel({
   onSave,
   onCancel,
 }: RemoteEditorPanelProps) {
+  const duoDock = useDuoDock(mode === 'fullscreen-input' ? 'input' : 'editor');
   const [draft, setDraft] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
   const [history, setHistory] = useState<EditorHistoryEntry[]>([]);
@@ -313,7 +315,7 @@ export function RemoteEditorPanel({
   if (!open) return null;
 
   return (
-    <div className={cn(
+    <div data-duo-dock={duoDock} className={cn(
       'absolute inset-0 z-50 bg-background text-foreground flex flex-col',
     )}>
       {/* Header */}

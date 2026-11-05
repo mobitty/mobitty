@@ -145,6 +145,35 @@ html, body {
   overflow: clip;
 }
 
+/* iPhone Duo, open (wide: flat and book; tall): a full-screen panel docks in
+   a pane over the terminal instead of covering the frame, and the terminal
+   never resizes for it (a resize redraws TUIs). The panel root carries
+   `data-duo-dock="a|b"` (useDuoDock); the hook in use-screen-pose.ts writes
+   the pane's rect relative to the frame as `--duo-dock-{a,b}-*` on the frame.
+   Unlayered, so it beats Tailwind's `inset-0` utility. Closed shapes and
+   off the Duo: no attribute, the panel keeps `inset-0`.
+   See docs/todo-design-ios-iphone-duo.md (Panels), docs/done-design-layout.md. */
+#root:is([data-duo-shape="wide"], [data-duo-shape="tall"]) .terminal-frame > [data-duo-dock="a"] {
+  inset: auto;
+  left: var(--duo-dock-a-left, 0px);
+  top: var(--duo-dock-a-top, 0px);
+  width: var(--duo-dock-a-width, 100%);
+  height: var(--duo-dock-a-height, 100%);
+}
+#root:is([data-duo-shape="wide"], [data-duo-shape="tall"]) .terminal-frame > [data-duo-dock="b"] {
+  inset: auto;
+  left: var(--duo-dock-b-left, 0px);
+  top: var(--duo-dock-b-top, 0px);
+  width: var(--duo-dock-b-width, 100%);
+  height: var(--duo-dock-b-height, 100%);
+}
+
+/* Toasts (sonner, top-center, position: fixed) would sit on the fold band
+   when wide: centre them over pane B instead (window coordinates). */
+#root[data-duo-shape="wide"] [data-sonner-toaster][data-x-position="center"] {
+  left: calc(var(--duo-pane-b-x) + var(--duo-pane-b-w) / 2);
+}
+
 /* xterm overrides */
 .xterm .xterm-helper-textarea {
   caret-color: transparent !important;

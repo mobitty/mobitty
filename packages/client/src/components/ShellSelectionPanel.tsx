@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { Badge } from '@/components/ui/badge';
 import type { ShellInfo } from '@/shells';
 import { HotkeyHelpOverlay } from '@/components/HotkeyHelpOverlay';
+import { useDuoDock } from '@/hooks/use-screen-pose';
 
 interface ShellSelectionPanelProps {
   shells: ShellInfo[];
@@ -9,6 +10,7 @@ interface ShellSelectionPanelProps {
 }
 
 export function ShellSelectionPanel({ shells, onSelect }: ShellSelectionPanelProps) {
+  const duoDock = useDuoDock('shell');
   const [focusedIndex, setFocusedIndex] = useState(0);
   const [showHelp, setShowHelp] = useState(false);
   const focusedRef = useRef<HTMLButtonElement>(null);
@@ -46,7 +48,7 @@ export function ShellSelectionPanel({ shells, onSelect }: ShellSelectionPanelPro
   }, [focusedIndex]);
 
   return (
-    <div className="absolute inset-0 z-50 bg-background text-foreground flex items-center justify-center">
+    <div data-duo-dock={duoDock} className="absolute inset-0 z-50 bg-background text-foreground flex items-center justify-center">
       <div className="w-full max-w-md px-6 space-y-4">
         <h2 className="text-lg font-semibold text-center">Select Shell</h2>
         {shells.map((shell, index) => {

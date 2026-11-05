@@ -33,6 +33,7 @@ import { fetchShells, saveShell, deleteShell, rediscoverShells, type ShellInfo }
 import { FONT_OPTIONS, CUSTOM_FONT_VALUE, findFontOption, loadFont } from '@/fonts';
 import { cn } from '@/lib/utils';
 import { declaredCapabilities } from '@/app-softkey-bar';
+import { useDuoDock } from '@/hooks/use-screen-pose';
 
 type SettingsSection = 'profile' | 'shells' | 'about';
 
@@ -137,6 +138,7 @@ interface SettingsDialogProps {
 }
 
 export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, onApply }: SettingsDialogProps) {
+  const duoDock = useDuoDock('settings');
   const [profileList, setProfileList] = useState<string[]>([]);
   // Device assignment dropdowns
   const [desktopProfileName, setDesktopProfileName] = useState(() => getSelectedProfileName('desktop'));
@@ -560,7 +562,7 @@ export function SettingsDialog({ open, onOpenChange, currentProfile, isMobile, o
   if (!open) return null;
 
   return (
-    <div className="absolute inset-0 z-50 bg-background text-foreground flex flex-col">
+    <div data-duo-dock={duoDock} className="absolute inset-0 z-50 bg-background text-foreground flex flex-col">
       {/* Header */}
       <div className="flex items-center justify-between px-4 py-3 border-b border-border">
         <h2 className="text-lg font-semibold">Settings</h2>

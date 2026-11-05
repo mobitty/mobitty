@@ -22,7 +22,7 @@ import { DEFAULT_GESTURE_MAPPING } from '@/gesture-types';
 import type { GestureMapping } from '@/gesture-types';
 import { findFontOption, loadFont } from '@/fonts';
 import { isNativeApp, getNativeBridge } from '@/native-bridge';
-import { useScreenPose } from '@/hooks/use-screen-pose';
+import { ScreenPoseContext, useDuoDockFrame, useScreenPose } from '@/hooks/use-screen-pose';
 import {
   hasAppSoftkeyBar, shouldShowUpdateAppNotice, markUpdateAppNoticeShown, UPDATE_APP_NOTICE_TEXT,
 } from '@/app-softkey-bar';
@@ -109,9 +109,12 @@ const appSoftkeyBar = hasAppSoftkeyBar(getNativeBridge());
 
 export function App() {
   // iPhone Duo pose from the iOS app, mirrored onto #root as data-duo-*
-  // and --duo-* (null off the Duo). Returns the pose; W2 binds it to dock
-  // panels in its panes (panelDock / dockRect in src/screen-pose.ts).
-  useScreenPose();
+  // and --duo-* (null off the Duo). On the open Duo the full-screen panels
+  // dock in a pane over the terminal, which never resizes for them: the
+  // frame carries the dock rects, the panels read the pose from context.
+  const screenPose = useScreenPose();
+  const terminalFrameRef = useRef<HTMLDivElement>(null);
+  useDuoDockFrame(terminalFrameRef, screenPose);
   const [profile, setProfile] = useState<Profile | undefined>();
   const [profileReady, setProfileReady] = useState(false);
   const [themeColors, setThemeColors] = useState<ProfileTheme | undefined>();
@@ -890,13 +893,15 @@ export function App() {
     || sessionPanelOpen || settingsOpen;
 
   return (
-    <>
+    <ScreenPoseContext.Provider value={screenPose}>
       {/* Terminal area — flex-1, always present for layout stability.
           Full-screen panels (editor, session list, shell picker, settings)
           mount here so their `absolute inset-0` is scoped to the terminal
           frame — below the safe-area band #root reserves via
-          padding-top: env(safe-area-inset-top), above the softkey bar. */}
-      <div className="flex-1 min-h-0 relative terminal-frame">
+          padding-top: env(safe-area-inset-top), above the softkey bar.
+          On the open iPhone Duo a panel root with `data-duo-dock` sits in
+          a pane instead (index.css, `--duo-dock-*` on this frame). */}
+      <div ref={terminalFrameRef} className="flex-1 min-h-0 relative terminal-frame">
         {!pendingShellSelection && (
           <XtermTerminal
             ref={terminalRef}
@@ -1091,6 +1096,6 @@ export function App() {
 
       {/* Notification toasts */}
       <Toaster />
-    </>
+    </ScreenPoseContext.Provider>
   );
 }

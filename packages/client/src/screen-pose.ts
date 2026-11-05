@@ -164,3 +164,49 @@ export function dockRect(pose: ScreenPosePayload | null, dock: DuoDock, frame: D
   const bottom = Math.min(pane.y + pane.h, frame.top + frame.height);
   return { left: 0, top: top - frame.top, width: frame.width, height: Math.max(0, bottom - top) };
 }
+
+// --- Dock rects on .terminal-frame ---
+
+/// The `data-duo-dock` value a panel root carries: `a` / `b` on the open
+/// Duo, absent otherwise (the panel keeps its `inset-0`).
+export function dockAttr(dock: DuoDock): 'a' | 'b' | undefined {
+  if (dock === 'paneA') return 'a';
+  if (dock === 'paneB') return 'b';
+  return undefined;
+}
+
+const DOCK_NAMES = ['a', 'b'] as const;
+const DOCK_KEYS = ['left', 'top', 'width', 'height'] as const;
+
+export const DUO_DOCK_VARS: readonly string[] = DOCK_NAMES.flatMap((name) =>
+  DOCK_KEYS.map((key) => `--duo-dock-${name}-${key}`),
+);
+
+/// Below this a pane-docked panel would be unusable (tall, with a keyboard
+/// reaching into pane B): the dock falls back to the whole frame.
+export const MIN_DOCK_HEIGHT = 96;
+
+/// `--duo-dock-{a,b}-{left,top,width,height}` (px, relative to the terminal
+/// frame at `frame`, window coordinates) on the open Duo; empty otherwise.
+/// A pane the pose lacks has no variables.
+export function duoDockVars(pose: ScreenPosePayload | null, frame: DOMRectLike): Record<string, string> {
+  const vars: Record<string, string> = {};
+  if (!pose || !isOpenShape(pose.shape)) return vars;
+  for (const name of DOCK_NAMES) {
+    const dock: DuoDock = name === 'a' ? 'paneA' : 'paneB';
+    if (!(name === 'a' ? pose.paneA : pose.paneB)) continue;
+    let rect = dockRect(pose, dock, frame);
+    if (rect.height < MIN_DOCK_HEIGHT) rect = dockRect(pose, 'full', frame);
+    for (const key of DOCK_KEYS) vars[`--duo-dock-${name}-${key}`] = `${rect[key]}px`;
+  }
+  return vars;
+}
+
+/// Writes `vars` onto `el`, removing any `--duo-dock-*` it no longer lists.
+export function applyDuoDockVars(el: Pick<DuoRootTarget, 'style'>, vars: Record<string, string>): void {
+  for (const name of DUO_DOCK_VARS) {
+    const value = vars[name];
+    if (value === undefined) el.style.removeProperty(name);
+    else el.style.setProperty(name, value);
+  }
+}
