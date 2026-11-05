@@ -3,6 +3,7 @@ import type { KeySpec } from '@/softkey-types';
 import { usePressRepeat } from '@/hooks/use-press-repeat';
 import { usePressLongPress } from '@/hooks/use-press-long-press';
 import { cn } from '@/lib/utils';
+import { repeatIntervalMs } from '@/app-softkey-bar';
 
 export interface SoftkeyButtonProps {
   keySpec: KeySpec;
@@ -17,10 +18,9 @@ export interface SoftkeyButtonProps {
 const noop = () => {};
 
 export function SoftkeyButton({ keySpec, size, isModifierActive, isContainerActive, icon, onPress, onLongPress }: SoftkeyButtonProps) {
-  const isRepeatable = keySpec.repeat.kind === 'hold';
-  const intervalMs = keySpec.repeat.kind === 'hold'
-    ? (keySpec.repeat.interval === 'wheel' ? 60 : 120)
-    : 120;
+  const holdIntervalMs = repeatIntervalMs(keySpec.repeat);
+  const isRepeatable = holdIntervalMs !== null;
+  const intervalMs = holdIntervalMs ?? 120;
   const hasLongPress = onLongPress !== undefined;
 
   const repeatHandlers = usePressRepeat({

@@ -5,15 +5,70 @@
 // The protocol is mirrored in mobitty-ios/Mobitty/NativeBridge.swift (search
 // for "JS shim"). Keep the two in sync when adding fields.
 
-import type { KeyBehavior, ModifierFlags } from './softkey-types';
+import type { KeyBehavior, ModifierFlags } from './softkey-types.ts';
 
 export type KeyboardMode = 'system' | 'terminal' | 'dismissed';
+
+/// Features the app declares to the web client. A field left out means the
+/// app predates that feature (old behavior); fields this client doesn't know
+/// are ignored. See docs/todo-design-ios-web-compat.md.
+export interface NativeCapabilities {
+  readonly keyboard: boolean;
+  readonly push: boolean;
+  /// The app draws the softkey bar natively from `setSoftkeyBar` and reports
+  /// presses on `onSoftkeyPress` / `onSoftkeyLongPress`. Since app 1.2.0.
+  readonly appSoftkeyBar?: boolean;
+}
+
+/// Features this web client declares to the app in `hello`.
+export interface WebCapabilities {
+  appSoftkeyBar: boolean;
+}
+
+export interface HelloPayload {
+  capabilities: WebCapabilities;
+  /// The mobitty npm package version this client was built with. Display
+  /// only — never compared to decide behavior.
+  serverVersion: string;
+}
+
+export type AppSoftkeyState = 'on' | 'locked';
+
+export interface AppSoftkeyRepeat {
+  intervalMs: number;
+}
+
+export interface AppSoftkeyChild {
+  id: string;
+  label: string;
+  state?: AppSoftkeyState;
+  repeat?: AppSoftkeyRepeat;
+}
+
+export interface AppSoftkey extends AppSoftkeyChild {
+  /// Present on container keys only. The app opens and closes the container
+  /// itself; a child's press arrives as `onSoftkeyPress(childId)`.
+  children?: AppSoftkeyChild[];
+}
+
+export interface SoftkeyBarPayload {
+  /// Every page's keys in page order, flattened. The sessions and keyboard
+  /// buttons are the app's own pinned controls and are not listed.
+  keys: AppSoftkey[];
+  /// Alert dot on the app's sessions button.
+  sessionsBadge: boolean;
+  /// True when the web would hide its own bar; the app draws nothing.
+  hidden: boolean;
+}
 
 export interface MobittyNativeBridge {
   readonly __installed: true;
   readonly version: number;
   readonly platform: 'ios';
-  readonly capabilities: { keyboard: boolean; push: boolean };
+  readonly capabilities: NativeCapabilities;
+  /// App version (`CFBundleShortVersionString`), for display only. Absent on
+  /// apps before 1.2.0.
+  readonly appVersion?: string;
 
   onKeyAction: (action: KeyBehavior, modifiers: ModifierFlags | null) => void;
   onKeyboardModeChanged: (mode: KeyboardMode) => void;
@@ -23,6 +78,19 @@ export interface MobittyNativeBridge {
   /// from a native gesture (left-edge swipe, when enabled in iOS Settings).
   /// The web override should flip the `SessionPanel` open.
   onOpenSessionListRequested: () => void;
+  /// One press, or one hold-to-repeat tick, of a key in the app's softkey
+  /// bar. The shim's default is a no-op; the web overrides it while the app
+  /// draws the bar. Absent on apps without `appSoftkeyBar`.
+  onSoftkeyPress?: (id: string) => void;
+  /// Long press of a key in the app's softkey bar. Same lifecycle as
+  /// `onSoftkeyPress`.
+  onSoftkeyLongPress?: (id: string) => void;
+
+  /// Web → app handshake, sent once at mount. Absent on apps before 1.2.0.
+  hello?: (payload: HelloPayload) => void;
+  /// Keys, labels and states for the app's softkey bar. Sent whenever any
+  /// of them changes. Absent on apps without `appSoftkeyBar`.
+  setSoftkeyBar?: (payload: SoftkeyBarPayload) => void;
 
   requestKeyboardMode: (mode: KeyboardMode) => void;
   setSoftkeyConfig: (config: unknown) => void;
