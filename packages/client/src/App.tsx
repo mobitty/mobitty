@@ -22,6 +22,9 @@ import { DEFAULT_GESTURE_MAPPING } from '@/gesture-types';
 import type { GestureMapping } from '@/gesture-types';
 import { findFontOption, loadFont } from '@/fonts';
 import { isNativeApp, getNativeBridge } from '@/native-bridge';
+import {
+  hasAppSoftkeyBar, shouldShowUpdateAppNotice, markUpdateAppNoticeShown, UPDATE_APP_NOTICE_TEXT,
+} from '@/app-softkey-bar';
 import { getInitialSessionId, setLastSessionId, clearLastSessionId, syncSessionUrl, fetchSessions, type SessionInfo } from '@/sessions';
 import { fetchShells, type ShellInfo } from '@/shells';
 import { openExternalUrl } from '@/open-external-url';
@@ -99,6 +102,9 @@ function buildWsUrl(): string {
   const path = window.location.pathname.replace(/[/]+$/, '');
   return [protocol, '//', window.location.host, path, '/ws', window.location.search].join('');
 }
+
+// Constant for the page's lifetime: the shim is injected at document start.
+const appSoftkeyBar = hasAppSoftkeyBar(getNativeBridge());
 
 export function App() {
   const [profile, setProfile] = useState<Profile | undefined>();
@@ -326,6 +332,25 @@ export function App() {
       .catch(() => { /* on error, fall through to shell selection */ })
       .finally(() => { setInitialCheckComplete(true); });
   }, [refreshSessions]);
+
+  // Handshake with the iOS app: tell it this client can hand its softkey bar
+  // over, and which server version built it. Once per page load.
+  useEffect(() => {
+    getNativeBridge()?.hello?.({
+      capabilities: { appSoftkeyBar: true },
+      serverVersion: __MOBITTY_SERVER_VERSION__,
+    });
+  }, []);
+
+  // An app that predates the native softkey bar keeps the web bar; tell the
+  // user once per device that an update draws it natively. Waits for the
+  // Toaster, which mounts with the profile.
+  useEffect(() => {
+    if (!profileReady) return;
+    if (!shouldShowUpdateAppNotice(getNativeBridge(), localStorage)) return;
+    markUpdateAppNoticeShown(localStorage);
+    toast(UPDATE_APP_NOTICE_TEXT, { duration: Infinity, closeButton: true });
+  }, [profileReady]);
 
   // iOS shell can ask us to open the session panel from a native gesture
   // (left-edge swipe, when enabled in iOS Settings). The shim's default is a
@@ -853,6 +878,12 @@ export function App() {
 
   if (!profileReady || !profile) return null;
 
+  // With a session hotkey the user may hide the bar, except while the
+  // session panel or settings are open. The app's native bar follows the
+  // same rule through `hidden`, so its bar component stays mounted.
+  const webSoftkeyBarVisible = !(profile.hideSoftkeyBar && (profile.sessionSwitcherHotkey ?? '').trim() !== '')
+    || sessionPanelOpen || settingsOpen;
+
   return (
     <>
       {/* Terminal area — flex-1, always present for layout stability.
@@ -996,7 +1027,7 @@ export function App() {
         onKeepFocus={() => terminalRef.current?.core?.focus()}
       />
 
-      {(!(profile?.hideSoftkeyBar && (profile.sessionSwitcherHotkey ?? '').trim() !== '') || sessionPanelOpen || settingsOpen) && (
+      {(appSoftkeyBar || webSoftkeyBarVisible) && (
         <SoftkeyBar
           ref={softkeyBarRef}
           pages={softkeyConfig.pages}
@@ -1020,6 +1051,8 @@ export function App() {
           onContainerToggle={handleContainerToggle}
           onKeepFocus={() => terminalRef.current?.core?.focus()}
           onModifiersChange={setModifiers}
+          appBar={appSoftkeyBar}
+          hidden={!webSoftkeyBarVisible}
         />
       )}
 

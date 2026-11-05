@@ -8,6 +8,10 @@ import type { ModifierSource } from '@/terminal-core';
 import { SoftkeyButton } from '@/components/SoftkeyButton';
 import { getBatchInputDraft, setBatchInputDraft } from '@/batch-input-storage';
 import { getNativeBridge, type KeyboardMode } from '@/native-bridge';
+import {
+  buildSoftkeyBarPayload, createDedupedSender, dispatchAppSoftkeyPress,
+  runKeyBehavior as runSharedKeyBehavior, type KeyBehaviorHandlers,
+} from '@/app-softkey-bar';
 import { useBackdropColorSync } from '@/hooks/use-backdrop-color-sync';
 import { usePressLongPress } from '@/hooks/use-press-long-press';
 import { useAutocorrectToggle } from '@/hooks/use-autocorrect-toggle';
@@ -45,6 +49,13 @@ interface SoftkeyBarProps {
   onContainerToggle: (containerId: string) => void;
   onKeepFocus?: () => void;
   onModifiersChange?: (modifiers: ModifierFlags) => void;
+  /// The iOS app draws the bar (`appSoftkeyBar` capability): this component
+  /// keeps its state and handlers, renders nothing, and drives the app's bar
+  /// over `setSoftkeyBar` / `onSoftkeyPress`.
+  appBar?: boolean;
+  /// The web would hide its bar (hide rule in App). Only consulted with
+  /// `appBar`; without it App unmounts the bar instead.
+  hidden?: boolean;
 }
 
 // --- InlineInput sub-component ---
@@ -133,7 +144,7 @@ function InlineInput({ softkeySize, autocorrect, onAutocorrectToggle, onSubmit, 
 // --- SoftkeyBar ---
 
 export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
-  function SoftkeyBar({ pages, customKeys, containers, activeContainerId, batchInputOpen, softkeySize = 44, hasAlerts, isMobile, isNativeApp, autocorrect, onAutocorrectToggle, onSessionsOpen, onMeterToggle, onAction, onPaste, onFileUpload, onBatchInputToggle, onBatchSubmit, onContainerToggle, onKeepFocus, onModifiersChange }, ref) {
+  function SoftkeyBar({ pages, customKeys, containers, activeContainerId, batchInputOpen, softkeySize = 44, hasAlerts, isMobile, isNativeApp, autocorrect, onAutocorrectToggle, onSessionsOpen, onMeterToggle, onAction, onPaste, onFileUpload, onBatchInputToggle, onBatchSubmit, onContainerToggle, onKeepFocus, onModifiersChange, appBar = false, hidden = false }, ref) {
     const containerRef = useRef<HTMLDivElement>(null);
     useBackdropColorSync(containerRef);
     const [currentPage, setCurrentPage] = useState(0);
@@ -321,33 +332,59 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
     // native-keyboard taps routed through the bridge. `consumesModifiers`
     // mirrors the KeySpec flag — send-virtual / send-char pull in the bar's
     // sticky ctrl/alt/shift, everything else doesn't.
+    // The iOS app's softkey bar dispatches through the same handlers.
+    const keyHandlers = useMemo((): KeyBehaviorHandlers => ({
+      toggleModifier: handleToggleModifier,
+      paste: onPaste,
+      fileUpload: onFileUpload,
+      batchInputToggle: onBatchInputToggle,
+      meterToggle: onMeterToggle,
+      containerToggle: onContainerToggle,
+      consumeModifiers,
+      emptyModifiers,
+      action: onAction,
+    }), [consumeModifiers, handleToggleModifier, onAction, onPaste, onFileUpload, onBatchInputToggle, onMeterToggle, onContainerToggle]);
     const runKeyBehavior = useCallback((behavior: KeyBehavior, consumesModifiers: boolean) => {
-      switch (behavior.kind) {
-        case 'toggle-modifier':
-          handleToggleModifier(behavior.modifier);
-          return;
-        case 'paste':
-          onPaste();
-          return;
-        case 'file-upload':
-          onFileUpload();
-          return;
-        case 'batch-input-toggle':
-          onBatchInputToggle();
-          return;
-        case 'meter-toggle':
-          onMeterToggle();
-          return;
-        case 'container-toggle':
-          onContainerToggle(behavior.containerId);
-          return;
-        default: {
-          const mods = consumesModifiers ? consumeModifiers() : emptyModifiers();
-          onAction(behavior, mods);
-        }
-      }
-    }, [consumeModifiers, handleToggleModifier, onAction, onPaste, onFileUpload, onBatchInputToggle, onMeterToggle, onContainerToggle]);
+      runSharedKeyBehavior(behavior, consumesModifiers, keyHandlers);
+    }, [keyHandlers]);
     runKeyBehaviorRef.current = runKeyBehavior;
+
+    // --- iOS app's softkey bar ---
+
+    const appPressRef = useRef<(id: string) => void>(() => {});
+    appPressRef.current = (id: string) => dispatchAppSoftkeyPress(id, customKeyMap, keyHandlers);
+
+    useEffect(() => {
+      if (!appBar) return;
+      const bridge = getNativeBridge();
+      if (!bridge) return;
+      bridge.onSoftkeyPress = (id: string) => appPressRef.current(id);
+      // No web key has a long-press behavior yet (the keyboard button's is
+      // the app's own); accept the call so a future one has a home.
+      bridge.onSoftkeyLongPress = () => {};
+      return () => {
+        bridge.onSoftkeyPress = () => {};
+        bridge.onSoftkeyLongPress = () => {};
+      };
+    }, [appBar]);
+
+    const sendAppBar = useMemo(() => createDedupedSender(payload => {
+      getNativeBridge()?.setSoftkeyBar?.(payload);
+    }), []);
+
+    useEffect(() => {
+      if (!appBar) return;
+      sendAppBar(buildSoftkeyBarPayload({
+        pages,
+        customKeyMap,
+        containers: containers ?? [],
+        modifiers,
+        activeContainerId: activeContainerId ?? null,
+        batchInputOpen: batchInputOpen ?? false,
+        hasAlerts: hasAlerts ?? false,
+        hidden,
+      }));
+    }, [appBar, sendAppBar, pages, customKeyMap, containers, modifiers, activeContainerId, batchInputOpen, hasAlerts, hidden]);
 
     const handleKeyPress = useCallback((keySpec: KeySpec) => {
       runKeyBehavior(keySpec.behavior, keySpec.consumesModifiers);
@@ -454,6 +491,8 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
         <Keyboard className="size-5" />
       </button>
     ) : null;
+
+    if (appBar) return null;
 
     return (
       <div

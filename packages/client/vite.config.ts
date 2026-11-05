@@ -4,6 +4,16 @@ import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import path from 'path';
 
+// The server's npm version, shown in About and sent to the iOS app in
+// `hello`. Display only; never compared.
+const serverPackage: unknown = JSON.parse(
+  readFileSync(path.resolve(__dirname, '../mobitty/package.json'), 'utf8'),
+);
+const serverVersion = typeof serverPackage === 'object' && serverPackage !== null
+  && 'version' in serverPackage && typeof serverPackage.version === 'string'
+  ? serverPackage.version
+  : 'unknown';
+
 const backendPort = process.env.MOBITTY_SERVER_PORT ?? '5172';
 const backendTarget = `http://localhost:${backendPort}`;
 
@@ -21,6 +31,9 @@ const httpsConfig = tlsCert !== undefined && tlsKey !== undefined
 export default defineConfig({
   root: '.',
   plugins: [react(), tailwindcss()],
+  define: {
+    __MOBITTY_SERVER_VERSION__: JSON.stringify(serverVersion),
+  },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
