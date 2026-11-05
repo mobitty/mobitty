@@ -8,16 +8,16 @@
 // each panel root takes `data-duo-dock={useDuoDock(panel)}`; index.css
 // places `[data-duo-dock]` by those variables.
 //
-// In tabletop (`useTabletopPaneB`) the terminal stays in pane A and pane B
+// In tabletop (`useTabletop`) the terminal stays in pane A and pane B
 // shows the session list while no keyboard is up.
 
-import { createContext, useContext, useEffect, useLayoutEffect, useState, type RefObject } from 'react';
+import { createContext, useContext, useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import {
   getNativeBridge, lastKeyboardMode, subscribeKeyboardMode, type KeyboardMode, type ScreenPosePayload,
 } from '@/native-bridge';
 import {
-  applyDuoDockVars, applyDuoRootState, dockAttr, duoDockVars, duoRootState, isTabletop, panelDock,
-  parseScreenPose, tabletopPaneB, type DuoPanel,
+  applyDuoDockVars, applyDuoRootState, dockAttr, duoDockVars, duoRootState, isPaneBTextField, isTabletop, panelDock,
+  parseScreenPose, tabletopLift, tabletopPaneB, tabletopSystemKeyboardUp, type DuoPanel,
 } from '@/screen-pose';
 
 export function useScreenPose(): ScreenPosePayload | null {
@@ -71,26 +71,60 @@ export function useDuoDockFrame(frameRef: RefObject<HTMLElement | null>, pose: S
   }, [frameRef, pose]);
 }
 
-/// What tabletop's pane B shows with no panel open there (`tabletopPaneB`):
-/// `sessions` while no keyboard is up, `blank` under one and off tabletop.
-/// Follows the app's keyboard mode and, for the system keyboard, the visual
-/// viewport's height.
-export function useTabletopPaneB(pose: ScreenPosePayload | null): 'sessions' | 'blank' {
+export interface TabletopState {
+  /// What pane B shows with no panel open there (`tabletopPaneB`):
+  /// `sessions` while no keyboard is up, `blank` under one and off tabletop.
+  paneB: 'sessions' | 'blank';
+  /// A pane-B panel's text field raised the system keyboard: that panel
+  /// sits in pane A until the keyboard goes (`tabletopLift`). App sets
+  /// `data-duo-lift` on the terminal frame; index.css moves the pane-B
+  /// panel holding the focus (`:focus-within`) to pane A's dock rect.
+  lift: boolean;
+}
+
+/// Tabletop state from the app's keyboard mode, the visual viewport's height
+/// (the system keyboard) and the focus. "Typing in pane B" starts when a text
+/// field in a pane-B panel takes the focus and ends when the focus moves to
+/// another element or the system keyboard goes down, so a field that blurs
+/// first (a rename committed) does not flash pane B blank under the
+/// keyboard on its way down.
+export function useTabletop(pose: ScreenPosePayload | null): TabletopState {
   const [mode, setMode] = useState<KeyboardMode | null>(lastKeyboardMode);
   const [vvHeight, setVvHeight] = useState(() => window.visualViewport?.height ?? window.innerHeight);
+  const [paneBTyping, setPaneBTyping] = useState(false);
   const tabletop = isTabletop(pose);
+  const poseRef = useRef(pose);
+  poseRef.current = pose;
 
   useEffect(() => subscribeKeyboardMode(setMode), []);
 
   useEffect(() => {
     if (!tabletop) return;
     const vv = window.visualViewport;
-    if (!vv) return;
-    const update = () => setVvHeight(vv.height);
+    let wasUp = vv ? tabletopSystemKeyboardUp(poseRef.current, vv.height) : false;
+    const update = () => {
+      if (!vv) return;
+      setVvHeight(vv.height);
+      const up = tabletopSystemKeyboardUp(poseRef.current, vv.height);
+      if (wasUp && !up) setPaneBTyping(false);
+      wasUp = up;
+    };
+    const onFocusIn = (e: FocusEvent) => {
+      setPaneBTyping(e.target instanceof HTMLElement && isPaneBTextField(e.target));
+    };
     update();
-    vv.addEventListener('resize', update);
-    return () => vv.removeEventListener('resize', update);
+    setPaneBTyping(document.activeElement instanceof HTMLElement && isPaneBTextField(document.activeElement));
+    vv?.addEventListener('resize', update);
+    document.addEventListener('focusin', onFocusIn);
+    return () => {
+      vv?.removeEventListener('resize', update);
+      document.removeEventListener('focusin', onFocusIn);
+      setPaneBTyping(false);
+    };
   }, [tabletop]);
 
-  return tabletopPaneB(pose, mode, vvHeight);
+  return {
+    paneB: tabletopPaneB(pose, mode, vvHeight, paneBTyping),
+    lift: tabletopLift(pose, vvHeight, paneBTyping),
+  };
 }

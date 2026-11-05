@@ -60,20 +60,65 @@ export function isTabletop(pose: ScreenPosePayload | null): boolean {
   return pose !== null && pose.shape === 'tall' && pose.folded && pose.paneB !== null;
 }
 
+/// Tabletop with the system keyboard over pane B: the visual viewport ends
+/// above pane B's top (the WebView keeps its height, only `visualViewport`
+/// shrinks to the keyboard's top). False off tabletop.
+export function tabletopSystemKeyboardUp(pose: ScreenPosePayload | null, vvHeight: number): boolean {
+  return isTabletop(pose) && pose?.paneB != null && vvHeight < pose.paneB.y;
+}
+
 /// What pane B shows in tabletop with no panel open there: the session list
 /// while no keyboard is up (*Decisions* 2), blank under a keyboard. The
-/// terminal keyboard is up in mode `terminal`; the system keyboard when the
-/// visual viewport ends above pane B's top (the WebView keeps its height,
-/// only `visualViewport` shrinks to the keyboard's top). Off tabletop:
-/// blank (no resting list).
+/// terminal keyboard is up in mode `terminal`; the system keyboard when
+/// `tabletopSystemKeyboardUp`. `paneBTyping` (a text field in a pane-B
+/// panel raised the system keyboard; that panel sits in pane A meanwhile,
+/// `tabletopLift`): the system keyboard does not count, so the session list
+/// being typed in (renaming) stays open. Off tabletop: blank (no resting
+/// list).
 export function tabletopPaneB(
   pose: ScreenPosePayload | null,
   mode: KeyboardMode | null,
   vvHeight: number,
+  paneBTyping = false,
 ): 'sessions' | 'blank' {
-  if (!isTabletop(pose) || !pose?.paneB) return 'blank';
+  if (!isTabletop(pose)) return 'blank';
   if (mode === 'terminal') return 'blank';
-  return vvHeight < pose.paneB.y ? 'blank' : 'sessions';
+  if (paneBTyping) return 'sessions';
+  return tabletopSystemKeyboardUp(pose, vvHeight) ? 'blank' : 'sessions';
+}
+
+/// Tabletop: the pane-B panel holding the focused text field moves to pane
+/// A while the system keyboard it raised covers pane B, so the field stays
+/// in sight; it returns when the keyboard goes. Same rule as the typing
+/// panels (remote editor, fullscreen input), which sit in pane A in
+/// tabletop. The terminal does not move: its box is pane A's either way.
+export function tabletopLift(pose: ScreenPosePayload | null, vvHeight: number, paneBTyping: boolean): boolean {
+  return paneBTyping && tabletopSystemKeyboardUp(pose, vvHeight);
+}
+
+/// The slice of a focused element `isPaneBTextField` reads.
+export interface FocusTarget {
+  tagName: string;
+  type?: string;
+  readOnly?: boolean;
+  disabled?: boolean;
+  isContentEditable?: boolean;
+  closest(selector: string): unknown;
+}
+
+const NON_TEXT_INPUTS: ReadonlySet<string> = new Set([
+  'button', 'checkbox', 'color', 'file', 'hidden', 'image', 'radio', 'range', 'reset', 'submit',
+]);
+
+/// A focused element that raises the system keyboard (a writable text
+/// input, textarea or contenteditable) inside a panel docked in pane B
+/// (`data-duo-dock="b"`).
+export function isPaneBTextField(el: FocusTarget | null): boolean {
+  if (!el || el.readOnly === true || el.disabled === true) return false;
+  const tag = el.tagName.toUpperCase();
+  const text = tag === 'TEXTAREA' || el.isContentEditable === true
+    || (tag === 'INPUT' && !NON_TEXT_INPUTS.has((el.type ?? 'text').toLowerCase()));
+  return text && el.closest('[data-duo-dock="b"]') != null;
 }
 
 // --- #root state ---

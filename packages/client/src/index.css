@@ -182,6 +182,18 @@ html, body {
   height: var(--duo-dock-a-height, 100%);
 }
 
+/* Tabletop: a text field in a pane-B panel (settings, renaming a session)
+   raises the system keyboard over pane B. While it is up the frame carries
+   `data-duo-lift` (useTabletop) and the pane-B panel holding the focus sits
+   in pane A, as the typing panels do; it returns to pane B when the
+   keyboard goes. The terminal keeps its box. */
+#root[data-duo-shape="tall"][data-duo-folded="true"] .terminal-frame[data-duo-lift] > [data-duo-dock="b"]:focus-within {
+  left: var(--duo-dock-a-left, 0px);
+  top: var(--duo-dock-a-top, 0px);
+  width: var(--duo-dock-a-width, 100%);
+  height: var(--duo-dock-a-height, 100%);
+}
+
 /* Tabletop: the batch input panel overlays the foot of pane A instead of
    taking a row from the frame (which would resize the terminal). Window
    coordinates: #root is the page's full-height box at 0,0. */

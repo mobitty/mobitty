@@ -2,7 +2,8 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   applyDuoDockVars, applyDuoRootState, dockAttr, dockRect, DUO_DOCK_VARS, duoDockVars, duoRootState,
-  isTabletop, MIN_DOCK_HEIGHT, panelDock, parseScreenPose, tabletopPaneB,
+  isPaneBTextField, isTabletop, MIN_DOCK_HEIGHT, panelDock, parseScreenPose, tabletopLift, tabletopPaneB,
+  tabletopSystemKeyboardUp, type FocusTarget,
   type DuoDock, type DuoPanel, type DuoRootTarget,
 } from './screen-pose.ts';
 import type { DuoShape, ScreenPosePayload } from './native-bridge.ts';
@@ -349,5 +350,75 @@ describe('tabletopPaneB', () => {
       assert.equal(tabletopPaneB(pose, 'system', 951), 'blank', name);
     }
     assert.equal(tabletopPaneB(null, 'dismissed', 951), 'blank');
+  });
+
+  it('keeps the session list while a pane-B text field has the system keyboard up', () => {
+    assert.equal(tabletopPaneB(TABLETOP, 'system', 455.5, true), 'sessions');
+    assert.equal(tabletopPaneB(TABLETOP, 'terminal', 951, true), 'blank');
+    assert.equal(tabletopPaneB(TALL_FLAT, 'system', 455.5, true), 'blank');
+  });
+});
+
+describe('tabletopSystemKeyboardUp', () => {
+  it('is up when the visual viewport ends above pane B, in tabletop only', () => {
+    assert.equal(tabletopSystemKeyboardUp(TABLETOP, 455.5), true);
+    assert.equal(tabletopSystemKeyboardUp(TABLETOP, 503.5), false);
+    assert.equal(tabletopSystemKeyboardUp(TABLETOP, 951), false);
+    assert.equal(tabletopSystemKeyboardUp(TALL_FLAT, 300), false);
+    assert.equal(tabletopSystemKeyboardUp(null, 300), false);
+  });
+});
+
+describe('tabletopLift', () => {
+  it('lifts a pane-B panel to pane A while its field has the system keyboard up', () => {
+    assert.equal(tabletopLift(TABLETOP, 455.5, true), true);
+  });
+
+  it('returns it to pane B when the keyboard goes or nothing in pane B is typed in', () => {
+    assert.equal(tabletopLift(TABLETOP, 951, true), false);
+    assert.equal(tabletopLift(TABLETOP, 455.5, false), false);
+  });
+
+  it('never lifts off tabletop', () => {
+    for (const [name, pose] of Object.entries(ALL)) {
+      if (name === 'tabletop') continue;
+      assert.equal(tabletopLift(pose, 300, true), false, name);
+    }
+    assert.equal(tabletopLift(null, 300, true), false);
+  });
+
+  it('lifts into a pane A dock tall enough to use (no full-frame fallback)', () => {
+    const frame = { left: 0, top: 82, width: 669, height: 869 };
+    const vars = duoDockVars(TABLETOP, frame);
+    assert.equal(vars['--duo-dock-a-top'], '0px');
+    assert.equal(vars['--duo-dock-a-height'], '365.5px');
+  });
+});
+
+describe('isPaneBTextField', () => {
+  const el = (tagName: string, extra: Partial<FocusTarget> = {}, inPaneB = true): FocusTarget => ({
+    tagName, ...extra,
+    closest: (selector: string) => (inPaneB && selector === '[data-duo-dock="b"]' ? {} : null),
+  });
+
+  it('accepts text inputs, textareas and contenteditables in a pane-B panel', () => {
+    assert.equal(isPaneBTextField(el('INPUT')), true);
+    assert.equal(isPaneBTextField(el('input', { type: 'text' })), true);
+    assert.equal(isPaneBTextField(el('INPUT', { type: 'number' })), true);
+    assert.equal(isPaneBTextField(el('TEXTAREA')), true);
+    assert.equal(isPaneBTextField(el('DIV', { isContentEditable: true })), true);
+  });
+
+  it('rejects elements that raise no keyboard', () => {
+    assert.equal(isPaneBTextField(null), false);
+    assert.equal(isPaneBTextField(el('BUTTON')), false);
+    assert.equal(isPaneBTextField(el('INPUT', { type: 'checkbox' })), false);
+    assert.equal(isPaneBTextField(el('INPUT', { type: 'range' })), false);
+    assert.equal(isPaneBTextField(el('INPUT', { readOnly: true })), false);
+    assert.equal(isPaneBTextField(el('TEXTAREA', { disabled: true })), false);
+  });
+
+  it('rejects fields outside a pane-B panel (the terminal, pane-A panels)', () => {
+    assert.equal(isPaneBTextField(el('TEXTAREA', {}, false)), false);
   });
 });

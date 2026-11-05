@@ -22,7 +22,7 @@ import { DEFAULT_GESTURE_MAPPING } from '@/gesture-types';
 import type { GestureMapping } from '@/gesture-types';
 import { findFontOption, loadFont } from '@/fonts';
 import { isNativeApp, getNativeBridge } from '@/native-bridge';
-import { ScreenPoseContext, useDuoDockFrame, useScreenPose, useTabletopPaneB } from '@/hooks/use-screen-pose';
+import { ScreenPoseContext, useDuoDockFrame, useScreenPose, useTabletop } from '@/hooks/use-screen-pose';
 import { isTabletop } from '@/screen-pose';
 import {
   hasAppSoftkeyBar, shouldShowUpdateAppNotice, markUpdateAppNoticeShown, UPDATE_APP_NOTICE_TEXT,
@@ -119,7 +119,9 @@ export function App() {
   // Tabletop (open tall, folded): the terminal stays in pane A whether a
   // keyboard is up or not; pane B shows the session list while none is.
   const tabletop = isTabletop(screenPose);
-  const tabletopPaneB = useTabletopPaneB(screenPose);
+  // A pane-B panel's text field moves that panel to pane A while the system
+  // keyboard covers pane B (`tabletopLift`, `data-duo-lift` on the frame).
+  const { paneB: tabletopPaneB, lift: tabletopLift } = useTabletop(screenPose);
   const [profile, setProfile] = useState<Profile | undefined>();
   const [profileReady, setProfileReady] = useState(false);
   const [themeColors, setThemeColors] = useState<ProfileTheme | undefined>();
@@ -938,7 +940,7 @@ export function App() {
           padding-top: env(safe-area-inset-top), above the softkey bar.
           On the open iPhone Duo a panel root with `data-duo-dock` sits in
           a pane instead (index.css, `--duo-dock-*` on this frame). */}
-      <div ref={terminalFrameRef} className="flex-1 min-h-0 relative terminal-frame">
+      <div ref={terminalFrameRef} data-duo-lift={tabletopLift ? '' : undefined} className="flex-1 min-h-0 relative terminal-frame">
         {!pendingShellSelection && (
           <XtermTerminal
             ref={terminalRef}
