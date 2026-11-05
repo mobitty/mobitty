@@ -86,7 +86,7 @@ export const KEY_REGISTRY: Record<string, KeySpec> = {
   select_all: { id: 'select_all', label: 'Sel All', behavior: { kind: 'select-all' }, repeat: { kind: 'none' }, consumesModifiers: false },
 };
 
-import { BUILTIN_KEY_IDS } from './profile-schema';
+import { BUILTIN_KEY_IDS } from './profile-schema.ts';
 export { BUILTIN_KEY_IDS };
 
 // Single-character keys that can appear in softkey pages
