@@ -1,0 +1,166 @@
+// The iPhone Duo screen pose the iOS app sends (`mobittyNative.screenPose`,
+// `onScreenPose`), and what the web client derives from it: the `data-duo-*`
+// attributes and `--duo-*` variables on `#root`, and which pane a panel
+// docks in. Pure; the hook in hooks/use-screen-pose.ts applies it.
+// See docs/todo-design-ios-iphone-duo.md (Panels).
+
+import type { DuoShape, PoseRect, ScreenPosePayload } from './native-bridge.ts';
+
+const SHAPES: readonly DuoShape[] = ['column', 'columnTurned', 'wide', 'tall'];
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isShape(value: unknown): value is DuoShape {
+  return typeof value === 'string' && SHAPES.some((s) => s === value);
+}
+
+function finite(value: unknown): number | null {
+  return typeof value === 'number' && Number.isFinite(value) ? value : null;
+}
+
+function parseRect(value: unknown): PoseRect | null {
+  if (!isRecord(value)) return null;
+  const x = finite(value.x);
+  const y = finite(value.y);
+  const w = finite(value.w);
+  const h = finite(value.h);
+  if (x === null || y === null || w === null || h === null) return null;
+  if (w < 0 || h < 0) return null;
+  return { x, y, w, h };
+}
+
+/// A rect field that may be null. `undefined` result means malformed.
+function parseOptionalRect(value: unknown): PoseRect | null | undefined {
+  if (value === null) return null;
+  return parseRect(value) ?? undefined;
+}
+
+/// The pose from the bridge, or null when absent or malformed (treated as
+/// off the Duo: today's layout).
+export function parseScreenPose(value: unknown): ScreenPosePayload | null {
+  if (!isRecord(value)) return null;
+  const { shape, folded } = value;
+  if (!isShape(shape) || typeof folded !== 'boolean') return null;
+  const paneA = parseRect(value.paneA);
+  const band = parseOptionalRect(value.band);
+  const paneB = parseOptionalRect(value.paneB);
+  if (paneA === null || band === undefined || paneB === undefined) return null;
+  return { shape, folded, band, paneA, paneB };
+}
+
+export function isOpenShape(shape: DuoShape): boolean {
+  return shape === 'wide' || shape === 'tall';
+}
+
+// --- #root state ---
+
+export interface DuoRootState {
+  attrs: Record<string, string>;
+  vars: Record<string, string>;
+}
+
+export const DUO_ROOT_ATTRS = ['data-duo-shape', 'data-duo-folded'] as const;
+
+const RECT_NAMES = ['band', 'pane-a', 'pane-b'] as const;
+const RECT_KEYS = ['x', 'y', 'w', 'h'] as const;
+
+export const DUO_ROOT_VARS: readonly string[] = RECT_NAMES.flatMap((name) =>
+  RECT_KEYS.map((key) => `--duo-${name}-${key}`),
+);
+
+function rectVars(name: (typeof RECT_NAMES)[number], rect: PoseRect | null, out: Record<string, string>): void {
+  if (!rect) return;
+  for (const key of RECT_KEYS) out[`--duo-${name}-${key}`] = `${rect[key]}px`;
+}
+
+/// `data-duo-shape` / `data-duo-folded` and the `--duo-{band,pane-a,pane-b}-{x,y,w,h}`
+/// variables (px, window coordinates). Empty off the Duo; a null rect has no
+/// variables.
+export function duoRootState(pose: ScreenPosePayload | null): DuoRootState {
+  const attrs: Record<string, string> = {};
+  const vars: Record<string, string> = {};
+  if (!pose) return { attrs, vars };
+  attrs['data-duo-shape'] = pose.shape;
+  attrs['data-duo-folded'] = String(pose.folded);
+  rectVars('band', pose.band, vars);
+  rectVars('pane-a', pose.paneA, vars);
+  rectVars('pane-b', pose.paneB, vars);
+  return { attrs, vars };
+}
+
+/// The slice of HTMLElement `applyDuoRootState` touches.
+export interface DuoRootTarget {
+  setAttribute(name: string, value: string): void;
+  removeAttribute(name: string): void;
+  style: {
+    setProperty(name: string, value: string): void;
+    removeProperty(name: string): string;
+  };
+}
+
+/// Writes `state` onto `el`, removing any `data-duo-*` / `--duo-*` it no
+/// longer lists.
+export function applyDuoRootState(el: DuoRootTarget, state: DuoRootState): void {
+  for (const name of DUO_ROOT_ATTRS) {
+    const value = state.attrs[name];
+    if (value === undefined) el.removeAttribute(name);
+    else el.setAttribute(name, value);
+  }
+  for (const name of DUO_ROOT_VARS) {
+    const value = state.vars[name];
+    if (value === undefined) el.style.removeProperty(name);
+    else el.style.setProperty(name, value);
+  }
+}
+
+// --- Panels ---
+
+export type DuoPanel = 'sessions' | 'settings' | 'shell' | 'editor' | 'input' | 'viewer';
+export type DuoDock = 'full' | 'paneA' | 'paneB';
+
+/// Where a full-screen panel sits (the design's Panels table): on the open
+/// Duo, sessions/settings/shell picker/file viewer take pane B; the remote
+/// editor and fullscreen input take pane B wide and pane A tall (the
+/// keyboard is in or over pane B). Closed or off the Duo: the whole
+/// terminal area.
+export function panelDock(pose: ScreenPosePayload | null, panel: DuoPanel): DuoDock {
+  if (!pose || !isOpenShape(pose.shape)) return 'full';
+  const typing = panel === 'editor' || panel === 'input';
+  const dock: DuoDock = typing && pose.shape === 'tall' ? 'paneA' : 'paneB';
+  const rect = dock === 'paneA' ? pose.paneA : pose.paneB;
+  return rect ? dock : 'full';
+}
+
+export interface DOMRectLike {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+export interface DockRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/// The dock's rect relative to the terminal frame (`frame` in window
+/// coordinates, e.g. its `getBoundingClientRect()`). Wide: x/width from the
+/// pane, top/height from the frame. Tall: top from the pane, bottom = the
+/// lower of the pane's and the frame's bottoms; x/width from the frame.
+/// `full`, or a pane the pose lacks: the whole frame.
+export function dockRect(pose: ScreenPosePayload | null, dock: DuoDock, frame: DOMRectLike): DockRect {
+  const whole: DockRect = { left: 0, top: 0, width: frame.width, height: frame.height };
+  if (!pose || dock === 'full' || !isOpenShape(pose.shape)) return whole;
+  const pane = dock === 'paneA' ? pose.paneA : pose.paneB;
+  if (!pane) return whole;
+  if (pose.shape === 'wide') {
+    return { left: pane.x - frame.left, top: 0, width: pane.w, height: frame.height };
+  }
+  const top = Math.max(pane.y, frame.top);
+  const bottom = Math.min(pane.y + pane.h, frame.top + frame.height);
+  return { left: 0, top: top - frame.top, width: frame.width, height: Math.max(0, bottom - top) };
+}

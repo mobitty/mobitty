@@ -22,6 +22,7 @@ import { DEFAULT_GESTURE_MAPPING } from '@/gesture-types';
 import type { GestureMapping } from '@/gesture-types';
 import { findFontOption, loadFont } from '@/fonts';
 import { isNativeApp, getNativeBridge } from '@/native-bridge';
+import { useScreenPose } from '@/hooks/use-screen-pose';
 import {
   hasAppSoftkeyBar, shouldShowUpdateAppNotice, markUpdateAppNoticeShown, UPDATE_APP_NOTICE_TEXT,
 } from '@/app-softkey-bar';
@@ -107,6 +108,10 @@ function buildWsUrl(): string {
 const appSoftkeyBar = hasAppSoftkeyBar(getNativeBridge());
 
 export function App() {
+  // iPhone Duo pose from the iOS app, mirrored onto #root as data-duo-*
+  // and --duo-* (null off the Duo). Returns the pose; W2 binds it to dock
+  // panels in its panes (panelDock / dockRect in src/screen-pose.ts).
+  useScreenPose();
   const [profile, setProfile] = useState<Profile | undefined>();
   const [profileReady, setProfileReady] = useState(false);
   const [themeColors, setThemeColors] = useState<ProfileTheme | undefined>();

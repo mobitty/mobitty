@@ -18,11 +18,39 @@ export interface NativeCapabilities {
   /// The app draws the softkey bar natively from `setSoftkeyBar` and reports
   /// presses on `onSoftkeyPress` / `onSoftkeyLongPress`. Since app 1.2.0.
   readonly appSoftkeyBar?: boolean;
+  /// The app sends the iPhone Duo screen pose (`screenPose`,
+  /// `onScreenPose`). Since app 1.2.0.
+  readonly screenPose?: boolean;
 }
 
 /// Features this web client declares to the app in `hello`.
 export interface WebCapabilities {
   appSoftkeyBar: boolean;
+  /// This client lays out the Duo's panes and tabletop from the screen pose;
+  /// the app applies its tabletop keyboard rule only when declared. Since
+  /// server 0.7.0. Optional until the client lays out tabletop, then sent
+  /// as `true` (docs/todo-design-ios-iphone-duo.md).
+  screenPose?: boolean;
+}
+
+/// The iPhone Duo's screen shape: closed (`column`, turned `columnTurned`)
+/// or open (`wide`, `tall`). Absent (null pose) off the Duo.
+export type DuoShape = 'column' | 'columnTurned' | 'wide' | 'tall';
+
+/// A rect in window coordinates, CSS px (1 pt = 1 px).
+export interface PoseRect { x: number; y: number; w: number; h: number; }
+
+/// The Duo pose the app sends. See src/screen-pose.ts.
+export interface ScreenPosePayload {
+  shape: DuoShape;
+  /// The fold band is active (book, tabletop).
+  folded: boolean;
+  /// The fold band, 40 wide; listed flat too; null when closed.
+  band: PoseRect | null;
+  /// Closed: the safe content rect; open: the leading/top pane.
+  paneA: PoseRect;
+  /// Open only: the trailing/bottom pane.
+  paneB: PoseRect | null;
 }
 
 export interface HelloPayload {
@@ -73,6 +101,9 @@ export interface MobittyNativeBridge {
   /// App version (`CFBundleShortVersionString`), for display only. Absent on
   /// apps before 1.2.0.
   readonly appVersion?: string;
+  /// The current Duo pose, set by the shim at document start and on every
+  /// change; null off the Duo. Absent on apps without `screenPose`.
+  readonly screenPose?: ScreenPosePayload | null;
 
   onKeyAction: (action: KeyBehavior, modifiers: ModifierFlags | null) => void;
   onKeyboardModeChanged: (mode: KeyboardMode) => void;
@@ -89,6 +120,9 @@ export interface MobittyNativeBridge {
   /// Long press of a key in the app's softkey bar. Same lifecycle as
   /// `onSoftkeyPress`.
   onSoftkeyLongPress?: (id: string) => void;
+  /// The Duo pose changed (null: no longer a Duo). The shim's default is a
+  /// no-op; the web overrides it. Absent on apps without `screenPose`.
+  onScreenPose?: (pose: ScreenPosePayload | null) => void;
 
   /// Web → app handshake, sent once at mount. Absent on apps before 1.2.0.
   hello?: (payload: HelloPayload) => void;
