@@ -7,7 +7,7 @@ import {
 import type { ModifierSource } from '@/terminal-core';
 import { SoftkeyButton } from '@/components/SoftkeyButton';
 import { getBatchInputDraft, setBatchInputDraft } from '@/batch-input-storage';
-import { getNativeBridge, type KeyboardMode } from '@/native-bridge';
+import { getNativeBridge, subscribeKeyboardMode, type KeyboardMode } from '@/native-bridge';
 import {
   buildSoftkeyBarPayload, createDedupedSender, dispatchAppSoftkeyPress,
   runKeyBehavior as runSharedKeyBehavior, type KeyBehaviorHandlers,
@@ -220,16 +220,9 @@ export const SoftkeyBar = forwardRef<SoftkeyBarHandle, SoftkeyBarProps>(
 
 
     // Mirror the native keyboard mode locally so the pinned keyboard button
-    // can decide which mode to request next. The bridge shim's
-    // onKeyboardModeChanged starts as a no-op; we override it here.
-    useEffect(() => {
-      const bridge = getNativeBridge();
-      if (!bridge) return;
-      bridge.onKeyboardModeChanged = (mode: KeyboardMode) => setKeyboardMode(mode);
-      return () => {
-        bridge.onKeyboardModeChanged = () => {};
-      };
-    }, []);
+    // can decide which mode to request next. The shim's single
+    // onKeyboardModeChanged is shared (the Duo tabletop layout listens too).
+    useEffect(() => subscribeKeyboardMode(setKeyboardMode), []);
 
     // Forward iOS native-keyboard taps into the same TerminalCore dispatch
     // path the web softkey bar uses. The bridge shim's onKeyAction starts as

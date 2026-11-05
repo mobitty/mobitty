@@ -20,6 +20,13 @@ import { useDuoDock } from '@/hooks/use-screen-pose';
 
 interface SessionPanelProps {
   open: boolean;
+  /** False in tabletop on the iPhone Duo: the list rests in pane B whenever
+   *  no keyboard is up, so there is nothing to close it to. Default true. */
+  closable?: boolean;
+  /** The list's keyboard navigation (arrows, Enter, Escape, letters). Off
+   *  while the list only rests in tabletop's pane B, so keys typed at the
+   *  terminal reach it. Default true. */
+  hotkeys?: boolean;
   onClose: () => void;
   sessions: SessionInfo[];
   onRefreshSessions: () => Promise<SessionInfo[]>;
@@ -46,7 +53,7 @@ function isTypingInPanel(target: EventTarget | null, root: HTMLElement | null): 
 /** Tabs exist only in a browser; the native app's web view has none. */
 const canOpenTabs = !isNativeApp();
 
-export function SessionPanel({ open, onClose, sessions, onRefreshSessions, currentSessionId, alertedSessionIds, currentSessionAlerted, onSwitchSession, onCreateSession, onSettingsOpen, onNoSessionsLeft, isMobile }: SessionPanelProps) {
+export function SessionPanel({ open, closable = true, hotkeys = true, onClose, sessions, onRefreshSessions, currentSessionId, alertedSessionIds, currentSessionAlerted, onSwitchSession, onCreateSession, onSettingsOpen, onNoSessionsLeft, isMobile }: SessionPanelProps) {
   const duoDock = useDuoDock('sessions');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editName, setEditName] = useState('');
@@ -110,7 +117,7 @@ export function SessionPanel({ open, onClose, sessions, onRefreshSessions, curre
 
   // Keyboard navigation for session list
   useEffect(() => {
-    if (!open || showShellPicker || showHelp || sessions.length === 0) return;
+    if (!open || !hotkeys || showShellPicker || showHelp || sessions.length === 0) return;
     const handler = (e: KeyboardEvent) => {
       if (editingId) return;
       if (e.key === 'ArrowDown' && e.shiftKey) {
@@ -180,7 +187,7 @@ export function SessionPanel({ open, onClose, sessions, onRefreshSessions, curre
     };
     window.addEventListener('keydown', handler, true);
     return () => window.removeEventListener('keydown', handler, true);
-  }, [open, sessions, editingId, focusedIndex, currentSessionId, onClose, handleSwitch, showShellPicker, showHelp, onRefreshSessions]);
+  }, [open, hotkeys, sessions, editingId, focusedIndex, currentSessionId, onClose, handleSwitch, showShellPicker, showHelp, onRefreshSessions]);
 
   // Keyboard navigation for inline shell picker
   useEffect(() => {
@@ -306,9 +313,11 @@ export function SessionPanel({ open, onClose, sessions, onRefreshSessions, curre
           <Button variant="ghost" size="sm" onClick={() => setShowHelp(prev => !prev)}>
             ?
           </Button>
-          <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close">
-            <X className="size-4" />
-          </Button>
+          {closable && (
+            <Button variant="ghost" size="sm" onClick={onClose} aria-label="Close">
+              <X className="size-4" />
+            </Button>
+          )}
         </div>
       </div>
 

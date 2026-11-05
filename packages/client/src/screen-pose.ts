@@ -4,7 +4,7 @@
 // docks in. Pure; the hook in hooks/use-screen-pose.ts applies it.
 // See docs/todo-design-ios-iphone-duo.md (Panels).
 
-import type { DuoShape, PoseRect, ScreenPosePayload } from './native-bridge.ts';
+import type { DuoShape, KeyboardMode, PoseRect, ScreenPosePayload } from './native-bridge.ts';
 
 const SHAPES: readonly DuoShape[] = ['column', 'columnTurned', 'wide', 'tall'];
 
@@ -52,6 +52,28 @@ export function parseScreenPose(value: unknown): ScreenPosePayload | null {
 
 export function isOpenShape(shape: DuoShape): boolean {
   return shape === 'wide' || shape === 'tall';
+}
+
+/// Tabletop: open tall with the band active. The terminal stays in pane A
+/// (the standing half) and nothing resizes when a keyboard comes or goes.
+export function isTabletop(pose: ScreenPosePayload | null): boolean {
+  return pose !== null && pose.shape === 'tall' && pose.folded && pose.paneB !== null;
+}
+
+/// What pane B shows in tabletop with no panel open there: the session list
+/// while no keyboard is up (*Decisions* 2), blank under a keyboard. The
+/// terminal keyboard is up in mode `terminal`; the system keyboard when the
+/// visual viewport ends above pane B's top (the WebView keeps its height,
+/// only `visualViewport` shrinks to the keyboard's top). Off tabletop:
+/// blank (no resting list).
+export function tabletopPaneB(
+  pose: ScreenPosePayload | null,
+  mode: KeyboardMode | null,
+  vvHeight: number,
+): 'sessions' | 'blank' {
+  if (!isTabletop(pose) || !pose?.paneB) return 'blank';
+  if (mode === 'terminal') return 'blank';
+  return vvHeight < pose.paneB.y ? 'blank' : 'sessions';
 }
 
 // --- #root state ---

@@ -7,12 +7,17 @@
 // writes the frame-relative `--duo-dock-*` rects on `.terminal-frame`, and
 // each panel root takes `data-duo-dock={useDuoDock(panel)}`; index.css
 // places `[data-duo-dock]` by those variables.
+//
+// In tabletop (`useTabletopPaneB`) the terminal stays in pane A and pane B
+// shows the session list while no keyboard is up.
 
 import { createContext, useContext, useEffect, useLayoutEffect, useState, type RefObject } from 'react';
-import { getNativeBridge, type ScreenPosePayload } from '@/native-bridge';
 import {
-  applyDuoDockVars, applyDuoRootState, dockAttr, duoDockVars, duoRootState, panelDock, parseScreenPose,
-  type DuoPanel,
+  getNativeBridge, lastKeyboardMode, subscribeKeyboardMode, type KeyboardMode, type ScreenPosePayload,
+} from '@/native-bridge';
+import {
+  applyDuoDockVars, applyDuoRootState, dockAttr, duoDockVars, duoRootState, isTabletop, panelDock,
+  parseScreenPose, tabletopPaneB, type DuoPanel,
 } from '@/screen-pose';
 
 export function useScreenPose(): ScreenPosePayload | null {
@@ -64,4 +69,28 @@ export function useDuoDockFrame(frameRef: RefObject<HTMLElement | null>, pose: S
       window.removeEventListener('resize', update);
     };
   }, [frameRef, pose]);
+}
+
+/// What tabletop's pane B shows with no panel open there (`tabletopPaneB`):
+/// `sessions` while no keyboard is up, `blank` under one and off tabletop.
+/// Follows the app's keyboard mode and, for the system keyboard, the visual
+/// viewport's height.
+export function useTabletopPaneB(pose: ScreenPosePayload | null): 'sessions' | 'blank' {
+  const [mode, setMode] = useState<KeyboardMode | null>(lastKeyboardMode);
+  const [vvHeight, setVvHeight] = useState(() => window.visualViewport?.height ?? window.innerHeight);
+  const tabletop = isTabletop(pose);
+
+  useEffect(() => subscribeKeyboardMode(setMode), []);
+
+  useEffect(() => {
+    if (!tabletop) return;
+    const vv = window.visualViewport;
+    if (!vv) return;
+    const update = () => setVvHeight(vv.height);
+    update();
+    vv.addEventListener('resize', update);
+    return () => vv.removeEventListener('resize', update);
+  }, [tabletop]);
+
+  return tabletopPaneB(pose, mode, vvHeight);
 }

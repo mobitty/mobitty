@@ -22,7 +22,8 @@ import { DEFAULT_GESTURE_MAPPING } from '@/gesture-types';
 import type { GestureMapping } from '@/gesture-types';
 import { findFontOption, loadFont } from '@/fonts';
 import { isNativeApp, getNativeBridge } from '@/native-bridge';
-import { ScreenPoseContext, useDuoDockFrame, useScreenPose } from '@/hooks/use-screen-pose';
+import { ScreenPoseContext, useDuoDockFrame, useScreenPose, useTabletopPaneB } from '@/hooks/use-screen-pose';
+import { isTabletop } from '@/screen-pose';
 import {
   hasAppSoftkeyBar, shouldShowUpdateAppNotice, markUpdateAppNoticeShown, UPDATE_APP_NOTICE_TEXT,
 } from '@/app-softkey-bar';
@@ -115,6 +116,10 @@ export function App() {
   const screenPose = useScreenPose();
   const terminalFrameRef = useRef<HTMLDivElement>(null);
   useDuoDockFrame(terminalFrameRef, screenPose);
+  // Tabletop (open tall, folded): the terminal stays in pane A whether a
+  // keyboard is up or not; pane B shows the session list while none is.
+  const tabletop = isTabletop(screenPose);
+  const tabletopPaneB = useTabletopPaneB(screenPose);
   const [profile, setProfile] = useState<Profile | undefined>();
   const [profileReady, setProfileReady] = useState(false);
   const [themeColors, setThemeColors] = useState<ProfileTheme | undefined>();
@@ -307,11 +312,14 @@ export function App() {
   // visible area.  Without this, the layout viewport stays full-screen when the
   // mobile keyboard opens, creating a scrollable region that blocks swipe-up
   // gestures and shows a scrollbar.
+  // In tabletop on the iPhone Duo the page keeps the window's height: the
+  // keyboard lies in pane B, below the terminal in pane A, and nothing
+  // resizes when it comes or goes (docs/todo-design-ios-iphone-duo.md).
   useEffect(() => {
     const vv = window.visualViewport;
     if (!vv) return;
     const sync = () => {
-      const h = `${Math.round(vv.height)}px`;
+      const h = tabletop ? '' : `${Math.round(vv.height)}px`;
       document.documentElement.style.height = h;
       document.body.style.height = h;
       // Reset any browser auto-scroll that happened when the keyboard opened
@@ -324,7 +332,7 @@ export function App() {
       vv.removeEventListener('resize', sync);
       vv.removeEventListener('scroll', sync);
     };
-  }, []);
+  }, [tabletop]);
 
   // Pre-fetch sessions on mount so the panel renders instantly when opened.
   // When there's no stored session ID, also use the result to decide between
@@ -342,10 +350,11 @@ export function App() {
   }, [refreshSessions]);
 
   // Handshake with the iOS app: tell it this client can hand its softkey bar
-  // over, and which server version built it. Once per page load.
+  // over and lays out the iPhone Duo's panes and tabletop, and which server
+  // version built it. Once per page load.
   useEffect(() => {
     getNativeBridge()?.hello?.({
-      capabilities: { appSoftkeyBar: true },
+      capabilities: { appSoftkeyBar: true, screenPose: true },
       serverVersion: __MOBITTY_SERVER_VERSION__,
     });
   }, []);
@@ -369,6 +378,34 @@ export function App() {
     bridge.onOpenSessionListRequested = () => setSessionPanelOpen(true);
     return () => { bridge.onOpenSessionListRequested = () => {}; };
   }, []);
+
+  // Tabletop: a panel in pane B (sessions, settings, shell picker, file
+  // viewer) opens in place of the keyboard, so a keyboard that is up goes
+  // down. Only when one is up: dismissing suppresses the system keyboard
+  // until the user brings it back with the keyboard button.
+  const shellPickerShown = pendingShellSelection && initialShells.length > 0;
+  const paneBPanelOpen = sessionPanelOpen || settingsOpen || shellPickerShown || (viewerOpen && !viewerHidden);
+  const keyboardUpRef = useRef(false);
+  keyboardUpRef.current = tabletop && tabletopPaneB === 'blank';
+  useEffect(() => {
+    if (!tabletop || !paneBPanelOpen || !keyboardUpRef.current) return;
+    getNativeBridge()?.requestKeyboardMode('dismissed');
+  }, [tabletop, paneBPanelOpen]);
+
+  // Tabletop: a keyboard coming up covers pane B, so the session list there
+  // closes (its hotkeys would otherwise take the keys typed at the terminal).
+  // It rests in pane B again once the keyboard goes.
+  const prevPaneBRef = useRef(tabletopPaneB);
+  useEffect(() => {
+    const prev = prevPaneBRef.current;
+    prevPaneBRef.current = tabletopPaneB;
+    if (tabletop && prev === 'sessions' && tabletopPaneB === 'blank') setSessionPanelOpen(false);
+  }, [tabletop, tabletopPaneB]);
+
+  // The session list resting in pane B: tabletop, no keyboard up, and no
+  // other panel in pane B (they mount below it in the frame).
+  const sessionListResting = tabletopPaneB === 'sessions' && !settingsOpen && !shellPickerShown
+    && !(viewerOpen && !viewerHidden) && !pendingShellSelection;
 
   // Fetch shells for new-user selection (waits for initial session check to avoid racing)
   useEffect(() => {
@@ -989,7 +1026,9 @@ export function App() {
         )}
 
         <SessionPanel
-          open={sessionPanelOpen}
+          open={sessionPanelOpen || sessionListResting}
+          closable={!tabletop}
+          hotkeys={sessionPanelOpen}
           onClose={() => { setSessionPanelOpen(false); terminalRef.current?.core?.focus(); }}
           sessions={sessions}
           onRefreshSessions={refreshSessions}

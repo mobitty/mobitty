@@ -27,10 +27,10 @@ export interface NativeCapabilities {
 export interface WebCapabilities {
   appSoftkeyBar: boolean;
   /// This client lays out the Duo's panes and tabletop from the screen pose;
-  /// the app applies its tabletop keyboard rule only when declared. Since
-  /// server 0.7.0. Optional until the client lays out tabletop, then sent
-  /// as `true` (docs/todo-design-ios-iphone-duo.md).
-  screenPose?: boolean;
+  /// the app applies its tabletop keyboard rule (no keyboard slot, the
+  /// terminal keyboard over pane B) only when declared. Since server 0.7.0
+  /// (docs/todo-design-ios-iphone-duo.md).
+  screenPose: boolean;
 }
 
 /// The iPhone Duo's screen shape: closed (`column`, turned `columnTurned`)
@@ -192,4 +192,52 @@ export function getNativeBridge(): MobittyNativeBridge | undefined {
 
 export function isNativeApp(): boolean {
   return getNativeBridge() !== undefined;
+}
+
+// --- Keyboard mode: one shim callback, several listeners ---
+//
+// The shim has a single `onKeyboardModeChanged`; the softkey bar (its ⌨
+// cycle) and the Duo tabletop layout (sessions rest in pane B while no
+// keyboard is up) both need it. `subscribeKeyboardMode` installs one
+// dispatcher on the bridge while anyone listens and restores the no-op when
+// the last listener leaves.
+
+type KeyboardModeListener = (mode: KeyboardMode) => void;
+
+const keyboardModeListeners = new Set<KeyboardModeListener>();
+let keyboardModeTarget: MobittyNativeBridge | null = null;
+let lastMode: KeyboardMode | null = null;
+
+/// The last mode the app reported while anyone listened; null before.
+export function lastKeyboardMode(): KeyboardMode | null {
+  return lastMode;
+}
+
+/// Calls `listener` on every keyboard mode change the app reports. Returns
+/// the unsubscribe. A no-op outside the iOS shell.
+export function subscribeKeyboardMode(
+  listener: KeyboardModeListener,
+  bridge: MobittyNativeBridge | undefined = getNativeBridge(),
+): () => void {
+  if (!bridge) return () => {};
+  if (keyboardModeTarget !== bridge) {
+    if (keyboardModeTarget) keyboardModeTarget.onKeyboardModeChanged = () => {};
+    keyboardModeListeners.clear();
+    keyboardModeTarget = bridge;
+    bridge.onKeyboardModeChanged = (mode) => {
+      lastMode = mode;
+      for (const l of [...keyboardModeListeners]) {
+        try { l(mode); } catch (e) { console.error('keyboard mode listener failed', e); }
+      }
+    };
+  }
+  const entry: KeyboardModeListener = (mode) => listener(mode);
+  keyboardModeListeners.add(entry);
+  return () => {
+    keyboardModeListeners.delete(entry);
+    if (keyboardModeListeners.size === 0 && keyboardModeTarget === bridge) {
+      bridge.onKeyboardModeChanged = () => {};
+      keyboardModeTarget = null;
+    }
+  };
 }

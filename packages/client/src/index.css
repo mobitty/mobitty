@@ -168,6 +168,32 @@ html, body {
   height: var(--duo-dock-b-height, 100%);
 }
 
+/* iPhone Duo tabletop (tall, folded): the terminal stays in pane A, the
+   standing half, whether a keyboard is up or not; pane B (the lying half)
+   holds the keyboard or the session list. The page keeps the window's height
+   (App skips its visualViewport sync), so the frame runs on below the fold
+   and the panels docked in pane B stay inside its clip; only the terminal's
+   own box is cut to pane A (`--duo-dock-a-*`, frame-relative). */
+#root[data-duo-shape="tall"][data-duo-folded="true"] .terminal-frame > [data-duo-terminal] {
+  inset: auto;
+  left: 0;
+  right: 0;
+  top: var(--duo-dock-a-top, 0px);
+  height: var(--duo-dock-a-height, 100%);
+}
+
+/* Tabletop: the batch input panel overlays the foot of pane A instead of
+   taking a row from the frame (which would resize the terminal). Window
+   coordinates: #root is the page's full-height box at 0,0. */
+#root[data-duo-shape="tall"][data-duo-folded="true"] > [data-duo-batch-input] {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(var(--duo-pane-a-y) + var(--duo-pane-a-h));
+  transform: translateY(-100%);
+  z-index: 40;
+}
+
 /* Toasts (sonner, top-center, position: fixed) would sit on the fold band
    when wide: centre them over pane B instead (window coordinates). */
 #root[data-duo-shape="wide"] [data-sonner-toaster][data-x-position="center"] {

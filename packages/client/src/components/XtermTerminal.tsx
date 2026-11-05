@@ -91,6 +91,7 @@ export const XtermTerminal = forwardRef<XtermTerminalHandle, XtermTerminalProps>
     return (
       <div
         ref={containerRef}
+        data-duo-terminal=""
         className="absolute inset-0"
       />
     );

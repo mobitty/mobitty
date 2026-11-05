@@ -2,7 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   applyDuoDockVars, applyDuoRootState, dockAttr, dockRect, DUO_DOCK_VARS, duoDockVars, duoRootState,
-  MIN_DOCK_HEIGHT, panelDock, parseScreenPose,
+  isTabletop, MIN_DOCK_HEIGHT, panelDock, parseScreenPose, tabletopPaneB,
   type DuoDock, type DuoPanel, type DuoRootTarget,
 } from './screen-pose.ts';
 import type { DuoShape, ScreenPosePayload } from './native-bridge.ts';
@@ -312,5 +312,42 @@ describe('applyDuoDockVars', () => {
     applyDuoDockVars(frame, duoDockVars(COLUMN, { left: 0, top: 0, width: 382, height: 644 }));
     assert.deepEqual([...frame.props.keys()], ['--other']);
     assert.equal(DUO_DOCK_VARS.length, 8);
+  });
+});
+
+describe('isTabletop', () => {
+  it('is tall and folded only', () => {
+    for (const [name, pose] of Object.entries(ALL)) {
+      assert.equal(isTabletop(pose), name === 'tabletop', name);
+    }
+    assert.equal(isTabletop(null), false);
+    assert.equal(isTabletop({ ...TABLETOP, paneB: null }), false);
+  });
+});
+
+describe('tabletopPaneB', () => {
+  it('rests the session list while no keyboard is up', () => {
+    assert.equal(tabletopPaneB(TABLETOP, 'system', 951), 'sessions');
+    assert.equal(tabletopPaneB(TABLETOP, 'dismissed', 951), 'sessions');
+    assert.equal(tabletopPaneB(TABLETOP, null, 951), 'sessions');
+    // The visual viewport ends exactly at pane B's top: still no keyboard over it.
+    assert.equal(tabletopPaneB(TABLETOP, 'system', 503.5), 'sessions');
+  });
+
+  it('is blank under the terminal keyboard (it fills pane B; the viewport keeps its height)', () => {
+    assert.equal(tabletopPaneB(TABLETOP, 'terminal', 951), 'blank');
+  });
+
+  it('is blank under the system keyboard (the viewport ends at the band top)', () => {
+    assert.equal(tabletopPaneB(TABLETOP, 'system', 455.5), 'blank');
+    assert.equal(tabletopPaneB(TABLETOP, 'dismissed', 455.5), 'blank');
+  });
+
+  it('is blank off tabletop', () => {
+    for (const [name, pose] of Object.entries(ALL)) {
+      if (name === 'tabletop') continue;
+      assert.equal(tabletopPaneB(pose, 'system', 951), 'blank', name);
+    }
+    assert.equal(tabletopPaneB(null, 'dismissed', 951), 'blank');
   });
 });

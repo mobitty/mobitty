@@ -67,6 +67,7 @@ export function BatchInputPanel({ open, fullscreen, autocorrect, onAutocorrectTo
   return (
     <div
       ref={panelRef}
+      data-duo-batch-input=""
       className={cn(
         'shrink-0 w-full flex items-stretch gap-2 px-2 py-1.5',
         'bg-[var(--bar-bg)] backdrop-blur-sm',
