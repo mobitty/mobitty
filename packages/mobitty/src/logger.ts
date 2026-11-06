@@ -134,6 +134,12 @@ export class Logger implements LoggerInterface {
   warn(msg: string, data?: Record<string, unknown>): void { this.write('warn', 'server', msg, data); }
   error(msg: string, data?: Record<string, unknown>): void { this.write('error', 'server', msg, data); }
 
+  /** Startup output the operator must always see (listen URL, shells): printed
+   *  to the console untagged at every console level, recorded in the file at
+   *  `info`. Not a level — reserve it for the startup banner, never for
+   *  conditions (those are `warn`/`error`). */
+  notice(msg: string, data?: Record<string, unknown>): void { this.write('info', 'server', msg, data, undefined, undefined, true); }
+
   /** Whether either sink (console or file) would emit at this level. Use to
    *  guard expensive log-data construction. */
   isEnabled(level: LogLevel): boolean {
@@ -155,7 +161,7 @@ export class Logger implements LoggerInterface {
     return typeof session === 'string' ? `[mobitty:${session.slice(0, 8)}]` : '[mobitty]';
   }
 
-  private write(level: LogLevel, source: LogSource, msg: string, explicitData?: Record<string, unknown>, clientSeq?: number, ts?: string): void {
+  private write(level: LogLevel, source: LogSource, msg: string, explicitData?: Record<string, unknown>, clientSeq?: number, ts?: string, alwaysConsole = false): void {
     // Merge context into data, excluding 'session' (promoted to top-level)
     const merged: Record<string, unknown> = {};
     let hasData = false;
@@ -175,7 +181,7 @@ export class Logger implements LoggerInterface {
     const consoleData = hasData ? merged : undefined;
     const consoleMsg = source === 'client' ? `[client] ${msg}` : msg;
 
-    if (shouldLog(this.consoleLevel, level)) {
+    if (alwaysConsole || shouldLog(this.consoleLevel, level)) {
       console.log(formatConsole(this.prefix, level, consoleMsg, consoleData));
     }
 

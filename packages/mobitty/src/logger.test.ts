@@ -52,6 +52,21 @@ describe('Logger', () => {
     assert.ok(files[0]!.endsWith('.jsonl'));
   });
 
+  it('notice prints untagged at every console level and records info in the file', (t) => {
+    const lines: string[] = [];
+    t.mock.method(console, 'log', (line: string) => { lines.push(line); });
+    const logger = createLogger(makeConfig(tmpDir, { consoleLevel: 'error', fileLevel: 'info' }));
+    logger.notice('Listening on http://127.0.0.1:8000');
+    logger.info('not on console');
+    logger.close();
+
+    assert.deepEqual(lines, ['[mobitty] Listening on http://127.0.0.1:8000']);
+    const logsDir = join(tmpDir, 'logs');
+    const entries = readJsonl(join(logsDir, logFiles(logsDir)[0]!));
+    assert.equal(entries[0]!.level, 'info');
+    assert.equal(entries[0]!.msg, 'Listening on http://127.0.0.1:8000');
+  });
+
   it('writes JSONL entries with correct structure', () => {
     const logger = createLogger(makeConfig(tmpDir));
     logger.info('hello', { key: 'value' });

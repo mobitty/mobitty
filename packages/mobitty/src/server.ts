@@ -72,10 +72,9 @@ export function startServer(config: ServerConfig, logger: Logger): void {
 
   httpServer.listen(config.port, config.host, () => {
     const scheme = config.tls !== undefined ? 'https' : 'http';
-    logger.warn(`Listening on ${scheme}://${config.host}:${config.port}`);
+    logger.notice(`Listening on ${scheme}://${config.host}:${config.port}`);
     const shells = shellStore.list();
-    logger.warn(`shells: ${shells.map(s => s.name).join(', ') || '(none discovered)'}`);
-
+    logger.notice(`shells: ${shells.map(s => s.name).join(', ') || '(none discovered)'}`);
   });
 
   let shuttingDown = false;
